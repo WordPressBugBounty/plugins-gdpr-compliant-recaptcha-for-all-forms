@@ -1,0 +1,7 @@
+#adminmenu,
+#wpadminbar,
+#adminmenu a,
+#wpadminbar a {
+    background-color: red !important;
+    color: white !important;
+}
