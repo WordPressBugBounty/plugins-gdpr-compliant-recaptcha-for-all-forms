@@ -381,9 +381,11 @@ class Stamp
     */
     public function add_script_to_header(){
         //Adds div on top-level that is displayed each when PoW is done in order to prevent the user from clicking the submit button
+        $stamp = $this->get_stamp();
         ?>
         <script>
-        var gdpr_compliant_recaptcha_stamp = '<?php echo $this->get_stamp(); ?>';
+        var gdpr_compliant_recaptcha_stamp = '<?php echo $stamp["stamp"]; ?>';
+        var gdpr_compliant_recaptcha_ip = '<?php echo $stamp["client_ip"]; ?>';
         var gdpr_compliant_recaptcha_nonce = null;
         var gdpr_compliant_recaptcha = {
             stampLoaded : false,
@@ -649,6 +651,7 @@ class Stamp
             // Iterate through as many nonces as it takes to find one that gives us a solution hash at the target difficulty.
             findHash : async function() {
                 var hashStamp = gdpr_compliant_recaptcha_stamp;
+                var clientIP = gdpr_compliant_recaptcha_ip;
                 var hashDifficulty = '<?php echo get_option( Option::POW_DIFFICULTY ); ?>';
 
                 var nonce = 1;
@@ -668,11 +671,14 @@ class Stamp
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
-                    body: 'action=check_stamp&hashStamp=' + hashStamp + '&hashDifficulty=' + hashDifficulty + '&hashNonce=' + nonce
+                    body: 'action=check_stamp' +
+                          '&hashStamp=' + encodeURIComponent(hashStamp) +
+                          '&hashDifficulty=' + encodeURIComponent(hashDifficulty) +
+                          '&clientIP=' + encodeURIComponent(clientIP) +
+                          '&hashNonce=' + encodeURIComponent(nonce)
                 })
                 .then(function (response) {
                 });
-
                 return true;
             },
             
@@ -688,6 +694,7 @@ class Stamp
                 })
                 .then(function (response) {
                     gdpr_compliant_recaptcha_stamp = response.stamp;
+                    gdpr_compliant_recaptcha_ip = response.client_ip;
                     gdpr_compliant_recaptcha.findHash();
                 });
 
@@ -761,7 +768,7 @@ class Stamp
                             form.prepend(hashPWFieldsInput);
                         }
                     });
-                    
+
                     // Override open method to store method and URL
                     XMLHttpRequest.prototype.open = function (method, url) {
                         this._method = method;
@@ -776,7 +783,7 @@ class Stamp
                         function handleReadyStateChange() {
                             if (self.readyState === 4 && self._method === 'POST') {
                                 // Check for an error response
-                                if (self.status >= 200 || self.status < 300) {
+                                if (self.status >= 200 && self.status < 300) {
                                     var responseData = self.responseText;
                                     if(gdpr_compliant_recaptcha.isValidJson(self.responseText)){
                                         // Parse the response JSON
@@ -1314,12 +1321,9 @@ class Stamp
 
         // stamp = hash of user ip . salt value
         $stamp = $this->get_stamp();
-        
-        $array_result = array(
-            'stamp' => $stamp,
-        );
+
         // Make your array as json
-        wp_send_json( $array_result );
+        wp_send_json( $stamp );
 
         // Don't forget to stop execution afterward.
         wp_die();
@@ -1332,7 +1336,11 @@ class Stamp
     public function get_stamp() {
         $ip = $this->get_client_ip();
         $stamp = $this->hash_Values( $ip . get_option( Option::POW_SALT ) );
-        return $stamp;
+        $array_result = array(
+            'stamp'     => $stamp,
+            'client_ip' => $ip, // Damit der Client die korrekte IP speichern kann
+        );
+        return $array_result;
     }
 
     /** Attempt to determine the client's IP address
@@ -1356,6 +1364,29 @@ class Stamp
         //$client.= getenv( 'HTTP_USER_AGENT' );
         return $client;
     }
+    /*private function get_client_ip() {
+        $client = "";
+    
+        $extract_first_ip = function ($value) {
+            return explode(',', $value)[0];
+        };
+    
+        if (getenv('HTTP_X_FORWARDED_FOR')) {
+            $client = $extract_first_ip(getenv('HTTP_X_FORWARDED_FOR'));
+        } elseif (getenv('HTTP_CLIENT_IP')) {
+            $client = $extract_first_ip(getenv('HTTP_CLIENT_IP'));
+        } elseif (getenv('HTTP_X_FORWARDED')) {
+            $client = $extract_first_ip(getenv('HTTP_X_FORWARDED'));
+        } elseif (getenv('HTTP_FORWARDED_FOR')) {
+            $client = $extract_first_ip(getenv('HTTP_FORWARDED_FOR'));
+        } elseif (getenv('HTTP_FORWARDED')) {
+            $client = $extract_first_ip(getenv('HTTP_FORWARDED'));
+        } elseif (getenv('REMOTE_ADDR')) {
+            $client = $extract_first_ip(getenv('REMOTE_ADDR'));
+        }
+    
+        return trim($client);
+    }*/
 
     /** Drop in your desired hash function here
      * 
@@ -1366,7 +1397,6 @@ class Stamp
 
     public function check_request() {
         global $wpdb;
-
         $versuche = 0;
         while ($versuche < 5) { // Schleife für 3 Sekunden (30 * 100ms)
             $rows = $wpdb->get_results(
@@ -1400,7 +1430,7 @@ class Stamp
         //The stamp is used to determine whether a valid hash and a valid nonce is given.
         //If either or are crap, we know that the input was manipulated.
         $stamp = preg_replace('/[^a-zA-Z0-9]/', '', $fields['hashStamp']);
-        $nonce = $client_difficulty = '';
+        $nonce = $client_difficulty = $client_ip = '';
 
         // If the difficulty level is not of type int, it has been manipulated and thus remains empty.
         // This will cause the input to be classified as spam
@@ -1412,10 +1442,34 @@ class Stamp
         if( ctype_digit( $fields[ 'hashNonce' ] ) ){
             $nonce = filter_var( $fields[ 'hashNonce' ], FILTER_SANITIZE_NUMBER_INT );
         }
+
+        // Validation of IP
+        if (!empty($fields['clientIP'])) {
+            $raw_client_ip = trim($fields['clientIP']);
+            $ips = explode(',', $raw_client_ip);
+            $allValid = true;
+            foreach ($ips as $ipCandidate) {
+                if (!filter_var(trim($ipCandidate), FILTER_VALIDATE_IP)) {
+                    $allValid = false;
+                    break;
+                }
+            }
+            if ($allValid && count($ips) > 0) {
+                // Alle Teilstrings sind gültige IPs – den gesamten, unbearbeiteten String übernehmen
+                $client_ip = $raw_client_ip;
+            } else {
+                // Mindestens ein Teilstring ist ungültig
+                wp_die('Invalid IP adress transmitted.');
+            }
+        } else {
+            // Es wurde gar keine IP übermittelt – das ist ein Fehler
+            wp_die('No IP adress transmitted.');
+        }
         
         $this->print_debug_information( "stamp: $stamp" );
         $this->print_debug_information( "difficulty: $client_difficulty" );
         $this->print_debug_information( "nonce: $nonce" );
+        $this->print_debug_information( "client-IP: $client_ip" );
 
         $this->print_debug_information( "difficulty comparison: $client_difficulty vs " . get_option( Option::POW_DIFFICULTY ) );
         if ( $client_difficulty != get_option( Option::POW_DIFFICULTY ) ) wp_die();//return false;
@@ -1426,7 +1480,7 @@ class Stamp
             wp_die();//return false;
         }
 
-        if ( $this->validate_stamp( $stamp ) ) {
+        if ( $this->validate_stamp( $stamp, $client_ip ) ) {
             $this->print_debug_information( "Stamp is correct" );
         } else {
             $this->print_debug_information( "Stamp is incorrect" );
@@ -1471,15 +1525,15 @@ class Stamp
     /** Check whether the stamp was manipulated
      *  
      */
-    private function validate_stamp( $a_stamp ) {
-        $ip = $this->get_client_ip();
+    private function validate_stamp( $a_stamp, $client_ip ) {
+        $ip = $client_ip;
         $validated = false;
         // gen hash for ip & salt
         if ( $a_stamp === $this->hash_Values( $ip . get_option( Option::POW_SALT ) ) ) {
             $validated = true;
         }
 
-        $this->print_debug_information( "stamp expired" );
+        $this->print_debug_information( "Stamp invalid or expired" );
         return $validated;
     }
 
