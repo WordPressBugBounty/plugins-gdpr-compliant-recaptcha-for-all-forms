@@ -784,10 +784,10 @@ class Stamp
                             if (self.readyState === 4 && self._method === 'POST') {
                                 // Check for an error response
                                 if (self.status >= 200 && self.status < 300) {
-                                    var responseData = self.responseText;
-                                    if(gdpr_compliant_recaptcha.isValidJson(self.responseText)){
+                                    var responseData = self.responseType === 'json' ? self.response : self.responseText;
+                                    if(gdpr_compliant_recaptcha.isValidJson(responseData)){
                                         // Parse the response JSON
-                                        responseData = JSON.parse(self.responseText);
+                                        responseData = JSON.parse(responseData);
                                     }
                                     // Check if the gdpr_error_message parameter is present
                                     if (!responseData.success && responseData.data && responseData.data.gdpr_error_message) {
