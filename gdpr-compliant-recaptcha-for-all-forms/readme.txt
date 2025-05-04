@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, antispam, recaptcha, captcha, spam-protection
 Requires at least: 4.8+
 Tested up to: 6.8
-Stable tag: 3.8.1
+Stable tag: 4.0
 Requires PHP: 5.6
 License: GPLv3
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
@@ -55,45 +55,21 @@ It has a lot of options on the one hand and comes with a well balanced default c
 I hope you enjoy using the CAPTCHA plugin! If you are happy with it, I would be glad to get your review and probably a coffee too.
 
 == Installation ==
-1. Install and activate the plugin via WordPress Plugins page. Done!
-2. Optionally: After activation, you can adjust precisely how messages shall be blocked, flagged or saved in plugin's settings menu.
-3. You should take a look into the message inbox. As many system functions act like bots, it may happen that they are blocked too. From the inbox and from the spam inbox you can jsut whitelist them with one click respectively.
+1. Watch the setup video
+2. Install & activate the plugin via the WordPress Plugins page
+3. Check if all forms are correctly recognized by the spam protection system 
+4. Manually add missing actions/patterns for any unrecognized forms using direct analysis mode
+5. (Optional) Adjust settings to block, flag, or save spam submissions
 
 == Frequently Asked Questions ==
 = Submissions are incorrectly treated as spam =
 1. The problem occasionally occurs right after installation due to caching. In such cases, the necessary JavaScript for proof-of-work isn't loaded as intended. To resolve this, clear the cache on your webserver (WordPress caching is typically managed by plugins, which offer an option to clear the cache) and in your browser.
 2. JavaScript might crash due to incompatibility between this plugin and another one you're using. If you notice this, please report it to me. I usually address such issues within the same day. Additionally, it's crucial to ensure that JavaScript is functioning correctly on all your pages, even without this plugin. In most browsers, you can identify JavaScript errors by pressing F12 on your page and navigating to the console. Here, you can observe what's happening on your page.
-3. Generally, I recommend running the plugin in **Explicit mode 🎯** as it's more efficient and avoids compatibility problems. Please refer to the "help" section for this option.
 = Neither messages, nore spam is shown in the inbox =
 1. Activate the **Analysis mode 🔍**, 
 2. Submit the form and look for the message that has been saved for the new submission in the <strong>Analytic Box</strong>
 3. Open the message and enhance the scope of the spam to this type of message
 4. If the message doesn't appear here, or is already in scope, please give me a note
-In general I recommend to run the plugin in the **Explicit mode 🎯** and to do so with all types of submissions that you which to be considered for the spam check.
-= Problems with WooCommerce/ Jetpack activation =
-If you face problems with the activation of Jetpack this may occur during the handshake-procedure of jetpack. This procedure acts like a bot, when it passes a passphrase from a certain IP adress to an automatically generated form on your site. 
-In order to get this fixed, you need either to disable the option **🖥️ Apply on REST-API**, or to whitelist the respective form that is used to exchange the passphrase. 
-Usually you need to process the following steps for whitelisting:
-1. Check the spam folder for the respective message that has been blocked
-2. Copy the site-adress "from_site"
-3. Paste the site-adress into the option **📄 Site-Whitelist** on the properties site 
-4. Press save
-Usually you need to whitelist two different sites to connect jetpack:
-1. To connect the site: your-domnain-without-protocol/?rest_route=/jetpack/v4/verify_registration/
-2. To connect your user: your-domnain-without-protocol/?rest_route=/jetpack/v4/remote_authorize/
-Generally, I recommend running the plugin in **Explicit mode 🎯** as it's more efficient and avoids such compatibility problems. Please refer to the "help" section for this option.
-= Problems with activation/ installation of other plugins =
-If you face problems with other plugins (i.e. during plugin installation/ activation) this may occur during handshake-procedures, or during maintenance of your plugin from the vendor. These procedures usually act like bots, as they pass a code or contents via certain automatically generated forms on your site.
-In order to get this fixed you can either disable the option **🖥️ Apply on REST-API**, or whitelist the IP address of your vendor, or you can whitelist the page which contains the maintenance form. In order to check whether such a problem occurs you can check the spam folder of this plugin. Here you find the site adress that you can use for whitelisting as "from_site" too
-Generally, I recommend running the plugin in **Explicit mode 🎯** as it's more efficient and avoids such compatibility problems. Please refer to the "help" section for this option.
-= Webhooks from Thrive automation don't work properly when the plugin is activated =
-You need to whitelist the respective webhooks ( those which the respective service is using to call your site) with the option **📄 Site-Whitelist**. Do not forget to cut the protocoll (i.e. "http" and "https").
-Note: As Thrive doesn't use the standard WordPress-REST-route, just deactivating the option **🖥️ Apply on REST-API** will not work.
-Generally, I recommend running the plugin in **Explicit mode 🎯** as it's more efficient and avoids those compatibility problems. Please refer to the "help" section for this option.
-= Any Webhooks or API-calls do not work =
-You need to whitelist the respective webhooks ( those which the respective service is using to call your site) with the option **📄 Site-Whitelist**. Do not forget to cut the protocoll (i.e. "http" and "https").
-Alternatively you can deactivate the option **🖥️ Apply on REST-API** if your services is using the standard WordPress-REST route.
-Generally, I recommend running the plugin in **Explicit mode 🎯** as it's more efficient and avoids those compatibility problems. Please refer to the "help" section for this option.
 = Problems with Borlabs Script Blocker =
 When you use the Borlabs Script Blocker to scan for JavaScripts, the scan doesn't work properly, as it doesn't show any JavaScripts. Just deactivate this plugin for the scan and activate it again after the scan.
 = Can't get my problems fixed =
@@ -106,8 +82,14 @@ When you use the Borlabs Script Blocker to scan for JavaScripts, the scan doesn'
 * When deactivating the plugin you will be asked for the reason. If you face any problems I would be glad if you report to it me as detailed as possible. Usually I will fix them quickly. If you give me contcat details, I may inform you as soon as it is fixed.
 
 == Changelog ==
+= 4.0 =
+* The automatic mode has been removed. From now on, all form types require manual configuration of associated patterns and actions to ensure the spam protection functions correctly.
+* During plugin installation, the appropriate actions and patterns for major form builders will be automatically added to the scope—provided the respective form builder is installed.
+* Adding new form types to the spam protection, which are not yet included by default, can still be done via the analysis mode or direct analysis mode.
+* If important patterns or actions are missing, I appreciate any feedback and suggestions for improvements.
+* This update ensures targeted spam protection configuration while still allowing automatic detection of widely used form builders.
 = 3.8.1 =
-* Fixed: Eroneous error handling for file-uploads (i.e. Fancy Product Designer)
+* Fixed: Erroneous error handling for file-uploads (i.e. Fancy Product Designer)
 = 3.8 =
 * Fixed: Problems with IP-Forwarding and load-balancing led to always false-positives
 = 3.7.3 =

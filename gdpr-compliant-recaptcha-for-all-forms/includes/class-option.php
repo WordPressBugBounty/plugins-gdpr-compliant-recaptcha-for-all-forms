@@ -108,15 +108,9 @@ class Option
 
     /** @var bool */
     const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
-    
-    /** @var bool */
-    const POW_EXPLICIT_MODE = self::PREFIX . 'pow_explicit_mode';
 
     /** @var string */
     const POW_EXPLICIT_ACTION = self::PREFIX . 'pow_explicit_action';
-
-    /** @var bool */
-    const POW_ACTION_WHITELIST = self::PREFIX . 'pow_action_whitelist';
 
     /** @var int */
     const POW_CRON_DELETE_INBOX = self::PREFIX . 'pow_cron_delete_inbox';
@@ -259,17 +253,14 @@ class Option
     }
 
     /**Get all messages */
-    //public static function get_rows( $search, $messageType, $today = false ){
-    public static function get_rows( $search, $messageType, $today = false, $hidden_actions = [ '-' ], $existing_actions = [ '-' ], $whitelisted_actions = [ '-' ], $existing_patterns = [], $hidden_patterns = [] ){
+    public static function get_rows( $search, $messageType, $today = false, $hidden_actions = [ '-' ], $existing_actions = [ '-' ], $existing_patterns = [], $hidden_patterns = [] ){
         global $wpdb;
         $hidden_actions_placeholders = implode( ', ', array_fill( 0, count( $hidden_actions ), '%s' ) );
         $existing_actions_placeholders = implode( ', ', array_fill( 0, count( $existing_actions ), '%s' ) );
-        $whitelisted_actions_placeholders = implode( ', ', array_fill( 0, count( $whitelisted_actions ), '%s' ) );
         $parameters = array_merge(
             [ $messageType ], 
             $hidden_actions,
             $existing_actions,
-            $whitelisted_actions,
             [ $search, $search ]
         );
         
@@ -320,7 +311,6 @@ class Option
         
         $filter_today = '';
         if ($today) $filter_today = ' AND DATE(rgm.rgm_date) = CURDATE() ';
-        //if ( $search ){
         $rows = $wpdb->get_results(
             $wpdb->prepare("
                     SELECT COUNT(*) as count
@@ -332,7 +322,6 @@ class Option
                         WHERE rgm.rgm_type = %s
                         AND COALESCE(rgm.rgm_action, '') NOT IN ($hidden_actions_placeholders)
                         AND COALESCE(rgm.rgm_action, '') NOT IN ($existing_actions_placeholders)
-                        AND COALESCE(rgm.rgm_action, '') NOT IN ($whitelisted_actions_placeholders)
                         AND ( rgd.rgd_attribute LIKE CONCAT('%',%s,'%')
                             OR rgd.rgd_value LIKE CONCAT('%',%s,'%')
                             )
@@ -342,21 +331,6 @@ class Option
                 ", $parameters
             )
         );
-        /*} else {
-            $rows = $wpdb->get_results(
-                $wpdb->prepare("
-                        SELECT COUNT(rgm.rgm_id) as count
-                        FROM " . $wpdb->prefix . "recaptcha_gdpr_message_rgm rgm
-                        WHERE rgm.rgm_type = %s
-                        AND rgm.rgm_action NOT IN ($hidden_actions_placeholders)
-                        AND rgm.rgm_action NOT IN ($existing_actions_placeholders)
-                        AND rgm.rgm_action NOT IN ($whitelisted_actions_placeholders)
-                        " . implode( '', $sqlArray ) .  implode( '', $hiddenSqlArray ) . "
-                        $filter_today
-                    ", $parameters
-                )
-            );
-        }*/
         $count = 0;
         foreach ( $rows as $row ) {
             $count = $row->count;

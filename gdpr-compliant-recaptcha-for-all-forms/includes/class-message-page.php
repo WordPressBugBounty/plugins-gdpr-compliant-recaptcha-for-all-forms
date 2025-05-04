@@ -15,12 +15,10 @@ class Message_Page
 
     private $listed_actions = null;
     private $listed_patterns = null;
-    private $whitelisted_actions = null;
     private $whitelisted_sites = null;
     private $whitelisted_ips = null;
     private $hidden_actions = null;
     private $hidden_patterns = null;
-    private $explicit_mode = null;
 
     /** Get an instance of the class
      * 
@@ -45,7 +43,6 @@ class Message_Page
         add_action( 'wp_ajax_render_message', [ $this, 'render_message' ] );
         add_action( 'wp_ajax_change_message_type', [ $this, 'change_message_type' ] );
         add_action( 'wp_ajax_delete_message', [ $this, 'delete_message' ] );
-        add_action( 'wp_ajax_save_whitelist_parameter', [ $this, 'save_whitelist_parameter_callback' ] );
         add_action( 'wp_ajax_save_list_parameter', [ $this, 'save_list_parameter_callback' ] );
         add_action( 'wp_ajax_save_pattern', [ $this, 'save_pattern_callback' ] );
     }
@@ -169,7 +166,6 @@ class Message_Page
 
     /** Add the page for saved messages */
     public function render_message_page( $messageType ) {
-        $this->explicit_mode = get_option( Option::POW_EXPLICIT_MODE );
         $titles = [
             1 => __( 'Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
             2 => __( 'Spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -199,53 +195,27 @@ class Message_Page
                     Show messages that are already in scope of specific rules</label>
                 </div><br>
                 <div class="filter_checkboxes">
-            <?php
-            if( $this->explicit_mode ){
-            ?>
-                <label>
-                    <input type="checkbox" id="listedActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Explicit actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>⚙️✔️</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="listedPatterns" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Explicit patterns %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🔍✔️</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="whitelistedActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🚫</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="whitelistedSites" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted sites %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>📄</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="whitelistedIPs" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted IPs %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🌐</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="hiddenActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>⚙️🚫</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="hiddenPatterns" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden patterns %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🔍🚫</b></label>' ) ); ?>
-                </label>
-            <?php
-            }else{
-                ?>
-                <label>
-                    <input type="checkbox" id="whitelistedActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🚫</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="whitelistedSites" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted sites %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>📄</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="whitelistedIPs" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted IPs %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🌐</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="hiddenActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>⚙️🚫</b></label>' ) ); ?>
-                </label>
-                <label>
-                    <input type="checkbox" id="hiddenPatterns" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden patterns %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🔍🚫</b></label>' ) ); ?>
-                </label>
-            <?php
-            }
-        ?>
-        <br>
-        </div></div><br>
+                    <label>
+                        <input type="checkbox" id="listedActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Explicit actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>⚙️✔️</b></label>' ) ); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="listedPatterns" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Explicit patterns %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🔍✔️</b></label>' ) ); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="whitelistedSites" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted sites %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>📄</b></label>' ) ); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="whitelistedIPs" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Whitelisted IPs %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🌐</b></label>' ) ); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="hiddenActions" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden actions %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>⚙️🚫</b></label>' ) ); ?>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="hiddenPatterns" onchange="messageSearch(1);"> <?php echo( sprintf( __( "Hidden patterns %s" , 'gdpr-compliant-recaptcha-for-all-forms' ),'<label style="font-size: 30px;"><b>🔍🚫</b></label>' ) ); ?>
+                    </label>
+                    <br>
+                </div>
+            </div><br>
         <?php
         }
         ?>
@@ -308,7 +278,6 @@ class Message_Page
                 var search = document.querySelector('.messageSearch').value;
                 var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                 var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';
                 var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                 var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                 var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -319,7 +288,7 @@ class Message_Page
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
-                    body: `action=render_messages&page=${page}&search=${search}&messageType=${<?php echo( esc_js( $messageType ) ); ?>}&search_nonce=${'<?php echo( wp_create_nonce( 'render-messages_'.esc_js( $messageType ) ) ); ?>'}${listedActions}${listedPatterns}${whitelistedActions}${whitelistedSites}${whitelistedIPs}${hiddenActions}${hiddenPatterns}`
+                    body: `action=render_messages&page=${page}&search=${search}&messageType=${<?php echo( esc_js( $messageType ) ); ?>}&search_nonce=${'<?php echo( wp_create_nonce( 'render-messages_'.esc_js( $messageType ) ) ); ?>'}${listedActions}${listedPatterns}${whitelistedSites}${whitelistedIPs}${hiddenActions}${hiddenPatterns}`
                 })
                 .then(response => response.json())
                 .then(function(response) {
@@ -484,7 +453,6 @@ class Message_Page
                     };
                     var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                     var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                    var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';
                     var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                     var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                     var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -499,7 +467,6 @@ class Message_Page
                         "&search_nonce=<?php echo( wp_create_nonce( 'render-messages_'.esc_js( $messageType ) ) ); ?>" +
                         listedActions +
                         listedPatterns +
-                        whitelistedActions +
                         whitelistedSites +
                         whitelistedIPs +
                         hiddenActions +
@@ -587,7 +554,6 @@ class Message_Page
                     };
                     var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                     var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                    var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';                
                     var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                     var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                     var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -601,7 +567,6 @@ class Message_Page
                         "&search_nonce=<?php echo( wp_create_nonce( "render-messages_".esc_js( $messageType ) )); ?>" +
                         listedActions +
                         listedPatterns +
-                        whitelistedActions +
                         whitelistedSites +
                         whitelistedIPs +
                         hiddenActions +
@@ -654,7 +619,6 @@ class Message_Page
                 };
                 var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                 var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';                
                 var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                 var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                 var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -671,7 +635,6 @@ class Message_Page
                     "&search_nonce=<?php echo( wp_create_nonce( "render-messages_".esc_js( $messageType ) )); ?>" +
                     listedActions +
                     listedPatterns +
-                    whitelistedActions +
                     whitelistedSites +
                     whitelistedIPs +
                     hiddenActions +
@@ -718,7 +681,6 @@ class Message_Page
                     };
                     var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                     var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                    var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';                
                     var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                     var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                     var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -733,7 +695,6 @@ class Message_Page
                         "&search_nonce=<?php echo( wp_create_nonce( "render-messages_".esc_js( $messageType ) )); ?>" +
                         listedActions +
                         listedPatterns +
-                        whitelistedActions +
                         whitelistedSites +
                         whitelistedIPs +
                         hiddenActions +
@@ -829,7 +790,6 @@ class Message_Page
                     };
                     var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
                     var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-                    var whitelistedActions = document.querySelector('#whitelistedActions') && document.querySelector('#whitelistedActions').checked ? '&whitelistedActions=' + document.querySelector('#whitelistedActions').checked : '';                
                     var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
                     var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
                     var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
@@ -846,7 +806,6 @@ class Message_Page
                         "&search_nonce=<?php echo( wp_create_nonce( "render-messages_".esc_js( $messageType ) )); ?>" +
                         listedActions +
                         listedPatterns +
-                        whitelistedActions +
                         whitelistedSites +
                         whitelistedIPs +
                         hiddenActions +
@@ -1007,44 +966,6 @@ class Message_Page
         exit;
     }
 
-    /** Whitelist Ajax-Action*/
-    function save_whitelist_parameter_callback() {
-
-        // Überprüfen der Sicherheitsnonce
-        $message_type = filter_var( $_POST[ 'messageType' ], FILTER_VALIDATE_INT );
-        $search_nonce = filter_var( $_POST[ 'search_nonce' ], FILTER_UNSAFE_RAW );
-
-        if ( ! wp_verify_nonce( $search_nonce, 'render-messages_' . $message_type ) ) {
-            $array_result = array(
-                'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' )
-            );
-            wp_send_json_error( $array_result );
-            exit;
-        }
-    
-        // Get whitelisting parameters
-        $whitelist_key = sanitize_text_field( $_POST[ 'whitelistKey' ] );
-    
-        $existing_option = get_option( Option::POW_ACTION_WHITELIST );
-        $existing_lines = preg_split( "/\r\n|\n|\r/", $existing_option );
-    
-        // Check, whether the whitelisting-parameter already exists
-        if ( ! in_array( $whitelist_key, $existing_lines ) ) {
-            // If not add the new parameter
-            $existing_lines[] = $whitelist_key;
-    
-            // Transform to String again
-            $updated_option = implode( "\n", $existing_lines );
-    
-            // Save the option
-            update_option( Option::POW_ACTION_WHITELIST, $updated_option );
-
-        }
-
-        $this->render_messages();
-
-    }
-
     /** Save Pattern*/
     function save_pattern_callback() {
 
@@ -1116,7 +1037,6 @@ class Message_Page
             
             $this->listed_actions = isset( $_POST[ 'listedActions' ] ) ? $_POST[ 'listedActions' ] : null;
             $this->listed_patterns = isset( $_POST[ 'listedPatterns' ] ) ? $_POST[ 'listedPatterns' ] : null ;
-            $this->whitelisted_actions = isset( $_POST[ 'whitelistedActions' ] ) ? $_POST[ 'whitelistedActions' ] : null;
             $this->whitelisted_sites = isset( $_POST[ 'whitelistedSites' ] ) ? $_POST[ 'whitelistedSites' ] : null ;
             $this->whitelisted_ips = isset( $_POST[ 'whitelistedIPs' ] ) ? $_POST[ 'whitelistedIPs' ] : null ;
             $this->hidden_actions = isset( $_POST[ 'hiddenActions' ] ) ? $_POST[ 'hiddenActions' ] : null;
@@ -1134,16 +1054,11 @@ class Message_Page
             }
         }
 
-        $explicit_mode = get_option( Option::POW_EXPLICIT_MODE );
-
         $existing_actions_list = get_option( Option::POW_EXPLICIT_ACTION );
         $existing_actions_lines = array_filter( preg_split( "/\r\n|\n|\r/", $existing_actions_list ) );
 
         $existing_patterns_list = get_option( Option::POW_PARAMETER_PATTERN );
         $existing_patterns_lines = array_filter( preg_split( "/\r\n|\n|\r/", $existing_patterns_list ) );
-
-        $existing_whitelist_actions_list = get_option( Option::POW_ACTION_WHITELIST );
-        $existing_whitelist_actions_lines = array_filter( preg_split( "/\r\n|\n|\r/", $existing_whitelist_actions_list ) );
 
         $existing_whitelist_sites_list = get_option( Option::POW_SITE_WHITELIST );
         $existing_whitelist_sites_lines = array_filter( preg_split( "/\r\n|\n|\r/", $existing_whitelist_sites_list ) );
@@ -1163,9 +1078,8 @@ class Message_Page
             $message_type,
             false,
             $message_type == 4 && $hidden_actions_list && ! $this->hidden_actions ? $hidden_actions_lines : [ '-' ] ,
-            $message_type == 4 && $existing_actions_list && ! $this->listed_actions && $explicit_mode ? $existing_actions_lines : [ '-' ],
-            $message_type == 4 && $existing_whitelist_actions_list && $this->whitelisted_actions ? $action_whitelisted : [ '-' ],
-            $message_type == 4 && $existing_patterns_list && ! $this->listed_patterns && $explicit_mode ? $existing_patterns_lines : [],
+            $message_type == 4 && $existing_actions_list && ! $this->listed_actions ? $existing_actions_lines : [ '-' ],
+            $message_type == 4 && $existing_patterns_list && ! $this->listed_patterns ? $existing_patterns_lines : [],
             $message_type == 4 && $hidden_patterns_list && ! $this->hidden_patterns ? $hidden_patterns_lines : []
         );
         $per_page = 25;
@@ -1186,9 +1100,8 @@ class Message_Page
             $start, 
             $per_page, 
             $message_type == 4 && $hidden_actions_list && ! $this->hidden_actions ? $hidden_actions_lines : [ '-' ] ,
-            $message_type == 4 && $existing_actions_list && ! $this->listed_actions && $explicit_mode ? $existing_actions_lines : [ '-' ],
-            $message_type == 4 && $existing_whitelist_actions_list && $this->whitelisted_actions ? $action_whitelisted : [ '-' ],
-            $message_type == 4 && $existing_patterns_list && ! $this->listed_patterns && $explicit_mode ? $existing_patterns_lines : [],
+            $message_type == 4 && $existing_actions_list && ! $this->listed_actions ? $existing_actions_lines : [ '-' ],
+            $message_type == 4 && $existing_patterns_list && ! $this->listed_patterns ? $existing_patterns_lines : [],
             $message_type == 4 && $hidden_patterns_list && ! $this->hidden_patterns ? $hidden_patterns_lines : [],
         );
 
@@ -1210,121 +1123,102 @@ class Message_Page
 
             // Check, whether the whitelisting-parameter already exists
             $action_listed = trim( $rgm_action ) && in_array( trim( $rgm_action ), $existing_actions_lines );
-            $action_whitelisted = trim( $rgm_action ) && in_array( trim( $rgm_action ), array_map('trim', $existing_whitelist_actions_lines ), true );
             $site_whitelisted = trim( $rgm_site ) && in_array( trim( $rgm_site ), $existing_whitelist_sites_lines );
             $ip_whitelisted = trim( $rgm_ip ) && in_array( trim( $rgm_ip ), $existing_whitelist_ips_lines );
-            if( 
-                $message_type != 4
-                || (
-                    $explicit_mode 
-                    || ( ! $explicit_mode && ( ( $site_whitelisted && $this->whitelisted_sites ) || ( $ip_whitelisted && $this->whitelisted_ips ) || ! ( $site_whitelisted || $ip_whitelisted ) ) )
-                )
-            ){
+            $html.= '
+                <table id="resultTable">
+                <col style="width:40px">
+                <tr>
+                <td class="check_message_col"> <input type="checkbox" name="check_message" class="check_message" id="check_message_'.$rgm_id.'" /></td>
+                <td><button class="akkordeonButton" id="akkordeonButton_'.$rgm_id.'">
+                            '.$rgm_date.' '.$rgm_title.'
+                </button>
+                <div class="akkordeonEinheit">
+                    <div id="messageDetails'.$rgm_id.'">
+                    </div>
+                    <input type="hidden" name="messageNonce" id="messageNonce'.$rgm_id.'" value="'.wp_create_nonce( 'get-detail-'.$rgm_id.$message_type ).'" />
+            ';
+            $html.= '<table><th>';
+            if (  $message_type != 1 && $message_type != 4 ){
                 $html.= '
-                    <table id="resultTable">
-                    <col style="width:40px">
-                    <tr>
-                    <td class="check_message_col"> <input type="checkbox" name="check_message" class="check_message" id="check_message_'.$rgm_id.'" /></td>
-                    <td><button class="akkordeonButton" id="akkordeonButton_'.$rgm_id.'">
-                                '.$rgm_date.' '.$rgm_title.'
-                    </button>
-                    <div class="akkordeonEinheit">
-                        <div id="messageDetails'.$rgm_id.'">
-                        </div>
-                        <input type="hidden" name="messageNonce" id="messageNonce'.$rgm_id.'" value="'.wp_create_nonce( 'get-detail-'.$rgm_id.$message_type ).'" />
+                        <td>
+                        <form id="messageForm'.$rgm_id.'" onSubmit="moveMessage( event, \'messageForm\', '.$rgm_id.', 1 );">
+                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                            <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'1' ).'" />
+                            <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Messages', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
+                        </form>
+                        </td>
                 ';
-                $html.= '<table><th>';
-                if (  $message_type != 1 && $message_type != 4 ){
-                    $html.= '
-                            <td>
-                            <form id="messageForm'.$rgm_id.'" onSubmit="moveMessage( event, \'messageForm\', '.$rgm_id.', 1 );">
-                                <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                                <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'1' ).'" />
-                                <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Messages', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
-                            </form>
-                            </td>
-                    ';
-                }
-                if (  $message_type != 2 && $message_type != 4 ){
-                    $html.= '
-                            <td>
-                            <form id="spamForm'.$rgm_id.'" onSubmit="moveMessage( event, \'spamForm\', '.$rgm_id.', 2 );">
-                                <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                                <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'2' ).'" />
-                                <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Spam', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
-                            </form>
-                            </td>
-                    ';
-                }
-                if ( $message_type != 3 && $message_type != 4 ){
-                    $html.= '
-                            <td>
-                            <form id="trashForm'.$rgm_id.'" onSubmit="moveMessage( event, \'trashForm\', '.$rgm_id.', 3 );">
-                                <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                                <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'3' ).'" />
-                                <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Trash', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
-                            </form>
-                            </td>
-                    ';
-                }
-                if ( $rgm_ajax && $rgm_action && ! $explicit_mode && ! $action_whitelisted ){
-                    $html.= '
-                        <td>
-                        <form id="whitelistForm'.$rgm_id.'" onSubmit="saveWhitelistParameter(event, \''.$rgm_action.'\', \'block_Button_' . $rgm_id . '\');">
-                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                            <input type="submit" id="block_Button_' . $rgm_id . '" class="blockButton button-primary" name="blockButton" value="'.__('Whitelist type of submission', 'gdpr-compliant-recaptcha-for-all-forms').'" />
-                        </form>
-                        </td>
-                    ';
-                }
-                if ( $rgm_ajax && $rgm_action && $explicit_mode && ! $action_listed ){
-                    $html.= '
-                        <td>
-                        <form id="whiteList'.$rgm_id.'" onSubmit="saveListParameter(event, \''.$rgm_action.'\', \'list_Button_' . $rgm_id . '\', false);">
-                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                            <input type="submit" id="list_Button_' . $rgm_id . '" class="listButton button-primary" name="listButton" value="'.__('Enhance spam check on type of action', 'gdpr-compliant-recaptcha-for-all-forms').'" />
-                        </form>
-                        </td>
-                        <td>
-                        <form id="hideList'.$rgm_id.'" onSubmit="saveListParameter(event, \''.$rgm_action.'\', \'hide_Button_' . $rgm_id . '\', true);">
-                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                            <input type="submit" id="hide_Button_' . $rgm_id . '" class="hideButton button-primary" name="hideButton" value="'.__('Hide action', 'gdpr-compliant-recaptcha-for-all-forms').'" />
-                        </form>
-                        </td>
-                    ';
-                }
-                if ( $message_type == 4 && ! $rgm_ajax ){
-                    $html.= '
-                        <td>
-                        <form id="patternForm' . $rgm_id . '" onSubmit="savePattern(event, \'' . $rgm_id . '\', \'pattern_Button_' . $rgm_id . '\', false);">
-                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                            <input type="submit" id="pattern_Button_' . $rgm_id . '" class="patternButton button-primary" name="patternButton" value="'.__('Enhance spam check on type of submission', 'gdpr-compliant-recaptcha-for-all-forms').'" />
-                        </form>
-                        </td>
-                        <td>
-                        <form id="hidePatternForm' . $rgm_id . '" onSubmit="savePattern(event, \'' . $rgm_id . '\', \'hide_Pattern_Button_' . $rgm_id . '\', true);">
-                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                            <input type="submit" id="hide_Pattern_Button_' . $rgm_id . '" class="hidePatternButton button-primary" name="hidePatternButton" value="'.__('Hide pattern', 'gdpr-compliant-recaptcha-for-all-forms').'" />
-                        </form>
-                        </td>
-                    ';
-                }
-                if ( $message_type == 3 || $message_type == 4 ){
-                    $html.= '
-                            <td>
-                            <form id="deleteForm'.$rgm_id.'" onSubmit="deleteSingleMessage( event, \'deleteForm\', '.$rgm_id.' );">
-                                <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
-                                <input type="hidden" name="deleteNonce" id="deleteNonce" value="'.wp_create_nonce( 'delete-message-'.$rgm_id.$message_type ).'" />
-                                <input type="submit" class="trashButton button-primary" id="trashButton" name="trashButton" value="'.__( 'Delete', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
-                            </form>
-                            </td>
-                    ';
-                }
-                $html.= '</th></table>';
-                $html.= '</div></td>
-                </tr>
-                </table>';
             }
+            if (  $message_type != 2 && $message_type != 4 ){
+                $html.= '
+                        <td>
+                        <form id="spamForm'.$rgm_id.'" onSubmit="moveMessage( event, \'spamForm\', '.$rgm_id.', 2 );">
+                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                            <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'2' ).'" />
+                            <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Spam', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
+                        </form>
+                        </td>
+                ';
+            }
+            if ( $message_type != 3 && $message_type != 4 ){
+                $html.= '
+                        <td>
+                        <form id="trashForm'.$rgm_id.'" onSubmit="moveMessage( event, \'trashForm\', '.$rgm_id.', 3 );">
+                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                            <input type="hidden" name="moveNonce" id="moveNonce" value="'.wp_create_nonce( 'move-message-'.$rgm_id.$message_type.'3' ).'" />
+                            <input type="submit" class="trashButton button-secondary" id="trashButton" name="trashButton" value="'.__( 'Move to Trash', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
+                        </form>
+                        </td>
+                ';
+            }
+            if ( $rgm_ajax && $rgm_action && ! $action_listed ){
+                $html.= '
+                    <td>
+                    <form id="whiteList'.$rgm_id.'" onSubmit="saveListParameter(event, \''.$rgm_action.'\', \'list_Button_' . $rgm_id . '\', false);">
+                        <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                        <input type="submit" id="list_Button_' . $rgm_id . '" class="listButton button-primary" name="listButton" value="'.__('Enhance spam check on type of action', 'gdpr-compliant-recaptcha-for-all-forms').'" />
+                    </form>
+                    </td>
+                    <td>
+                    <form id="hideList'.$rgm_id.'" onSubmit="saveListParameter(event, \''.$rgm_action.'\', \'hide_Button_' . $rgm_id . '\', true);">
+                        <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                        <input type="submit" id="hide_Button_' . $rgm_id . '" class="hideButton button-primary" name="hideButton" value="'.__('Hide action', 'gdpr-compliant-recaptcha-for-all-forms').'" />
+                    </form>
+                    </td>
+                ';
+            }
+            if ( $message_type == 4 && ! $rgm_ajax ){
+                $html.= '
+                    <td>
+                    <form id="patternForm' . $rgm_id . '" onSubmit="savePattern(event, \'' . $rgm_id . '\', \'pattern_Button_' . $rgm_id . '\', false);">
+                        <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                        <input type="submit" id="pattern_Button_' . $rgm_id . '" class="patternButton button-primary" name="patternButton" value="'.__('Enhance spam check on type of submission', 'gdpr-compliant-recaptcha-for-all-forms').'" />
+                    </form>
+                    </td>
+                    <td>
+                    <form id="hidePatternForm' . $rgm_id . '" onSubmit="savePattern(event, \'' . $rgm_id . '\', \'hide_Pattern_Button_' . $rgm_id . '\', true);">
+                        <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                        <input type="submit" id="hide_Pattern_Button_' . $rgm_id . '" class="hidePatternButton button-primary" name="hidePatternButton" value="'.__('Hide pattern', 'gdpr-compliant-recaptcha-for-all-forms').'" />
+                    </form>
+                    </td>
+                ';
+            }
+            if ( $message_type == 3 || $message_type == 4 ){
+                $html.= '
+                        <td>
+                        <form id="deleteForm'.$rgm_id.'" onSubmit="deleteSingleMessage( event, \'deleteForm\', '.$rgm_id.' );">
+                            <input type="hidden" name="messsageID" id="messsageID" value="'.$rgm_id.'" />
+                            <input type="hidden" name="deleteNonce" id="deleteNonce" value="'.wp_create_nonce( 'delete-message-'.$rgm_id.$message_type ).'" />
+                            <input type="submit" class="trashButton button-primary" id="trashButton" name="trashButton" value="'.__( 'Delete', 'gdpr-compliant-recaptcha-for-all-forms' ).'" />
+                        </form>
+                        </td>
+                ';
+            }
+            $html.= '</th></table>';
+            $html.= '</div></td>
+            </tr>
+            </table>';
         }
         $array_result = array(
             'success' => 1,
@@ -1410,21 +1304,19 @@ class Message_Page
     }
 
     /**Get all messages */
-    private function get_messages( $search, $messageType, $start, $pages, $hidden_actions = [ '-' ], $existing_actions = [ '-' ], $whitelisted_actions = [ '-' ], $existing_patterns = [], $hidden_patterns = [] ){
+    private function get_messages( $search, $messageType, $start, $pages, $hidden_actions = [ '-' ], $existing_actions = [ '-' ], $existing_patterns = [], $hidden_patterns = [] ){
         global $wpdb;
 
         $hidden_actions_placeholders = implode( ', ', array_fill( 0, count( $hidden_actions ), '%s' ) );
         $existing_actions_placeholders = implode( ', ', array_fill( 0, count( $existing_actions ), '%s' ) );
-        $whitelisted_actions_placeholders = implode( ', ', array_fill( 0, count( $whitelisted_actions ), '%s' ) );
         $parameters = array_merge(
             [ $messageType ], 
             $hidden_actions,
             $existing_actions,
-            $whitelisted_actions,
             [ $search, $search, $start, $pages, ]
         );
         $sqlArray = [];
-        //For each pattern build a sub-seelect to check whether the conditions match
+        //For each pattern build a sub-select to check whether the conditions match
         foreach ( $existing_patterns as $pattern ) {
             $pattern = Option::generate_paths( json_decode( $pattern, true ), '' );
             $conditions = array();
@@ -1468,25 +1360,24 @@ class Message_Page
             ;
         }
 
+        $query = "SELECT DISTINCT rgm.*
+        FROM " . $wpdb->prefix . "recaptcha_gdpr_message_rgm rgm
+        JOIN " . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
+          ON rgm.rgm_id = rgd.rgm_id
+        WHERE rgm.rgm_type = %d
+          AND COALESCE(rgm.rgm_action, '') NOT IN ($hidden_actions_placeholders)
+          AND COALESCE(rgm.rgm_action, '') NOT IN ($existing_actions_placeholders)
+          AND ( rgd.rgd_attribute LIKE CONCAT('%',%s,'%')
+                OR rgd.rgd_value LIKE CONCAT('%',%s,'%')
+              )
+          " . implode( '', $sqlArray ) .  implode( '', $hiddenSqlArray ) . "
+        ORDER BY rgm.rgm_date DESC
+        LIMIT %d, %d";
+
+        $prepared_query = call_user_func_array( [ $wpdb, 'prepare' ], array_merge( [ $query ], $parameters ) );
+
         // Anfrage ausführen,
-        $results = $wpdb->get_results(
-            $wpdb->prepare( "SELECT DISTINCT rgm.*
-                            FROM " . $wpdb->prefix . "recaptcha_gdpr_message_rgm rgm
-                            JOIN " . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
-                              ON rgm.rgm_id = rgd.rgm_id
-                            WHERE rgm.rgm_type = %d
-                              AND COALESCE(rgm.rgm_action, '') NOT IN ($hidden_actions_placeholders)
-                              AND COALESCE(rgm.rgm_action, '') NOT IN ($existing_actions_placeholders)
-                              AND COALESCE(rgm.rgm_action, '') NOT IN ($whitelisted_actions_placeholders)
-                              AND ( rgd.rgd_attribute LIKE CONCAT('%',%s,'%')
-                                    OR rgd.rgd_value LIKE CONCAT('%',%s,'%')
-                                  )
-                              " . implode( '', $sqlArray ) .  implode( '', $hiddenSqlArray ) . "
-                            ORDER BY rgm.rgm_date DESC
-                            LIMIT %d, %d
-                           ", $parameters
-            )
-        );
+        $results = $wpdb->get_results( $prepared_query );
         return $results;
     }
 

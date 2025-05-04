@@ -128,62 +128,10 @@ class Stamp
             if( $ajax ){
                 //Post-requests from the plugin
                 if( ! in_array( $action, [ 'get_stamp', 'check_stamp' ] ) ){
-                    // If explicit mode, only explicitly listed actions shall be allowed that are listed on the explicit actions list
-                    if( get_option( Option::POW_EXPLICIT_MODE ) ){
-                        if( $this->checkExplicitActions() ){
-                            add_action( 'init', [ $this, 'run' ] );
-                            return $this->check_submit( null, $_POST, 'ajax-call', $action, $ajax );
-                        }
-                    // If default mode, all actions will be allowed if they are not listed on the exclusion-list
-                    }else{
-                        $excluded = false;
-                        $lines = preg_split('/\r\n|\n|\r/', get_option( Option::POW_ACTION_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY);
-                        if ( count( $lines ) > 0 ){
-                            foreach ($lines as $line) {
-                                if( fnmatch( trim ( $line ), $action ) ){
-                                    $excluded = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        function wildcard_match_array( $action, $array ) {
-                            foreach ( $array as $pattern ) {
-                                if ( fnmatch( $pattern, $action ) ) {
-                                    return true; // If any item matches, return true
-                                }
-                            }
-                            return false; // If no match is found in the entire array, return false
-                        }
-
-                        $exclusion_array = array(
-                            'wordfence_*', // Wordfence
-                            'tcb_editor_ajax', 'tve_dash_front_ajax', 'tie_save_image_content', 'tie_save_image_file', // Thrive
-                            'woocommerce_*', 'wp_1_wc_privacy_cleanup', 'as_async_request_queue_runner', // WooCommerce
-                            'wp_mail_smtp_*', 'health-check-email-domain_check_test', 'wp_async_request', // wp-mail-smtp
-                            'wp_optimize_ajax', 'save-widget', 'update-widget', 'updraft_*', // wp-optimize
-                            'wpforms_*', // wpforms
-                            'wps-limit-login-unlock', 'wpslimitlogin_rated', // wps-limit-login
-                            'wpcf7-update-welcome-panel', // contact form 7
-                            'forminator_*', 'wpmudev_notices_action', // Forminator
-                            'et_fb_*', 'et_pb_*', // Divi
-                            'heartbeat', // WordPress
-                            'shield_action', // Shield
-                        );
-
-                        //Array to exclude specific values from used matching-patterns
-                        $exclusion_from_pattern = array(
-                            'wpforms_submit', 'forminator_submit_form_*',
-                        );
-
-                        if( ! $excluded && 
-                            ( wildcard_match_array( $action, $exclusion_from_pattern )
-                                || ! wildcard_match_array( $action, $exclusion_array )
-                            ) 
-                        ){
-                            add_action( 'init', [ $this, 'run' ] );
-                            return $this->check_submit( null, $_POST, 'ajax-call', $action, $ajax );
-                        }
+                    if( $this->checkExplicitActions() ){
+                        // Only explicitly listed actions shall be allowed that are listed on the explicit actions list
+                        add_action( 'init', [ $this, 'run' ] );
+                        return $this->check_submit( null, $_POST, 'ajax-call', $action, $ajax );
                     }
                 }else{
                     add_action( 'init', [ $this, 'run' ] );
@@ -215,17 +163,15 @@ class Stamp
     }
 
     private function checkExplicitActions(){
-        if( get_option( Option::POW_EXPLICIT_MODE ) ){
-            $action = isset( $_REQUEST[ 'action' ] ) ? sanitize_text_field( $_REQUEST[ 'action' ] ) : '';
-            if( $action ){
-                $lines = preg_split('/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY);
-                if ( count( $lines ) > 0 ){
-                    foreach ($lines as $line) {
-                        if( $action == trim ( $line ) //explicitly listed ajax-action
-                            || isset( $_REQUEST[ $action ] ) //explicitly listed post-attribute
-                        ){
-                            return true;
-                        }
+        $action = isset( $_REQUEST[ 'action' ] ) ? sanitize_text_field( $_REQUEST[ 'action' ] ) : '';
+        if( $action ){
+            $lines = preg_split('/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY);
+            if ( count( $lines ) > 0 ){
+                foreach ($lines as $line) {
+                    if( $action == trim ( $line ) //explicitly listed ajax-action
+                        || isset( $_REQUEST[ $action ] ) //explicitly listed post-attribute
+                    ){
+                        return true;
                     }
                 }
             }
@@ -268,9 +214,7 @@ class Stamp
         $patternFound = false;
         //Specific posts as proprietary ajax calls
         $existing_pattern = get_option( Option::POW_PARAMETER_PATTERN );
-        if(
-            $existing_pattern && get_option( Option::POW_EXPLICIT_MODE ) 
-        ){
+        if( $existing_pattern ){
             $existing_lines_pattern = preg_split( "/\r\n|\n|\r/", $existing_pattern );
 
             // Iterate through the array, convert each field to JSON, and update the array
@@ -336,11 +280,6 @@ class Stamp
                 add_action( 'wp_authenticate_user', [ $this, 'pre_process_login'], 1, 1 );
                 add_action( 'check_passwords',[ $this, 'pre_process_login' ], 1, 1 );
                 add_action( 'password_reset',[ $this, 'pre_process_login' ], 1, 1 );
-            }
-            if( ! get_option( Option::POW_EXPLICIT_MODE ) ){
-                add_action( 'preprocess_comment', [ $this, 'pre_process_submission'] );
-                add_action( 'parse_request',[ $this, 'pre_process_submission' ], 1, 1 );
-                add_action( 'register_post',[ $this, 'pre_process_submission' ], 1, 1 );
             }
         }
     }

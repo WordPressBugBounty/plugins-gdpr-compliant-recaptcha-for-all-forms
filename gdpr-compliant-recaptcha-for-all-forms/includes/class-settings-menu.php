@@ -46,6 +46,192 @@ class Settings_Menu
         add_action( 'init', [ $this, 'run' ] );
     }
 
+    /**
+     * Display an admin notice in the backend.
+     *
+     * @param string $message The message to be displayed.
+     */
+    function display_admin_notice( $message ) {
+        if ( ! is_admin() || get_option( Option::POW_INSTALLED ) ) {
+            return;
+        }
+        add_action( 'admin_notices', function() use ( $message ) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html( $message ) . '</p></div>';
+        } );
+    }
+
+    function get_default_ajax_actions() {
+        include_once( ABSPATH . 'wp-admin/includes/plugin.php' );
+        $actions = [];
+        $installed_plugins = get_plugins();
+        $installed_themes  = wp_get_themes();
+    
+        // *** Forminator (uses WordPress AJAX) ***
+        if ( is_plugin_active( 'forminator/forminator.php' ) || array_key_exists( 'forminator/forminator.php', $installed_plugins ) ) {
+            $actions[] = 'forminator_submit_form_custom-forms';
+            $this->display_admin_notice( __( 'Forminator detected – added action: forminator_submit_form_custom-forms', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** WPForms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'wpforms/wpforms.php', $installed_plugins ) || array_key_exists( 'wpforms-lite/wpforms.php', $installed_plugins ) ) {
+            $actions[] = 'wpforms_submit';
+            $this->display_admin_notice( __( 'WPForms detected – added action: wpforms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Ninja Forms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'ninja-forms/ninja-forms.php', $installed_plugins ) ) {
+            $actions[] = 'nf_ajax_submit';
+            $this->display_admin_notice( __( 'Ninja Forms detected – added action: nf_ajax_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Fluent Forms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'fluentform/fluentform.php', $installed_plugins ) ) {
+            $actions[] = 'fluentform_submit';
+            $this->display_admin_notice( __( 'Fluent Forms detected – added action: fluentform_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Jetpack Forms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'jetpack/jetpack.php', $installed_plugins ) ) {
+            $actions[] = 'jetpack_contact_form_submit';
+            $this->display_admin_notice( __( 'Jetpack Forms detected – added action: jetpack_contact_form_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Everest Forms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'everest-forms/everest-forms.php', $installed_plugins ) ) {
+            $actions[] = 'everest_forms_submit';
+            $this->display_admin_notice( __( 'Everest Forms detected – added action: everest_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** WS Forms (uses WordPress AJAX) ***
+        if ( array_key_exists( 'ws-forms/ws-forms.php', $installed_plugins ) ) {
+            $actions[] = 'ws_forms_submit';
+            $this->display_admin_notice( __( 'WS Forms detected – added action: ws_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Otter Blocks (uses WordPress AJAX) ***
+        if ( array_key_exists( 'otter-blocks/otter-blocks.php', $installed_plugins ) ) {
+            $actions[] = 'otter_blocks_submit';
+            $this->display_admin_notice( __( 'Otter Blocks detected – added action: otter_blocks_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Elementor Pro Forms (correct action) ***
+        if ( array_key_exists( 'elementor-pro/elementor-pro.php', $installed_plugins ) ) {
+            $actions[] = 'elementor_pro_forms_send_form';
+            $this->display_admin_notice( __( 'Elementor Pro Forms detected – added action: elementor_pro_forms_send_form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+        
+        return implode("\n", $actions);
+    }
+
+    function get_default_recognition_patterns() {
+        include_once( ABSPATH . 'wp-admin/includes/plugin.php' );
+        $patterns = [];
+        $installed_plugins = get_plugins();
+        $installed_themes  = wp_get_themes();
+    
+        // *** Contact Form 7 ***
+        if ( array_key_exists( 'contact-form-7/wp-contact-form-7.php', $installed_plugins ) ) {
+            $patterns[] = '{"_wpcf7":null}';
+            $patterns[] = '{"wpcf7_submit":null}';
+            $patterns[] = '{"wpcf7_contact_form":null}';
+            $patterns[] = '{"wpcf7_file_upload":null}';
+            $patterns[] = '{"wpcf7_attachment":null}';
+            $patterns[] = '{"wpcf7_post_submission":null}';
+            $patterns[] = '{"wpcf7_save_post":null}';
+            $this->display_admin_notice( __( 'Contact Form 7 detected – added default recognition patterns', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** WooCommerce ***
+        if ( array_key_exists( 'woocommerce/woocommerce.php', $installed_plugins ) ) {
+            $patterns[] = '{"add-to-cart":null}';
+            $patterns[] = '{"remove-from-cart":null}';
+            $patterns[] = '{"update-cart":null}';
+            $patterns[] = '{"woocommerce_checkout":null}';
+            $patterns[] = '{"woocommerce_order":null}';
+            $patterns[] = '{"woocommerce_payment_complete":null}';
+            $patterns[] = '{"woocommerce_created_customer":null}';
+            $patterns[] = '{"woocommerce_login":null}';
+            $patterns[] = '{"woocommerce_review":null}';
+            $patterns[] = '{"woocommerce_comment":null}';
+            $this->display_admin_notice( __( 'WooCommerce detected – added recognition patterns for cart, checkout, and user actions', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Gravity Forms (custom submission method) ***
+        if ( array_key_exists( 'gravityforms/gravityforms.php', $installed_plugins ) ) {
+            $patterns[] = '{"gform_submit":null}';
+            $patterns[] = '{"gform_file_upload":null}';
+            $this->display_admin_notice( __( 'Gravity Forms detected – added recognition patterns for submissions and file uploads', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Divi Contact Form Module (custom submission method) ***
+        if ( array_key_exists( 'Divi', $installed_themes ) ) {
+            $patterns[] = '{"et_pb_contactform_submit_0":null}';
+            $this->display_admin_notice( __( 'Divi detected – added recognition pattern: {"et_pb_contactform_submit_0":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Thrive Leads & Thrive Architect (custom submission method) ***
+        if ( array_key_exists( 'thrive-leads/thrive-leads.php', $installed_plugins ) ) {
+            $patterns[] = '{"thrive_leads_submit":null}';
+            $this->display_admin_notice( __( 'Thrive Leads detected – added recognition pattern: {"thrive_leads_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Thrive Architect Forms (custom submission method) ***
+        if ( array_key_exists( 'thrive-architect/thrive-architect.php', $installed_plugins ) ) {
+            $patterns[] = '{"thrive_architect_form_submit":null}';
+            $this->display_admin_notice( __( 'Thrive Architect detected – added recognition pattern: {"thrive_architect_form_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Thrive Apprentice (Online course signups) ***
+        if ( array_key_exists( 'thrive-apprentice/thrive-apprentice.php', $installed_plugins ) ) {
+            $patterns[] = '{"thrive_apprentice_signup":null}';
+            $this->display_admin_notice( __( 'Thrive Apprentice detected – added recognition pattern: {"thrive_apprentice_signup":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Thrive Quiz Builder (Quiz forms) ***
+        if ( array_key_exists( 'thrive-quiz-builder/thrive-quiz-builder.php', $installed_plugins ) ) {
+            $patterns[] = '{"thrive_quiz_submission":null}';
+            $this->display_admin_notice( __( 'Thrive Quiz Builder detected – added recognition pattern: {"thrive_quiz_submission":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Thrive Comments (replaces WordPress comments) ***
+        if ( array_key_exists( 'thrive-comments/thrive-comments.php', $installed_plugins ) ) {
+            $patterns[] = '{"thrive_comments_submit":null}';
+            $this->display_admin_notice( __( 'Thrive Comments detected – added recognition pattern: {"thrive_comments_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Formidable Forms (custom submission method) ***
+        if ( array_key_exists( 'formidable/formidable.php', $installed_plugins ) ) {
+            $patterns[] = '{"formidable_submit":null}';
+            $this->display_admin_notice( __( 'Formidable Forms detected – added recognition pattern: {"formidable_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** WP User Frontend Forms (custom submission method) ***
+        if ( array_key_exists( 'wp-user-frontend/wp-user-frontend.php', $installed_plugins ) ) {
+            $patterns[] = '{"wpuf_submit":null}';
+            $this->display_admin_notice( __( 'WP User Frontend Forms detected – added recognition pattern: {"wpuf_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Jotform (custom submission method) ***
+        if ( array_key_exists( 'jotform/jotform.php', $installed_plugins ) ) {
+            $patterns[] = '{"jotform_submit":null}';
+            $this->display_admin_notice( __( 'Jotform detected – added recognition pattern: {"jotform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Typeform (custom submission method) ***
+        if ( array_key_exists( 'typeform/typeform.php', $installed_plugins ) ) {
+            $patterns[] = '{"typeform_submit":null}';
+            $this->display_admin_notice( __( 'Typeform detected – added recognition pattern: {"typeform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+    
+        // *** Zoho Forms (custom submission method) ***
+        if ( array_key_exists( 'zoho-forms/zoho-forms.php', $installed_plugins ) ) {
+            $patterns[] = '{"zoho_forms_submit":null}';
+            $this->display_admin_notice( __( 'Zoho Forms detected – added recognition pattern: {"zoho_forms_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+            
+        return implode("\n", $patterns);
+    }
+
     public function prepare_options(){
         //$boolOptionType = Option::BOOL;
         $POW_SAVE_SPAM_LABEL = sprintf( __( "If you want to check that only spam messages are blocked. You can see your saved spam messages <a href='%s'>here</a>", 'gdpr-compliant-recaptcha-for-all-forms' ), admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_SPAM );
@@ -99,31 +285,6 @@ class Settings_Menu
             EOT ), 'gdpr-compliant-recaptcha-for-all-forms' ), '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_MESSAGES .'">', '</a>' );
 
         $this->options = [
-            Option::POW_EXPLICIT_MODE => new Option(
-                __( 'Explicit mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                Option::BOOL,
-                false,
-                sprintf( __( trim( "
-                    <strong>It is highly recommended using this mode!</strong>
-                    <br><br>
-                    <strong>Purpose:</strong> In this mode, spam protection is applied only to submission types that are either explicitly listed or are original standard submission types from WordPress for comments, posts, and requests.
-                    <br><br>
-                    <strong>How it Works:</strong>
-                    <br>Follow these steps to easily list submission types to the spam check:
-                    <br><br>
-                    <ol>
-                        <li>Enable <b>Direct Analysis mode</b> 🕵️</li>
-                        <li>Navigate to the pages that contain your forms while remaining logged in.</li>
-                        <li>Submit the forms you want to add to the spam check.</li>
-                        <li>Enhance the spam check directly from your pages, by following the additional instructions provided directly on the forms.</li>
-                        <li>Finally, remember to deactivate the mode.</li>
-                    </ol>                    
-                    <br><br>
-                    <strong>If this doesn't work for you, alternatively (for technical advanced users) use the <b>Analysis mode</b> 🔍</strong>
-                    " ), 'gdpr-compliant-recaptcha-for-all-forms' ), admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS, admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS ),
-                __( 'Most relevant', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                '🎯'
-            ),
             Option::POW_DIRECT_ANALYSIS_MODE => new Option(
                 __( 'Direct analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 Option::BOOL,
@@ -163,6 +324,37 @@ class Settings_Menu
                 " ), 'gdpr-compliant-recaptcha-for-all-forms' ), admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS, admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS ),
                 __( 'Most relevant', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 '🔍'
+            ),
+            Option::POW_EXPLICIT_ACTION => new Option(
+                __( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                Option::TEXT,
+                $this->get_default_ajax_actions(),
+                sprintf( __( trim( "
+                        Add line by line actions, that you wish to be considered from the spam protection, if the plugin is in the <b>Explicit mode</b> 🎯. 
+                        <br>You can find and copy the action from unwanted messages in the plugin's %sspam or message inbox%s. Or you can use the <b>Analysis mode</b> 🔍 in order to record all types of submissions, open the <a href='%s'>Analytic Box</a>, search for the related message and add its action by clicking the respective button on the bottom of this message.
+                        <br>
+                        <br><strong>Example:</strong> 
+                        <br>
+                        <br><em>forminator_submit_form_custom-forms</em>
+                        <br><em>wpforms_submit</em>
+                    " ), 'gdpr-compliant-recaptcha-for-all-forms' ) , '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_MESSAGES .'">', '</a>', admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS ),
+                __( 'Most relevant', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                '⚙️✔️'
+            ),
+            Option::POW_PARAMETER_PATTERN => new Option(
+                __( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                Option::TEXT,
+                $this->get_default_recognition_patterns(),
+                sprintf( __( trim( "
+                    <strong>The purpose:</strong> This option is intended to specify patterns for post parameters to enhance the scope for the spam check. 
+                    If you are facing the problem, that your form submissions are not filtered by the spam check, the most likely reason is that the submission type of the respective forms are not yet recognized by the spam check.
+                    <br>
+                    <br><strong>How it works:</strong> Whereas at this point you can insert and view parameter patterns, the best and easiest way to insert new patterns is to enable <b>Analysis mode</b> 🔍, then submit the form that you want to be considered and search into the %sAnalytic Box%s for the message related to your submission.
+                    Open the message, choose the fields and values for your pattern and add the pattern by clicking on the respective button on the bottom of the message.
+                    <br>Finally you can view and alter all added patterns line by line at this option. The patterns use json format.
+                " ), 'gdpr-compliant-recaptcha-for-all-forms' ) , '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS .'">', '</a>' ),
+                __( 'Most relevant', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                '🔍✔️'
             ),
             Option::POW_BLOCK_LOGIN => new Option(
                 __( 'Apply for WordPress-Login', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -385,37 +577,6 @@ class Settings_Menu
                 __( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 '🗑️📨'
             ),
-            Option::POW_EXPLICIT_ACTION => new Option(
-                __( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                Option::TEXT,
-                "",
-                sprintf( __( trim( "
-                        Add line by line actions, that you wish to be considered from the spam protection, if the plugin is in the <b>Explicit mode</b> 🎯. 
-                        <br>You can find and copy the action from unwanted messages in the plugin's %sspam or message inbox%s. Or you can use the <b>Analysis mode</b> 🔍 in order to record all types of submissions, open the <a href='%s'>Analytic Box</a>, search for the related message and add its action by clicking the respective button on the bottom of this message.
-                        <br>
-                        <br><strong>Example:</strong> 
-                        <br>
-                        <br><em>forminator_submit_form_custom-forms</em>
-                        <br><em>wpforms_submit</em>
-                    " ), 'gdpr-compliant-recaptcha-for-all-forms' ) , '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_MESSAGES .'">', '</a>', admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS ),
-                __( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                '⚙️✔️'
-            ),
-            Option::POW_PARAMETER_PATTERN => new Option(
-                __( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                Option::TEXT,
-                "",
-                sprintf( __( trim( "
-                    <strong>The purpose:</strong> This option is intended to specify patterns for post parameters to enhance the scope for the spam check. 
-                    If you are facing the problem, that your form submissions are not filtered by the spam check, the most likely reason is that the submission type of the respective forms are not yet recognized by the spam check.
-                    <br>
-                    <br><strong>How it works:</strong> Whereas at this point you can insert and view parameter patterns, the best and easiest way to insert new patterns is to enable <b>Analysis mode</b> 🔍, then submit the form that you want to be considered and search into the %sAnalytic Box%s for the message related to your submission.
-                    Open the message, choose the fields and values for your pattern and add the pattern by clicking on the respective button on the bottom of the message.
-                    <br>Finally you can view and alter all added patterns line by line at this option. The patterns use json format.
-                " ), 'gdpr-compliant-recaptcha-for-all-forms' ) , '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS .'">', '</a>' ),
-                __( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                '🔍✔️'
-            ),
             Option::POW_APPLY_REST => new Option(
                 __( 'Apply on REST-API', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 Option::BOOL,
@@ -446,28 +607,6 @@ class Settings_Menu
                 " ), 'gdpr-compliant-recaptcha-for-all-forms' ),
                 __( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 '📄'
-            ),
-            Option::POW_ACTION_WHITELIST => new Option(
-                __( 'Action-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                Option::TEXT,
-                "",
-                sprintf( __( trim( "
-                    <strong>The purpose:</strong> By using this option, you can avoid the spam plugin from processing counters, keep-alive-signals and alike.
-                    <br>
-                    <br><strong>How it works:</strong> Add line by line ajax-actions, that you wish to be whitelisted if the plugin is <b><u>not</u></b> in the 'Explicit mode'. 
-                    <br>You can find and copy the action from unwanted messages of the plugin's %sspam or message inbox%s.
-                    <br>If you want to whitelist a set of actions that follow a specific naming convention, you can use \"*\" as wildcard.
-                    <br>
-                    <br><strong>Example:</strong>
-                    <br>
-                    <br><em>heartbeat</em>
-                    <br><em>keep-alive</em>
-                    <br><em>site_counter</em>
-                    <br>
-                    <br><strong>Note:</strong> Simple non-ajax-submissions are not affected from this option and thus will always be considered by the spam-protection.
-                " ), 'gdpr-compliant-recaptcha-for-all-forms' ) , '<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_MESSAGES .'">', '</a>' ),
-                __( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                '🚫'
             ),
             Option::POW_HIDE_ACTION => new Option(
                 __( 'Hide actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -864,15 +1003,6 @@ class Settings_Menu
                 'updated'
             );
         }
-        if( ! get_option( Option::POW_EXPLICIT_MODE ) ){
-            // Add success message
-            add_settings_error(
-                Option::PREFIX . 'options',
-                'warning-for-explicit-mode',
-                __( 'Beware: The plugin is not yet running in "Explicit mode 🎯". This may work for you nevertheless, but to avoid compatibility issues and boost performance, we strongly recommend you to read the help for the option "Explicit mode 🎯", switch to it and administrate it respectively.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-                'warning'
-            );
-        }
     }
 
     /** Filter special chars if not int
@@ -920,36 +1050,10 @@ class Settings_Menu
           document.getElementById(tabId).style.display = 'block';
         }
         </script>
-        <?php
-        if( ! get_option( Option::POW_EXPLICIT_MODE ) ){
-            ?>
-            <script type="text/javascript">
-                window.addEventListener( 'load', function(){
-                    function blinkElement(element, times, speed) {
-                        var count = 0;
-                        var interval = setInterval(function () {
-                            element.style.visibility = (element.style.visibility === 'hidden') ? 'visible' : 'hidden';
-
-                            if (++count === times * 2) {
-                                clearInterval(interval);
-                            }
-                        }, speed);
-                    }
-                    var explicit_element = document.getElementById("gdpr_pow_pow_explicit_mode");
-                    // Iterate through the elements and set the background color to red
-                    blinkElement(explicit_element, 2, 500);
-                    explicit_element.style.boxShadow = "0 0 20px red";
-                });
-            </script>
-            <?php
-        }
-        ?>
         <div class="recaptchaWrap">
             <h1><?php esc_html_e( $this->plugin_name.' - '.__( 'Settings', 'gdpr-compliant-recaptcha-for-all-forms' ) ) ?>
             </h1>
             <?php
-                if( ! get_option( Option::POW_EXPLICIT_MODE ) )
-                    echo( $message_with_links1 );
                 echo( $message_with_links2 );
             ?>
             <table>
