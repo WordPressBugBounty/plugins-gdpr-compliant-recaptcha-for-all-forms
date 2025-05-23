@@ -195,7 +195,7 @@ class Settings_Menu
     
         // *** Thrive Comments (replaces WordPress comments) ***
         if ( array_key_exists( 'thrive-comments/thrive-comments.php', $installed_plugins ) ) {
-            $patterns[] = '{"thrive_comments_submit":null}';
+            $patterns[] = '{"comment_content":null,"comment_post_ID":null,"tva_term":null}';
             $this->display_admin_notice( __( 'Thrive Comments detected – added recognition pattern: {"thrive_comments_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
         }
     
@@ -439,6 +439,30 @@ class Settings_Menu
                 ),
                 __( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
                 '📈'
+            ),
+            Option::POW_FAIL_2_BAN_PATH => new Option(
+                __( 'Path to save spam approaches to syslog', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                Option::TEXT,
+                "",
+                __( trim( "<strong>The purpose:</strong> <br>Fail2Ban is a security tool designed to <strong>protect servers</strong> by monitoring log files and automatically blocking IP addresses involved in <strong>repeated unauthorized access attempts or suspicious activities</strong>.
+                            <br>While commonly used for <strong>SSH, email servers, and web applications</strong>, this integration focuses on securing WordPress forms from login abuse and spam.<br>
+
+                            <br><strong>Specify the directory path where log files should be stored:</strong>
+                            <ol>
+                            <li>If the field is <strong>left empty or contains an invalid path</strong>, logging remains <strong>disabled</strong>.</li>
+                            <li>A <strong>valid directory path</strong> enables logging, generating two separate log files:</li>
+                            <ol>
+                            <li><strong>Login attempts log:</strong> <code>auth.log</code> – Records failed login attempts.</li>
+                            <li><strong>Spam detection log:</strong> <code>spam.log</code> – Logs suspicious form submissions.</li>
+                            </ol>
+                            </ol>
+
+                            <br>Ensure the specified path is <strong>writable</strong> by the server and does not include a filename, as logs will be automatically managed within the chosen directory.
+                            <br>If <code>auth.log</code> or <code>spam.log</code> already exist in the specified directory, they will be used for logging instead of creating new files.<br>
+                " ),
+                'gdpr-compliant-recaptcha-for-all-forms' ),
+                __( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
+                '🛡'
             ),
             Option::POW_SAVE_CLEAN => new Option(
                 __( 'Save clean messages', 'gdpr-compliant-recaptcha-for-all-forms' ),

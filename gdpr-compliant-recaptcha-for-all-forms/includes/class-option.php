@@ -148,6 +148,9 @@ class Option
     /** @var Text */
     const POW_SKIP_FIELDS = self::PREFIX . 'pow_skip_fields';
 
+    /** @var Text */
+    const POW_FAIL_2_BAN_PATH = self::PREFIX . 'pow_fail_2_ban_path';
+
     /** @var string */
     const HASH = self::PREFIX . 'hash';
 

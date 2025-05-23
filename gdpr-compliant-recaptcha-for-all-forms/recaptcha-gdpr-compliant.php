@@ -5,7 +5,7 @@
 	 * Plugin Name: GDPR Compliant ReCaptcha for all forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: This plugin protects all forms and logins against spam and brute-force attacks. Invisible, GDPR compliant and user input is not required.
-	 * Version: 4.0
+	 * Version: 4.1
 	 * Requires at least: 4.8+
 	 * Requires PHP: PHP-Version 5.6+
 	 * Author: Matthias Nordwig
@@ -26,7 +26,7 @@
 	class RCM_Main
 	{
 		/** Current version of the plugin */
-		private $version = '4.0';
+		private $version = '4.1';
 
 		/** Holding the instance of this class */
 		public static $instance;

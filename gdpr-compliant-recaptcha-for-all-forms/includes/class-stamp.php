@@ -16,6 +16,10 @@ class Stamp
     /** String that holds the spam-information */
     private $plugin_spam;
 
+    /** JSON that holds the data of the request */
+    private $request_data;
+    private $whole_request_data;
+
     /** Get an instance of the class
      * 
      */
@@ -34,6 +38,7 @@ class Stamp
      */
     public function __construct()
     {
+        $this->capture_request_data();
         $referrer_without_protocol = null;
         $posted_site = null;
         if( array_key_exists( 'HTTP_REFERER', $_SERVER ) )
@@ -81,10 +86,10 @@ class Stamp
             }
         }
         
-        $logged_out = array_key_exists( 'loggedout', $_REQUEST ) ? $_REQUEST[ 'loggedout' ] : false;
-        $interim_login = array_key_exists( 'interim-login', $_REQUEST ) ? $_REQUEST[ 'interim-login' ] : false;
+        $logged_out = array_key_exists( 'loggedout', $this->whole_request_data  ) ? $this->whole_request_data [ 'loggedout' ] : false;
+        $interim_login = array_key_exists( 'interim-login', $this->whole_request_data  ) ? $this->whole_request_data [ 'interim-login' ] : false;
         $ajax = defined('DOING_AJAX') && DOING_AJAX;
-        $action = isset( $_REQUEST[ 'action' ] ) ? sanitize_text_field( $_REQUEST[ 'action' ] ) : '';
+        $action = isset( $this->whole_request_data [ 'action' ] ) ? sanitize_text_field( $this->whole_request_data [ 'action' ] ) : '';
 
         function checkArrays( $arrayOfArrays, $comparisonArray ) {
             if( $comparisonArray ){
@@ -131,30 +136,30 @@ class Stamp
                     if( $this->checkExplicitActions() ){
                         // Only explicitly listed actions shall be allowed that are listed on the explicit actions list
                         add_action( 'init', [ $this, 'run' ] );
-                        return $this->check_submit( null, $_POST, 'ajax-call', $action, $ajax );
+                        return $this->check_submit( null, $this->request_data, 'ajax-call', $action, $ajax );
                     }
                 }else{
                     add_action( 'init', [ $this, 'run' ] );
                 }
             }else{
                 //Do not apply if login shall not be blocked and it is a login
-                if( ! ( ! get_option( Option::POW_BLOCK_LOGIN ) && isset( $_REQUEST[ 'wp-submit' ] ) ) ){
+                if( ! ( ! get_option( Option::POW_BLOCK_LOGIN ) && isset( $this->whole_request_data [ 'wp-submit' ] ) ) ){
                     //Do not apply if the request is a wordfence_syncAttackData-Request from Wordfence
-                    if ( ! ( isset( $_POST[ 'wordfence_syncAttackData' ] ) && count( $_POST ) === 1 ) ) {
+                    if ( ! ( isset( $this->request_data[ 'wordfence_syncAttackData' ] ) && count( $this->request_data ) === 1 ) ) {
                         add_action( 'init', [ $this, 'run' ] );
                         $patternFound = $this->checkExistingPatterns();
                         $actionFound = $this->checkExplicitActions();
                         //WooCommerce
                         if( 
                             (
-                                isset( $_POST[ 'update_cart' ] ) && isset( $_POST[ 'cart' ] ) && isset( $_POST[ 'woocommerce-cart-nonce' ] ) 
+                                isset( $this->request_data[ 'update_cart' ] ) && isset( $this->request_data[ 'cart' ] ) && isset( $this->request_data[ 'woocommerce-cart-nonce' ] ) 
                             ) || (
-                                isset( $_REQUEST[ 'wc-ajax' ] ) && $_REQUEST[ 'wc-ajax' ] == 'checkout'
+                                isset( $this->whole_request_data [ 'wc-ajax' ] ) && $this->whole_request_data [ 'wc-ajax' ] == 'checkout'
                             ) 
                             || $patternFound
                             || $actionFound
                         ){
-                            return $this->check_submit( null, $_POST, 'specific call' );
+                            return $this->check_submit( null, $this->request_data, 'specific call' );
                         }
                     }
                 }
@@ -162,14 +167,28 @@ class Stamp
         }
     }
 
+    private function capture_request_data() {
+        $this->request_data = $_POST; // Standard POST data
+        $this->whole_request_data = $_REQUEST; // Standard REQUEST data
+
+        // Falls die Anfrage JSON ist, Daten aus php://input auslesen
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+            $json_data = json_decode(file_get_contents('php://input'), true);
+            if (!empty($json_data)) {
+                $this->request_data = array_merge($this->request_data, $json_data);
+                $this->whole_request_data = array_merge($this->whole_request_data, $json_data);
+            }
+        }
+    }
+
     private function checkExplicitActions(){
-        $action = isset( $_REQUEST[ 'action' ] ) ? sanitize_text_field( $_REQUEST[ 'action' ] ) : '';
+        $action = isset( $this->whole_request_data [ 'action' ] ) ? sanitize_text_field( $this->whole_request_data [ 'action' ] ) : '';
         if( $action ){
             $lines = preg_split('/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY);
             if ( count( $lines ) > 0 ){
                 foreach ($lines as $line) {
                     if( $action == trim ( $line ) //explicitly listed ajax-action
-                        || isset( $_REQUEST[ $action ] ) //explicitly listed post-attribute
+                        || isset( $this->whole_request_data [ $action ] ) //explicitly listed post-attribute
                     ){
                         return true;
                     }
@@ -181,7 +200,7 @@ class Stamp
 
     private function saveForAnalysis(){
         $ajax = defined('DOING_AJAX') && DOING_AJAX;
-        $action = isset( $_REQUEST[ 'action' ] ) ? sanitize_text_field( $_REQUEST[ 'action' ] ) : '';
+        $action = isset( $this->whole_request_data [ 'action' ] ) ? sanitize_text_field( $this->whole_request_data [ 'action' ] ) : '';
         $client_ip = $this->get_client_ip();
 
         $excluded_patterns_for_analysis = [
@@ -191,7 +210,7 @@ class Stamp
         $pattern_listed = false;
         foreach( $excluded_patterns_for_analysis as $existing_pattern ){
             if( $existing_pattern ){
-                $pattern_listed = Option::compareJSONObjects( $existing_pattern, $_REQUEST, true );
+                $pattern_listed = Option::compareJSONObjects( $existing_pattern, $this->whole_request_data , true );
                 if( $pattern_listed )
                     break;
             }
@@ -206,7 +225,7 @@ class Stamp
                     || $ajax && ! in_array( $action, $excluded_actions_for_analysis )
             )
         ){
-            $this->save_message( $_REQUEST, $action, $ajax, 4, $this->hash_Values( $client_ip ) );
+            $this->save_message( $this->whole_request_data , $action, $ajax, 4, $this->hash_Values( $client_ip ) );
         }
     }
 
@@ -224,7 +243,7 @@ class Stamp
                 // Decode the line from JSON to an array
                 $line = json_decode( $line ); // Passing true makes it return an associative array
 
-                if ( $this->checkPattern( $line, $_REQUEST ) )
+                if ( $this->checkPattern( $line, $this->whole_request_data  ) )
                     $patternFound = true;
             }
         }
@@ -301,7 +320,7 @@ class Stamp
         }
 
         if( ! is_admin() && ( $patternFound || $actionFound || $origin === 'login' ) ){
-            $fields = $_POST;
+            $fields = $this->request_data;
             // During loading, Wordpress is calling the server with a post request containing the time. We don't want to catch that
             if( $fields ){
                 return $this->check_submit( $wp, $fields );
@@ -845,7 +864,7 @@ class Stamp
                         $args =  explode(":", $line);
                         if ( count( $args ) == 2 ){
                             $field_link = &accessObjectOrArray( $gdpr_fields, html_entity_decode( $args[ 0 ] ) );
-                            $post_link = &accessObjectOrArray( $_POST, html_entity_decode( $args[ 0 ] ) );
+                            $post_link = &accessObjectOrArray( $this->request_data, html_entity_decode( $args[ 0 ] ) );
                             if ( isset( $field_link ) ){
                                 $prefix = htmlspecialchars( $args[1], ENT_QUOTES, 'UTF-8' );
                                 //$prefix = filter_var( $args[ 1 ], FILTER_SANITIZE_STRING );
@@ -869,6 +888,7 @@ class Stamp
                             //$field = filter_var( $args[ 0 ], FILTER_SANITIZE_STRING );
                             //$value = filter_var( $args[ 1 ], FILTER_SANITIZE_STRING );
                             $_POST[ $field ] = $value;
+                            $this->request_data[ $field ] = $value;
                             $gdpr_fields[ $field ] = $value;
                         }
                     }
@@ -895,6 +915,18 @@ class Stamp
                 'fields' => $gdpr_fields
             ];
             return $return_value;
+        }
+
+        // Write log for Fail2Ban
+        if ( $this->plugin_spam ) {
+            // Hook into failed login attempts in WordPress
+            if ( isset( $this->whole_request_data [ 'wp-submit' ] ) || ( isset( $this->whole_request_data ['log'] ) && isset( $this->whole_request_data ['pwd'] ) ) ) {
+                $username = $this->whole_request_data ['log'] ?? 'unknown_user';
+                $this->log_fail2ban_event( "Failed login attempt for user '$username' from IP " . $_SERVER[ 'REMOTE_ADDR' ], true );
+            }
+
+            // Logging a general spam-related event
+            $this->log_fail2ban_event( "Possible spam attempt from IP " . $_SERVER[ 'REMOTE_ADDR' ] );
         }
 
         // If spam shall be blocked and message is spam
@@ -942,7 +974,7 @@ class Stamp
                 header('Content-Type: application/json');
                 echo( json_encode( $response, JSON_PRETTY_PRINT ) );
                 exit;
-            }else if( isset( $_REQUEST[ '_wpcf7' ] ) ){ //contact form 7
+            }else if( isset( $this->whole_request_data [ '_wpcf7' ] ) ){ //contact form 7
                 $response = array(
                     'status' => 'spam',
                     'message' => $error_message
@@ -950,8 +982,8 @@ class Stamp
                 header('Content-Type: application/json');
                 echo( json_encode( $response ) );
                 exit;
-            }else if( isset( $_REQUEST[ 'sib_form_action' ] ) ){ //brevo forms
-                if( $_REQUEST[ 'sib_form_action' ] == 'subscribe_form_submit' ){
+            }else if( isset( $this->whole_request_data [ 'sib_form_action' ] ) ){ //brevo forms
+                if( $this->whole_request_data [ 'sib_form_action' ] == 'subscribe_form_submit' ){
                     $response = array(
                         'status' => 'gcaptchaFail',
                         'msg' => $error_message
@@ -1003,6 +1035,52 @@ class Stamp
         // Let wordpress do further processing
         return $wp;
 
+    }
+
+    /** Transforms an array into a string-representation */
+
+    function log_fail2ban_event($message, $is_login_attempt = false) {
+        // Get the configured log directory path
+        $log_path = get_option( Option::POW_FAIL_2_BAN_PATH );
+
+        // If no path is provided, simply do nothing (no error logging)
+        if (empty($log_path)) {
+            return;
+        }
+
+        // Check if the directory exists; if not, attempt to create it
+        if (!is_dir($log_path) && !mkdir($log_path, 0755, true)) {
+            error_log("Fail2Ban Log Path does not exist and could not be created: " . $log_path);
+            return;
+        }
+
+        // Ensure the directory is writable before proceeding
+        if (!is_writable($log_path)) {
+            error_log("Fail2Ban Log Path is not writable: " . $log_path);
+            return;
+        }
+
+        // Define log file paths
+        $log_files = [
+            'spam' => $log_path . '/spam.log',
+            'auth' => $log_path . '/auth.log'
+        ];
+
+        // Generate timestamp in ISO 8601 format (UTC)
+        $timestamp = date('Y-m-d\TH:i:s\Z');
+        $hostname = $_SERVER['SERVER_NAME'] ?? 'unknown_host'; // Get the server hostname
+        $priority_spam = '<42>'; // Priority for spam logs
+        $priority_auth = '<34>'; // Priority for authentication logs
+
+        // Create the spam log entry (always logged)
+        $spam_log_entry = sprintf("%s%s %s spam: %s\n", $priority_spam, $timestamp, $hostname, $message);
+        file_put_contents($log_files['spam'], $spam_log_entry, FILE_APPEND | LOCK_EX);
+
+        // If the request is a WordPress login attempt, also write to the authentication log
+        if ($is_login_attempt) {
+            $auth_log_entry = sprintf("%s%s %s auth: %s\n", $priority_auth, $timestamp, $hostname, $message);
+            file_put_contents($log_files['auth'], $auth_log_entry, FILE_APPEND | LOCK_EX);
+        }
     }
 
     /** Transforms an array into a string-representation */
@@ -1098,7 +1176,7 @@ class Stamp
     public function save_message( $fields, $action, $ajax, $message_type, $ip ){
         if (
             // Check whether the message stems from a login and shall be saved 
-            ! ( ! get_option( Option::POW_SAVE_LOGIN ) && isset( $fields[ 'hashPWFields' ] ) && isset( $_REQUEST[ 'wp-submit' ] ) ) 
+            ! ( ! get_option( Option::POW_SAVE_LOGIN ) && isset( $fields[ 'hashPWFields' ] ) && isset( $this->whole_request_data [ 'wp-submit' ] ) ) 
             &&  ( //Check for WooCommerce shopping carts and whether they shall be saved
                 get_option( Option::POW_SAVE_CART )
                 || ! ( 
@@ -1364,7 +1442,7 @@ class Stamp
      * 
      */
     public function check_stamp() {
-        $fields = $_POST;
+        $fields = $this->request_data;
         //The validation of the hashStamp and the nonce is what this whole function is about.
         //The stamp is used to determine whether a valid hash and a valid nonce is given.
         //If either or are crap, we know that the input was manipulated.

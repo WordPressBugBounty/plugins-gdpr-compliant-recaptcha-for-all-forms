@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, antispam, recaptcha, captcha, spam-protection
 Requires at least: 4.8+
 Tested up to: 6.8
-Stable tag: 4.0
+Stable tag: 4.1
 Requires PHP: 5.6
 License: GPLv3
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
@@ -82,6 +82,9 @@ When you use the Borlabs Script Blocker to scan for JavaScripts, the scan doesn'
 * When deactivating the plugin you will be asked for the reason. If you face any problems I would be glad if you report to it me as detailed as possible. Usually I will fix them quickly. If you give me contcat details, I may inform you as soon as it is fixed.
 
 == Changelog ==
+= 4.1 =
+* Fail2Ban-Support added
+* Problems with Thrive Comments and json-based submissions fixed
 = 4.0 =
 * The automatic mode has been removed. From now on, all form types require manual configuration of associated patterns and actions to ensure the spam protection functions correctly.
 * During plugin installation, the appropriate actions and patterns for major form builders will be automatically added to the scope—provided the respective form builder is installed.
