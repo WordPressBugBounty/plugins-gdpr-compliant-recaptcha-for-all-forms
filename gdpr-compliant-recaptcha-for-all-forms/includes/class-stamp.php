@@ -171,8 +171,9 @@ class Stamp
         $this->request_data = $_POST; // Standard POST data
         $this->whole_request_data = $_REQUEST; // Standard REQUEST data
 
-        // Falls die Anfrage JSON ist, Daten aus php://input auslesen
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && strpos($_SERVER['CONTENT_TYPE'], 'application/json') !== false) {
+        // If the request is JSON, read data from php://input
+        if ( isset( $_SERVER[ 'REQUEST_METHOD' ] ) && $_SERVER[ 'REQUEST_METHOD' ] === 'POST' 
+             && isset( $_SERVER[ 'CONTENT_TYPE' ] ) && strpos( $_SERVER[ 'CONTENT_TYPE' ], 'application/json' ) !== false ) {
             $json_data = json_decode(file_get_contents('php://input'), true);
             if (!empty($json_data)) {
                 $this->request_data = array_merge($this->request_data, $json_data);

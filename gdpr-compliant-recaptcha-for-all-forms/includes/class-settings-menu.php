@@ -66,6 +66,12 @@ class Settings_Menu
         $installed_plugins = get_plugins();
         $installed_themes  = wp_get_themes();
     
+        // *** Thrive Architect Forms (custom submission method) ***
+        if ( array_key_exists( 'thrive-architect/thrive-architect.php', $installed_plugins ) ) {
+            $actions[] = 'tve_api_form_submit';
+            $this->display_admin_notice( __( 'Thrive Architect detected – added recognition pattern: {"thrive_architect_form_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+        }
+
         // *** Forminator (uses WordPress AJAX) ***
         if ( is_plugin_active( 'forminator/forminator.php' ) || array_key_exists( 'forminator/forminator.php', $installed_plugins ) ) {
             $actions[] = 'forminator_submit_form_custom-forms';
@@ -173,12 +179,6 @@ class Settings_Menu
         if ( array_key_exists( 'thrive-leads/thrive-leads.php', $installed_plugins ) ) {
             $patterns[] = '{"thrive_leads_submit":null}';
             $this->display_admin_notice( __( 'Thrive Leads detected – added recognition pattern: {"thrive_leads_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-        }
-    
-        // *** Thrive Architect Forms (custom submission method) ***
-        if ( array_key_exists( 'thrive-architect/thrive-architect.php', $installed_plugins ) ) {
-            $patterns[] = '{"thrive_architect_form_submit":null}';
-            $this->display_admin_notice( __( 'Thrive Architect detected – added recognition pattern: {"thrive_architect_form_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
         }
     
         // *** Thrive Apprentice (Online course signups) ***
