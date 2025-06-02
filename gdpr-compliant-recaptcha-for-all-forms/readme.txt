@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, antispam, recaptcha, captcha, spam-protection
 Requires at least: 4.8+
 Tested up to: 6.8
-Stable tag: 4.1.1
+Stable tag: 4.1.2
 Requires PHP: 5.6
 License: GPLv3
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
@@ -82,6 +82,8 @@ When you use the Borlabs Script Blocker to scan for JavaScripts, the scan doesn'
 * When deactivating the plugin you will be asked for the reason. If you face any problems I would be glad if you report to it me as detailed as possible. Usually I will fix them quickly. If you give me contcat details, I may inform you as soon as it is fixed.
 
 == Changelog ==
+= 4.1.2 =
+* CSRF vulnerability fixed
 = 4.1.1 =
 * Improved Pattern recognition
 * Solved: Warning for usage of empty keys

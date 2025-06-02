@@ -992,6 +992,10 @@ class Settings_Menu
         // If update and current user is allowed to manage options
         if ( $postAction === self::UPDATE && current_user_can( 'manage_options' ) ) {
             $hash = null;
+            if ( ! isset( $_POST[ 'gdpr_settings_nonce_field' ] ) || 
+                ! wp_verify_nonce( $_POST[ 'gdpr_settings_nonce_field' ], 'gdpr_settings_nonce' ) ) {
+                wp_die( __( 'Security check failed. This request was blocked by an active CSRF protection mechanism. It may have been triggered by another webpage you recently visited or an unrelated browser tab. To resolve this issue, close untrusted sites, check browser extensions, and refresh your WordPress session by logging in again.', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+            }
     
             foreach ( $this->options as $key => $option ) {
                 // Check if the input is an array or a single value
@@ -1085,6 +1089,7 @@ class Settings_Menu
                     <td>
                         <form class="settings-form" method="post" action="<?php esc_attr_e( Option::PAGE_QUERY ); ?>">
                             <?php
+                            wp_nonce_field( 'gdpr_settings_nonce', 'gdpr_settings_nonce_field' ); // CSRF-protection add
                             settings_fields( Option::PREFIX . 'header_section' );
                             do_settings_sections( Option::PREFIX . 'options' );
                             ?>
