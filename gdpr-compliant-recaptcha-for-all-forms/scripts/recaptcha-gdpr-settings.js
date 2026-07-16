@@ -1,173 +1,136 @@
-document.addEventListener('DOMContentLoaded', function () {
+/**
+ * GDPR-Compliant ReCaptcha — settings page behaviour.
+ * Counterpart: Settings_Menu::options_page() (plugin/includes/class-settings-menu.php),
+ * which renders the full markup server-side (status strip, pill tabs, tab panels, option
+ * rows with a help popover). This script only wires up two purely client-side interactions
+ * on top of that markup — no DOM restructuring, no drag/burger-menu leftovers:
+ *
+ *   1. Tab switching: toggle the `hidden` attribute on .gdpr-tab-panel sections and the
+ *      `is-active` class on .gdpr-pill-tab buttons, and keep the hidden
+ *      #gdpr-settings-selection input in sync so the active tab survives a form submit
+ *      (read server-side in options_page()).
+ *   2. Help popovers: toggle the `hidden` attribute + `aria-expanded` on the matching
+ *      .gdpr-help-popover, closing others on open, on outside click, and on Escape.
+ */
+(function () {
+	'use strict';
 
-    // Get the form element
-    const form = document.querySelector('.settings-form');
+	document.addEventListener('DOMContentLoaded', function () {
+		// The pill nav sits OUTSIDE the form (sibling before it), so scope to the
+		// page wrap, not the form.
+		var wrap = document.querySelector('.gdpr-settings-wrap');
+		if (!wrap) {
+			return;
+		}
 
-    // Create Burger-Menu
-    const burgerMenu = document.createElement('div');
-    burgerMenu.classList.add('burger-menu');
+		initTabs(wrap);
+		initHelpPopovers(wrap);
+	});
 
-    // Create Burger-Icon
-    const burgerIcon = document.createElement('div');
-    burgerIcon.classList.add('burger-icon');
-    burgerIcon.id = 'burger-icon';
-    burgerIcon.innerHTML = '<h2>&#9776;</h2>';
+	/**
+	 * Tab switching. The server renders the initially active tab (panel not hidden, pill
+	 * with .is-active) — no click is triggered on load.
+	 */
+	function initTabs(wrap) {
+		var tabs = wrap.querySelectorAll('.gdpr-pill-tab');
+		var selectionInput = document.getElementById('gdpr-settings-selection');
+		if (!tabs.length) {
+			return;
+		}
 
-    // Create wrappers
-    const horizontalWrapper = document.createElement('div');
-    horizontalWrapper.classList.add('horizontal-wrapper');
+		tabs.forEach(function (tab) {
+			tab.addEventListener('click', function () {
+				var target = tab.getAttribute('data-tab-target');
+				if (!target) {
+					return;
+				}
 
-    const verticalWrapper = document.createElement('div');
-    verticalWrapper.classList.add('vertical-wrapper');
+				var panel = document.getElementById(target);
+				if (!panel) {
+					return;
+				}
 
-    // Iterate through the form elements
-    let currentElement = form.firstElementChild;
-    while (currentElement) {
-        // Store the reference to the next element before moving it
-        const nextElement = currentElement.nextElementSibling;
+				wrap.querySelectorAll('.gdpr-tab-panel').forEach(function (section) {
+					section.hidden = true;
+				});
+				panel.hidden = false;
 
-        // Move h2 elements to horizontal wrapper and tables to vertical wrapper
-        if (currentElement.tagName === 'DIV' && currentElement.classList.contains('gdpr-tab-link')) {
-            horizontalWrapper.appendChild(currentElement);
-        } else if (currentElement.tagName === 'TABLE' && currentElement.classList.contains('form-table')) {
-            verticalWrapper.appendChild(currentElement);
-        } else if (currentElement.tagName === 'DIV' && currentElement.id === 'submit-container') {
-            verticalWrapper.appendChild(currentElement);
-        }
+				tabs.forEach(function (otherTab) {
+					otherTab.classList.remove('is-active');
+				});
+				tab.classList.add('is-active');
 
-        // Move to the next element
-        currentElement = nextElement;
-    }
+				if (selectionInput) {
+					selectionInput.value = target;
+				}
+			});
+		});
+	}
 
-    // Append the wrappers to the form
-    burgerMenu.appendChild(burgerIcon);
-    burgerMenu.appendChild(horizontalWrapper);
-    form.appendChild(burgerMenu);
-    //form.appendChild(horizontalWrapper);
-    form.appendChild(verticalWrapper);
+	/**
+	 * Help popovers, anchored to their .gdpr-help-toggle button via aria-controls.
+	 */
+	function initHelpPopovers(wrap) {
+		var toggles = wrap.querySelectorAll('.gdpr-help-toggle');
+		if (!toggles.length) {
+			return;
+		}
 
-    // Get all tab links
-    var tabLinks = document.querySelectorAll('.gdpr-tab-link');
+		function closeAll(except) {
+			toggles.forEach(function (toggle) {
+				if (toggle === except) {
+					return;
+				}
+				var popover = document.getElementById(toggle.getAttribute('aria-controls'));
+				if (popover) {
+					popover.hidden = true;
+				}
+				toggle.setAttribute('aria-expanded', 'false');
+			});
+		}
 
-    // Attach click event listener to each tab
-    tabLinks.forEach(function (tab) {
-        tab.addEventListener('click', function () {
-            // Hide all options
-            hideAllOptions();
-            tabLinks.forEach(function (otherTabLink) {
-                otherTabLink.classList.remove('gdpr-tab-link-last-clicked');
-            });
-            // Get the target tab's data-tab-target attribute
-            var target = this.getAttribute('data-tab-target');
+		toggles.forEach(function (toggle) {
+			var popover = document.getElementById(toggle.getAttribute('aria-controls'));
+			if (!popover) {
+				return;
+			}
 
-            // Show options belonging to the selected section
-            showOptionsInTab(target);
-            this.classList.add('gdpr-tab-link-last-clicked');
+			toggle.addEventListener('click', function (event) {
+				event.stopPropagation();
+				var isOpen = toggle.getAttribute('aria-expanded') === 'true';
 
-            // Assuming you have a unique identifier for your input element
-            var gdprSettingsSelection = document.getElementById('gdpr-settings-selection');
+				closeAll(toggle);
 
-            // Check if the element exists before attempting to modify its value
-            if (gdprSettingsSelection) {
-                // Change the value of the input
-                gdprSettingsSelection.value = this.getAttribute('data-tab-target');
-            }
-            if(window.innerWidth<600){
-                burgerIcon.click();
-            }
-        });
-    });
+				popover.hidden = isOpen;
+				toggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+			});
+		});
 
-    
-    var hilfe_dialoge = document.getElementsByClassName('hilfe_dialog');
+		document.addEventListener('click', function (event) {
+			if (event.target.closest('.gdpr-option-control')) {
+				return;
+			}
+			closeAll();
+		});
 
-    for (var hilfe_dialog of hilfe_dialoge) {
-        dragElement(hilfe_dialog);
-    }
+		document.addEventListener('keydown', function (event) {
+			if (event.key !== 'Escape') {
+				return;
+			}
 
-    function dragElement (elmnt){
-        var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-        if (document.getElementById(elmnt.id + "header")) {
-        /* if present, the header is where you move the DIV from:*/
-        document.getElementById(elmnt.id + "header").onmousedown = dragMouseDown;
-        } else {
-        /* otherwise, move the DIV from anywhere inside the DIV:*/
-        elmnt.onmousedown = dragMouseDown;
-        }
-    
-        function dragMouseDown(e) {
-        e = e || window.event;
-        e.preventDefault();
-        // get the mouse cursor position at startup:
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        document.onmouseup = closeDragElement;
-        // call a function whenever the cursor moves:
-        document.onmousemove = elementDrag;
-        }
-    
-        function elementDrag(e) {
-        e = e || window.event;
-        e.preventDefault();
-        // calculate the new cursor position:
-        pos1 = pos3 - e.clientX;
-        pos2 = pos4 - e.clientY;
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        // set the element's new position:
-        elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
-        elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
-        }
-    
-        function closeDragElement() {
-        /* stop moving when mouse button is released:*/
-        document.onmouseup = null;
-        document.onmousemove = null;
-        }      
-    }
+			var openToggle = null;
+			toggles.forEach(function (toggle) {
+				if (toggle.getAttribute('aria-expanded') === 'true') {
+					openToggle = toggle;
+				}
+			});
 
-    // Function to hide all options
-    function hideAllOptions() {
-        var allOptions = document.querySelectorAll('.recaptchaOption');
-        allOptions.forEach(function (option) {
-            var closestTable = option.closest('table');
-            if (closestTable) {
-                closestTable.style.display = 'none';
-            }
-        });
-    }
+			if (!openToggle) {
+				return;
+			}
 
-    // Function to show options in a specific tab
-    function showOptionsInTab(tabId) {
-        var optionsInTab = document.querySelectorAll('.' + tabId);
-        optionsInTab.forEach(function (option) {
-            var closestTable = option.closest('table');
-            if (closestTable){
-                closestTable.style.display = '';
-            }
-        });
-    }
-
-    tabLinks[0].click();
-
-    // Toggle the display of the vertical wrapper on burger icon click
-    burgerIcon.addEventListener('click', function() {
-        var elements = document.querySelectorAll('.gdpr-tab-link');
-        elements.forEach(function (currentElement) {
-            currentElement.style.display = (currentElement.style.display === 'flex') ? 'none' : 'flex';
-        });
-    });
-
-    window.addEventListener('resize', function() {
-        // Your code to handle window resize goes here
-    
-        // You can access the current window width and height like this:
-        const currentWidth = window.innerWidth;
-        var elements = document.querySelectorAll('.gdpr-tab-link');
-        elements.forEach(function (currentElement) {
-            currentElement.style.display = (currentWidth < 600) ? 'none' : 'flex';
-        });
-    
-    });
-    
-});
+			closeAll();
+			openToggle.focus();
+		});
+	}
+})();

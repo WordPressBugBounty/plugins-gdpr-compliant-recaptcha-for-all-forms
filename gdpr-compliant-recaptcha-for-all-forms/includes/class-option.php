@@ -1,420 +1,454 @@
-<?php 
+<?php
 
 namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
-defined( 'ABSPATH' ) or die( 'Are you ok?' );
+defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
 /**
  * Class Option: Each instance of that class is intended to hold an option for the plugin
- * 
+ *
  */
-class Option
-{
-    /** @var string */
-    const PREFIX = 'gdpr_pow_';
+class Option {
 
-    /** @var int */
-    const INT = 1;
+	/** @var string */
+	const PREFIX = 'gdpr_pow_';
 
-    /** @var int */
-    const STRING = 2;
+	/** @var int */
+	const INT = 1;
 
-    /** @var int */
-    const BOOL = 3;
+	/** @var int */
+	const STRING = 2;
 
-    /** @var int */
-    const TEXT = 4;
+	/** @var int */
+	const BOOL = 3;
 
-    /** @var RoleDropDown */
-    const RoleDropDown = 5;
+	/** @var int */
+	const TEXT = 4;
 
-    /** @var string */
-    const PAGE_QUERY = '?page=' . self::PREFIX . 'options';
+	/** @var int */
+	const ROLE_DROPDOWN = 5;
 
-    /** @var string */
-    const PAGE_QUERY_MESSAGES = '?page=' . self::PREFIX . 'messages';
+	/** @var string */
+	const PAGE_QUERY = '?page=' . self::PREFIX . 'options';
 
-    /** @var string */
-    const PAGE_QUERY_SPAM = '?page=' . self::PREFIX . 'spam';
+	/** @var string */
+	const PAGE_QUERY_MESSAGES = '?page=' . self::PREFIX . 'messages';
 
-    /** @var string */
-    const PAGE_QUERY_TRASH = '?page=' . self::PREFIX . 'trash';
-    
-    /** @var string */
-    const PAGE_QUERY_ANALYSIS = '?page=' . self::PREFIX . 'analyse';
+	/** @var string */
+	const PAGE_QUERY_SPAM = '?page=' . self::PREFIX . 'spam';
 
-    /** @var boolean */
-    const POW_OPTIONS = self::PREFIX . 'pow_options';
+	/** @var string */
+	const PAGE_QUERY_TRASH = '?page=' . self::PREFIX . 'trash';
 
-    /** @var boolean */
-    const POW_INSTALLED = self::PREFIX . 'pow_installed';
+	/** @var string */
+	const PAGE_QUERY_ANALYSIS = '?page=' . self::PREFIX . 'analyse';
 
-    /** @var String */
-    const POW_VERSION = self::PREFIX . 'pow_version';
+	/** @var boolean */
+	const POW_OPTIONS = self::PREFIX . 'pow_options';
 
-    /** @var string */
-    const POW_SALT = self::PREFIX . 'pow_salt';
+	/** @var boolean */
+	const POW_INSTALLED = self::PREFIX . 'pow_installed';
 
-    /** @var string */
-    const POW_DIFFICULTY = self::PREFIX . 'pow_difficulty';
+	/** @var String */
+	const POW_VERSION = self::PREFIX . 'pow_version';
 
-    /** @var string */
-    const POW_TIME_WINDOW = self::PREFIX . 'pow_time_window';
+	/** @var string */
+	const POW_SALT = self::PREFIX . 'pow_salt';
 
-    /** @var bool */
-    const POW_BLOCK_LOGIN = self::PREFIX . 'pow_block_login';
+	/** @var string */
+	const POW_DIFFICULTY = self::PREFIX . 'pow_difficulty';
 
-    /** @var bool */
-    const POW_BLOCK = self::PREFIX . 'pow_block';
+	/** @var string */
+	const POW_TIME_WINDOW = self::PREFIX . 'pow_time_window';
 
-    /** @var bool */
-    const POW_SAVE_SPAM = self::PREFIX . 'pow_save_spam';
+	/** @var string */
+	const POW_MAX_USES = self::PREFIX . 'pow_max_uses';
 
-    /** @var bool */
-    const POW_SAVE_CLEAN = self::PREFIX . 'pow_save_clean';
+	/** @var string */
+	const POW_UNDER_ATTACK_MODE = self::PREFIX . 'pow_under_attack_mode';
 
-    /** @var bool */
-    const POW_FLAG_SPAM = self::PREFIX . 'pow_flag_spam';
+	/** @var bool */
+	const POW_BLOCK_LOGIN = self::PREFIX . 'pow_block_login';
 
-    /** @var bool */
-    const POW_FLAG_SAVE = self::PREFIX . 'pow_flag_save';
+	/** @var bool */
+	const POW_BLOCK = self::PREFIX . 'pow_block';
 
-    /** @var string */
-    const POW_FLAG_SUFFIXES = self::PREFIX . 'pow_flag_suffixes';
+	/** @var bool */
+	const POW_SAVE_SPAM = self::PREFIX . 'pow_save_spam';
 
-    /** @var string */
-    const POW_FLAG_TAGS = self::PREFIX . 'pow_flag_tags';
+	/** @var bool */
+	const POW_SAVE_CLEAN = self::PREFIX . 'pow_save_clean';
 
-    /** @var bool */
-    const POW_SIMULATE_SPAM = self::PREFIX . 'pow_simulate_spam';
+	/** @var bool */
+	const POW_FLAG_SPAM = self::PREFIX . 'pow_flag_spam';
 
-    /** @var string */
-    const POW_MESSAGE_HEADS = self::PREFIX . 'pow_message_heads';
+	/** @var bool */
+	const POW_FLAG_SAVE = self::PREFIX . 'pow_flag_save';
 
-    /** @var int */
-    const POW_MENU_POSITION = self::PREFIX . 'pow_menu_position';
+	/** @var string */
+	const POW_FLAG_SUFFIXES = self::PREFIX . 'pow_flag_suffixes';
 
-    /** @var bool */
-    const POW_DASHBOARD = self::PREFIX . 'pow_dashboard';
+	/** @var string */
+	const POW_FLAG_TAGS = self::PREFIX . 'pow_flag_tags';
 
-    /** @var string */
-    const POW_IP_WHITELIST = self::PREFIX . 'pow_ip_whitelist';
+	/** @var bool */
+	const POW_SIMULATE_SPAM = self::PREFIX . 'pow_simulate_spam';
 
-    /** @var string */
-    const POW_SITE_WHITELIST = self::PREFIX . 'pow_site_whitelist';
+	/** @var string */
+	const POW_MESSAGE_HEADS = self::PREFIX . 'pow_message_heads';
 
-    /** @var bool */
-    const POW_APPLY_REST = self::PREFIX . 'pow_apply_rest';
+	/** @var int */
+	const POW_MENU_POSITION = self::PREFIX . 'pow_menu_position';
 
-    /** @var bool */
-    const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
+	/** @var bool */
+	const POW_DASHBOARD = self::PREFIX . 'pow_dashboard';
 
-    /** @var string */
-    const POW_EXPLICIT_ACTION = self::PREFIX . 'pow_explicit_action';
+	/** @var string */
+	const POW_IP_WHITELIST = self::PREFIX . 'pow_ip_whitelist';
 
-    /** @var int */
-    const POW_CRON_DELETE_INBOX = self::PREFIX . 'pow_cron_delete_inbox';
+	/** @var string */
+	const POW_SITE_WHITELIST = self::PREFIX . 'pow_site_whitelist';
 
-    /** @var int */
-    const POW_CRON_DELETE_SPAM = self::PREFIX . 'pow_cron_delete_spam';
+	/** @var string */
+	const POW_TRUSTED_PROXIES = self::PREFIX . 'pow_trusted_proxies';
 
-    /** @var int */
-    const POW_CRON_DELETE_TRASH = self::PREFIX . 'pow_cron_delete_trash';
+	/** @var bool */
+	const POW_APPLY_REST = self::PREFIX . 'pow_apply_rest';
 
-    /** @var Text */
-    const POW_ERROR_MESSAGE = self::PREFIX . 'pow_error_message';
-    
-    /** @var Bool */
-    const POW_ANALYSIS_MODE = self::PREFIX . 'pow_analysis_mode';
+	/** @var bool */
+	const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
 
-    /** @var Bool */
-    const POW_DIRECT_ANALYSIS_MODE = self::PREFIX . 'pow_direct_analysis_mode';
+	/** @var string */
+	const POW_EXPLICIT_ACTION = self::PREFIX . 'pow_explicit_action';
 
-    /** @var Text */
-    const POW_PARAMETER_PATTERN = self::PREFIX . 'pow_parameter_pattern';
+	/** @var int */
+	const POW_CRON_DELETE_INBOX = self::PREFIX . 'pow_cron_delete_inbox';
 
-    /** @var Text */
-    const POW_HIDE_ACTION = self::PREFIX . 'pow_hide_action';
+	/** @var int */
+	const POW_CRON_DELETE_SPAM = self::PREFIX . 'pow_cron_delete_spam';
 
-    /** @var Text */
-    const POW_HIDE_PATTERN = self::PREFIX . 'pow_hide_pattern';
+	/** @var int */
+	const POW_CRON_DELETE_TRASH = self::PREFIX . 'pow_cron_delete_trash';
 
-    /** @var Bool */
-    const POW_SAVE_IP = self::PREFIX . 'pow_save_ip';
+	/** @var Text */
+	const POW_ERROR_MESSAGE = self::PREFIX . 'pow_error_message';
 
-    /** @var Bool */
-    const POW_SAVE_LOGIN =  self::PREFIX . 'pow_save_login';
+	/** @var Bool */
+	const POW_ANALYSIS_MODE = self::PREFIX . 'pow_analysis_mode';
 
-    /** @var Text */
-    const POW_SKIP_FIELDS = self::PREFIX . 'pow_skip_fields';
+	/** @var Bool */
+	const POW_DIRECT_ANALYSIS_MODE = self::PREFIX . 'pow_direct_analysis_mode';
 
-    /** @var Text */
-    const POW_FAIL_2_BAN_PATH = self::PREFIX . 'pow_fail_2_ban_path';
+	/** @var Text */
+	const POW_PARAMETER_PATTERN = self::PREFIX . 'pow_parameter_pattern';
 
-    /** @var string */
-    const HASH = self::PREFIX . 'hash';
+	/** @var Text */
+	const POW_HIDE_ACTION = self::PREFIX . 'pow_hide_action';
 
-    /** @var string */
-    private $name;
+	/** @var Text */
+	const POW_HIDE_PATTERN = self::PREFIX . 'pow_hide_pattern';
 
-    /** @var int */
-    private $type;
+	/** @var Bool */
+	const POW_SAVE_IP = self::PREFIX . 'pow_save_ip';
 
-    /** @var int */
-    private $default;
+	/** @var Bool */
+	const POW_SAVE_LOGIN = self::PREFIX . 'pow_save_login';
 
-    /** @var int */
-    private $hint;
+	/** @var Text */
+	const POW_SKIP_FIELDS = self::PREFIX . 'pow_skip_fields';
 
-    /** @var string|int */
-    private $value = '';
+	/** @var Text */
+	const POW_FAIL_2_BAN_PATH = self::PREFIX . 'pow_fail_2_ban_path';
 
-    /** @var string|int */
-    private $symbol = '';
+	/** @var string */
+	const HASH = self::PREFIX . 'hash';
 
-    /** @var string|int */
-    private $group = '';
+	/** @var string */
+	private $name;
 
-    /**
-     * @param string $name
-     * @param int $type
-     */
-    public function __construct( $name, $type, $default, $hint, $group, $symbol = '' )
-    {
-        $this->name = $name;
-        $this->type = $type;
-        $this->default = $default;
-        $this->value = $default;
-        $this->hint = $hint;
-        $this->group = $group;
-        $this->symbol = $symbol;
-    }
+	/** @var int */
+	private $type;
 
-    /**
-     * @return string
-     */
-    public function getName()
-    {
-        return $this->name;
-    }
+	/** @var int */
+	private $default;
 
-    /**
-     * @return int
-     */
-    public function getType()
-    {
-        return $this->type;
-    }
+	/** @var int */
+	private $hint;
 
-    /**
-     * @return string
-     */
-    public function getDefault()
-    {
-        return $this->default;
-    }
+	/** @var string|int */
+	private $value = '';
 
-    /**
-     * @return string
-     */
-    public function getHint()
-    {
-        return $this->hint;
-    }
+	/** @var string|int */
+	private $symbol = '';
 
-    /**
-     * @return int|string
-     */
-    public function getValue()
-    {
-        return $this->value;
-    }
+	/** @var string|int */
+	private $group = '';
 
-    /**
-     * @return int|string
-     */
-    public function getSymbol()
-    {
-        return $this->symbol;
-    }
+	/** @var string One-sentence short description, always visible (see Settings_Menu). */
+	private $short = '';
 
-    /**
-     * @return int|string
-     */
-    public function getGroup()
-    {
-        return $this->group;
-    }
+	/**
+	 * @param string $name
+	 * @param int $type
+	 * @param string $short One-sentence short description, always visible under the label.
+	 */
+	public function __construct( $name, $type, $default_value, $hint, $group, $symbol = '', $short = '' ) {
+		$this->name    = $name;
+		$this->type    = $type;
+		$this->default = $default_value;
+		$this->value   = $default_value;
+		$this->hint    = $hint;
+		$this->group   = $group;
+		$this->symbol  = $symbol;
+		$this->short   = $short;
+	}
 
-    /**
-     * @param $value
-     * @return void
-     */
-    public function setValue($value)
-    {
-        $this->value = $value;
-    }
+	/**
+	 * @return string
+	 */
+	public function get_name() {
+		return $this->name;
+	}
 
-    /**Get all messages */
-    public static function get_rows( $search, $messageType, $today = false, $hidden_actions = [ '-' ], $existing_actions = [ '-' ], $existing_patterns = [], $hidden_patterns = [] ){
-        global $wpdb;
-        $hidden_actions_placeholders = implode( ', ', array_fill( 0, count( $hidden_actions ), '%s' ) );
-        $existing_actions_placeholders = implode( ', ', array_fill( 0, count( $existing_actions ), '%s' ) );
-        $parameters = array_merge(
-            [ $messageType ], 
-            $hidden_actions,
-            $existing_actions,
-            [ $search, $search ]
-        );
-        
-        $sqlArray = [];
-        //For each pattern build a sub-seelect to check whether the conditions match
-        foreach ( $existing_patterns as $pattern ) {
-            $pattern = Option::generate_paths( json_decode( $pattern, true ), '' );
-            $conditions = array();
-            foreach ( $pattern as $paramPath => $value ) {
-                if ( $value === null ) {
-                    $conditions[] = "(rgd.rgd_attribute LIKE '{$paramPath}')";
-                } else {
-                    $conditions[] = "(rgd.rgd_attribute LIKE '{$paramPath}' AND rgd.rgd_value = '{$value}')";
-                }
-            }
+	/**
+	 * @return int
+	 */
+	public function get_type() {
+		return $this->type;
+	}
 
-            $sqlArray[] = " AND rgd.rgm_id NOT IN (
+	/**
+	 * @return string|int
+	 */
+	public function get_default() {
+		return $this->default;
+	}
+
+	/**
+	 * @return string|int
+	 */
+	public function get_hint() {
+		return $this->hint;
+	}
+
+	/**
+	 * @return int|string
+	 */
+	public function get_value() {
+		return $this->value;
+	}
+
+	/**
+	 * @return int|string
+	 */
+	public function get_symbol() {
+		return $this->symbol;
+	}
+
+	/**
+	 * @return int|string
+	 */
+	public function get_group() {
+		return $this->group;
+	}
+
+	/**
+	 * @return string
+	 */
+	public function get_short() {
+		return $this->short;
+	}
+
+	/**
+	 * @param $value
+	 * @return void
+	 */
+	public function set_value( $value ) {
+		$this->value = $value;
+	}
+
+	/**Get all messages */
+	public static function get_rows( $search, $message_type, $today = false, $hidden_actions = array( '-' ), $existing_actions = array( '-' ), $existing_patterns = array(), $hidden_patterns = array() ) {
+		global $wpdb;
+		$hidden_actions_placeholders   = implode( ', ', array_fill( 0, count( $hidden_actions ), '%s' ) );
+		$existing_actions_placeholders = implode( ', ', array_fill( 0, count( $existing_actions ), '%s' ) );
+		$search_like                   = '%' . $search . '%';
+		$parameters                    = array_merge(
+			array( $message_type ),
+			$hidden_actions,
+			$existing_actions,
+			array( $search_like, $search_like )
+		);
+
+		$sql_array = array();
+		//For each pattern build a sub-seelect to check whether the conditions match
+		foreach ( $existing_patterns as $pattern ) {
+			$pattern    = self::generate_paths( json_decode( $pattern, true ), '' );
+			$conditions = array();
+			foreach ( $pattern as $param_path => $value ) {
+				if ( null === $value ) {
+					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+				} else {
+					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+				}
+			}
+
+			$sql_array[] = ' AND rgd.rgm_id NOT IN (
                     SELECT rgd.rgm_id
-                    FROM " . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
-                    WHERE " . implode(' OR ', $conditions) . "
+                    FROM ' . $wpdb->prefix . 'recaptcha_gdpr_details_rgd rgd
+                    WHERE ' . implode( ' OR ', $conditions ) . '
                     GROUP BY rgd.rgm_id
-                    HAVING COUNT(DISTINCT rgd.rgd_attribute) = " . count( $pattern ) . "
-                )"
-            ;
-        }
-        $hiddenSqlArray = [];
-        //For each pattern build a sub-seelect to check whether the conditions match
-        foreach ( $hidden_patterns as $pattern ) {
-            $pattern = Option::generate_paths( json_decode( $pattern, true ), '' );
-            $conditions = array();
-            foreach ( $pattern as $paramPath => $value ) {
-                if ( $value === null ) {
-                    $conditions[] = "(rgd.rgd_attribute LIKE '{$paramPath}')";
-                } else {
-                    $conditions[] = "(rgd.rgd_attribute LIKE '{$paramPath}' AND rgd.rgd_value = '{$value}')";
-                }
-            }
+                    HAVING COUNT(DISTINCT rgd.rgd_attribute) = ' . count( $pattern ) . '
+                )';
+		}
+		$hidden_sql_array = array();
+		//For each pattern build a sub-seelect to check whether the conditions match
+		foreach ( $hidden_patterns as $pattern ) {
+			$pattern    = self::generate_paths( json_decode( $pattern, true ), '' );
+			$conditions = array();
+			foreach ( $pattern as $param_path => $value ) {
+				if ( null === $value ) {
+					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+				} else {
+					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+				}
+			}
 
-            $hiddenSqlArray[] = " AND rgd.rgm_id NOT IN (
+			$hidden_sql_array[] = ' AND rgd.rgm_id NOT IN (
                     SELECT rgd.rgm_id
-                    FROM " . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
-                    WHERE " . implode(' OR ', $conditions) . "
+                    FROM ' . $wpdb->prefix . 'recaptcha_gdpr_details_rgd rgd
+                    WHERE ' . implode( ' OR ', $conditions ) . '
                     GROUP BY rgd.rgm_id
-                    HAVING COUNT(DISTINCT rgd.rgd_attribute) = " . count( $pattern ) . "
-                )"
-            ;
-        }
-        
-        $filter_today = '';
-        if ($today) $filter_today = ' AND DATE(rgm.rgm_date) = CURDATE() ';
-        $rows = $wpdb->get_results(
-            $wpdb->prepare("
+                    HAVING COUNT(DISTINCT rgd.rgd_attribute) = ' . count( $pattern ) . '
+                )';
+		}
+
+		$filter_today = '';
+		if ( $today ) {
+			$filter_today = ' AND DATE(rgm.rgm_date) = CURDATE() ';
+		}
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber, WordPress.DB.PreparedSQL.NotPrepared -- $hidden_actions_placeholders/$existing_actions_placeholders only ever contain comma-separated "%s" tokens (their count matches the actual values later merged into $parameters); $sql_array/$hidden_sql_array are pre-built LIKE fragments from admin-defined JSON patterns (Option::generate_paths), not raw request input; $filter_today is one of two hardcoded literals. The sniff cannot statically verify the dynamic %s count, hence the false-positive replacement-count warning too.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				'
                     SELECT COUNT(*) as count
                     FROM(
                         SELECT DISTINCT rgm.rgm_id
-                        FROM " . $wpdb->prefix . "recaptcha_gdpr_message_rgm rgm
-                        JOIN " . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
+                        FROM ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm rgm
+                        JOIN ' . $wpdb->prefix . "recaptcha_gdpr_details_rgd rgd
                         ON rgm.rgm_id = rgd.rgm_id
                         WHERE rgm.rgm_type = %s
                         AND COALESCE(rgm.rgm_action, '') NOT IN ($hidden_actions_placeholders)
                         AND COALESCE(rgm.rgm_action, '') NOT IN ($existing_actions_placeholders)
-                        AND ( rgd.rgd_attribute LIKE CONCAT('%',%s,'%')
-                            OR rgd.rgd_value LIKE CONCAT('%',%s,'%')
+                        AND ( rgd.rgd_attribute LIKE %s
+                            OR rgd.rgd_value LIKE %s
                             )
-                        " . implode( '', $sqlArray ) .  implode( '', $hiddenSqlArray ) . "
+                        " . implode( '', $sql_array ) . implode( '', $hidden_sql_array ) . "
                         $filter_today
                     ) counter
-                ", $parameters
-            )
-        );
-        $count = 0;
-        foreach ( $rows as $row ) {
-            $count = $row->count;
-        }
-        
-        return $count;
-    }
+                ",
+				$parameters
+			)
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber, WordPress.DB.PreparedSQL.NotPrepared
+		$count = 0;
+		foreach ( $rows as $row ) {
+			$count = $row->count;
+		}
 
-    /**Compare whether a JSON obj1 is completely inherited in a JSON object 2 */
-    public static function compareJSONObjects( $obj1, $obj2, $ignoreNull = false ) {
-        if( $obj1 && count( $obj1 ) ){
-            foreach ( $obj1 as $key => $value ) {
-                if ( isset( $obj2[ $key ] ) ) {
-                    if ( $value && ( is_array( $value ) ) && is_array( $obj2[ $key ] ) ) {
-                        if ( ! self::compareJSONObjects( $value, $obj2[ $key ], $ignoreNull ) ) {
-                            return false;
-                        }
-                    } else {
-                        if ( ! ( $ignoreNull && ( $value === null ) ) ) {
-                            if ( $value !== $obj2[ $key ] ) {
-                                return false;
-                            }
-                        }
-                    }
-                } else {
-                    return false;
-                }
-            }
-            return true;
-        }else{
-            return false;
-        }
-    }
+		return $count;
+	}
 
-    /**Converts an array of nested Attribute names into a JSON-object */
-    public static function convertToJsonObject( $mysqlResult, $attributeName, $valueName ) {
-        $jsonObject = [];
-        foreach ( $mysqlResult as $row ) {
-            $keys = explode( '->', $row->{ $attributeName } );
-            $currentObject = &$jsonObject;
-    
-            foreach ( $keys as $key ) {
-                // If the key does not exist, create an empty array or object
-                if ( !isset( $currentObject[ $key ] ) ) {
-                    $currentObject[ $key ] = [];
-                }
-    
-                // Move to the next level of the JSON object
-                $currentObject = &$currentObject[ $key ];
-            }
-    
-            // Assign the value to the lowest level of the nested attribute
-            $currentObject = $row->{ $valueName };
-        }
-    
-        return $jsonObject;
-    }
+	/**Compare whether a JSON obj1 is completely inherited in a JSON object 2 */
+	public static function compare_json_objects( $obj1, $obj2, $ignore_null = false ) {
+		if ( $obj1 && count( $obj1 ) ) {
+			foreach ( $obj1 as $key => $value ) {
+				if ( isset( $obj2[ $key ] ) ) {
+					if ( $value && ( is_array( $value ) ) && is_array( $obj2[ $key ] ) ) {
+						if ( ! self::compare_json_objects( $value, $obj2[ $key ], $ignore_null ) ) {
+							return false;
+						}
+					} elseif ( ! ( $ignore_null && ( null === $value ) ) ) {
+						if ( $value !== $obj2[ $key ] ) {
+							return false;
+						}
+					}
+				} else {
+					return false;
+				}
+			}
+			return true;
+		} else {
+			return false;
+		}
+	}
 
-    /** Transforms a nested object into a string-representation */
-    public static function generate_paths( $data, $current_path ) {
-        $values = [];
-    
-        foreach ($data as $key => $value) {
-            $path = $current_path . ( $current_path ? "->" : "" ) . $key;
-    
-            if ( is_array( $value ) || is_object( $value ) ) {
-                // Recurse into nested arrays/objects
-                $nested_values = self::generate_paths( $value, $path );
-                // Merge the nested values with the current values array
-                $values = array_merge( $values, $nested_values );
-            } else {
-                // Add the path and the corresponding value to the values array as an associative pair
-                $values[ $path ] = $value;
-            }
-        }
-    
-        return $values;
-    }
+	/**Converts an array of nested Attribute names into a JSON-object */
+	public static function convert_to_json_object( $mysql_result, $attribute_name, $value_name ) {
+		$json_object = array();
+		foreach ( $mysql_result as $row ) {
+			$keys           = explode( '->', $row->{ $attribute_name } );
+			$current_object = &$json_object;
 
-    public static function hash_Values( $x ) {
-        return hash( 'sha256', $x, false );
-    }
+			foreach ( $keys as $key ) {
+				// If the key does not exist, create an empty array or object
+				if ( ! isset( $current_object[ $key ] ) ) {
+					$current_object[ $key ] = array();
+				}
 
+				// Move to the next level of the JSON object
+				$current_object = &$current_object[ $key ];
+			}
+
+			// Assign the value to the lowest level of the nested attribute
+			$current_object = $row->{ $value_name };
+		}
+
+		return $json_object;
+	}
+
+	/** Transforms a nested object into a string-representation */
+	public static function generate_paths( $data, $current_path ) {
+		$values = array();
+
+		foreach ( $data as $key => $value ) {
+			$path = $current_path . ( $current_path ? '->' : '' ) . $key;
+
+			if ( is_array( $value ) || is_object( $value ) ) {
+				// Recurse into nested arrays/objects
+				$nested_values = self::generate_paths( $value, $path );
+				// Merge the nested values with the current values array
+				$values = array_merge( $values, $nested_values );
+			} else {
+				// Add the path and the corresponding value to the values array as an associative pair
+				$values[ $path ] = $value;
+			}
+		}
+
+		return $values;
+	}
+
+	public static function hash_values( $x ) {
+		return hash( 'sha256', $x, false );
+	}
+
+	/**
+	 * Count messages of a given rgm_type saved within the last $days days.
+	 * Used by the settings status strip (e.g. spam blocked this week).
+	 *
+	 * @param int $type Message type (rgm_type column, e.g. 2 for spam).
+	 * @param int $days Lookback window in days.
+	 * @return int
+	 */
+	public static function count_messages_since_days( $type, $days ) {
+		global $wpdb;
+		$count = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm WHERE rgm_type = %s AND rgm_date >= NOW() - INTERVAL %d DAY',
+				$type,
+				$days
+			)
+		);
+		return (int) $count;
+	}
 }

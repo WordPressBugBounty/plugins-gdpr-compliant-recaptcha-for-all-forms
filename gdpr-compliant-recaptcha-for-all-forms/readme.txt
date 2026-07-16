@@ -1,87 +1,167 @@
-=== Anti-spam, Spam protection, ReCaptcha for all forms and GDPR-compliant ===
+=== Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms ===
 Contributors: MatthiasNordwig
-Tags: anti-spam, antispam, recaptcha, captcha, spam-protection
-Requires at least: 4.8+
-Tested up to: 6.8
-Stable tag: 4.1.2
-Requires PHP: 5.6
-License: GPLv3
-License URI: http://www.gnu.org/licenses/gpl-3.0.html
+Tags: anti-spam, spam, captcha, recaptcha, spam-protection
+Requires at least: 4.8
+Tested up to: 7.0
+Stable tag: 5.0
+Requires PHP: 7.1
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Donate link: https://paypal.me/MatthiasNordwig
 
-Anti-spam - CAPTCHA that protects all forms against spam and brute-force. Invisible and GDPR-compliant.
-
+Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no lost visitors — a CAPTCHA your users never see.
 
 == Description ==
 
-Protect all your forms and logins against spam and brute-force attacks. The plugin is invisible and compliant to GDPR (RGPD, DSGVO). 
-It has a lot of options on the one hand and comes with a well balanced default configuration. Thus it starts working very well, as soon as it is activated.
+**Spam protection your visitors never see.** No image grids, no "I'm not a robot" checkbox, no puzzles, nothing to click. Your visitors just hit *Send* — while their browser silently solves a tiny cryptographic challenge (proof-of-work) in a few milliseconds. Real humans never notice. Mass-spam bots either fail the challenge or have to burn so much computing power per message that spamming your site stops being worth it.
 
-== Setup Guide ==
+**Every form, out of the box.** WordPress logins, registrations and comments, WooCommerce checkout and reviews, and virtually every form plugin — Contact Form 7, Elementor Pro Forms, WPForms, Gravity Forms, Ninja Forms, Fluent Forms, Formidable and dozens more (full list below). One plugin protects all of them, and the most popular builders are detected and configured automatically on activation.
+
+= Truly universal — not a list of integrations =
+
+Most anti-spam tools protect only the form plugins they ship an integration for. If your builder is not on their list — or you use a hand-coded form, a theme's built-in form, or three different builders on one site — you are on your own.
+
+This plugin works differently: it recognizes submissions by their **signature** — the characteristic fields and actions of the request itself — instead of hooking into specific form plugins. That is why it covers *any* form:
+
+* **Popular builders** are recognized automatically: their signatures ship with the plugin and are pre-configured on activation.
+* **Everything else** — custom-coded forms, exotic builders, legacy themes — you teach the spam check yourself in under a minute: turn on direct analysis mode, submit the form once, click *save*. Done. No code, no waiting for the developer to add your builder.
+
+And because no integration code is involved, nothing breaks when your form builder updates.
+
+In practice that solves two everyday problems:
+
+* **Real sites mix.** A typical site has comments, a contact form from one builder, a newsletter signup from another, WooCommerce reviews — protecting each with its own anti-spam solution means more plugins, more settings pages, more things that can conflict. Here, one plugin covers the whole site.
+* **Designers and agencies standardize.** If you build sites for clients, you can install the same proven plugin on every project — no matter which form stack the client uses (or switches to later). One tool to know, one place to look when something needs attention.
+
+= Why "invisible" wins =
+
+Every CAPTCHA interaction costs you real visitors: an extra click here, an unreadable image there, "select all traffic lights" on a phone screen — and the contact request or sale is gone. This plugin flips the deal: instead of making *humans* prove themselves, it makes the *device* pay. The visitor's browser proves it is a real, JavaScript-running client by doing a moment of invisible computation. Zero friction for people, real costs for bots.
+
+= Self-contained and featherweight =
+
+Everything runs on your own web server — there is no external service in the loop. That is not just a privacy nicety, it is an operational one:
+
+* **Nothing external can fail.** No third-party API whose outage, rate limit or latency silently breaks your forms. Your spam protection is exactly as available as your site.
+* **Nothing external slows you down.** No remote scripts, no extra DNS lookups or connections — your PageSpeed and Core Web Vitals stay untouched.
+* **Tiny footprint.** A few kilobytes of JavaScript and lean server code; runs fine on shared hosting, staging environments and even intranets without internet access.
+
+= Why not just use ... =
+
+* **Google reCAPTCHA, hCaptcha or Turnstile?** They require an account and API keys, load scripts from external servers (hello, consent banners) and still challenge real users when in doubt. This plugin needs no keys, makes no external requests and never challenges anyone.
+* **Akismet?** Sends the content of every submission to an external service for analysis, and commercial sites need a subscription. Here, everything stays on your own server.
+* **Honeypot fields and time checks?** Modern bots skip honeypots routinely, and browser autofill loves to fill them by accident. Proof-of-work attacks the economics of spam instead of playing hide-and-seek.
+
+And they all share one structural limit: they protect the forms they ship an integration for. This plugin protects the forms *you actually have* (see "Truly universal" above).
+
+= Key features =
+
+* **Invisible** — zero user interaction, ever
+* **Protects everything**: logins, registrations, comments, WooCommerce, every form builder — even hand-coded custom forms
+* **No account, no API keys, no external services** — install and you are done
+* **Brute-force protection** for logins, with optional Fail2Ban log support
+* **Adaptive under-attack mode**: the challenge automatically gets harder for everyone while a spam wave is running, and relaxes afterwards
+* **Your choice per site**: block spam, deliver it flagged, or just collect it in a spam inbox and watch
+* **Teach it live**: unrecognized custom form? Direct analysis mode adds it with one click, straight from the live page
+* **Lightweight**: a few KB of JavaScript, no render-blocking, no layout shift
+* **Privacy-friendly by design**: no cookies, no sessions, no tracking, no data leaves your server, IP addresses are only stored as hashes — GDPR/DSGVO/RGPD-friendly without a consent banner
+* **Free**
+
+= Setup Guide =
 
 [vimeo https://player.vimeo.com/video/905897718]
 
-== Key features ==
-* Blocks spam on all(!) public forms, comments and logins
-* Invisible. No user-input required
-* Still receive 100 percent of the real requests
-* Compliant to GDPR (respectively DSGVO, RGPD)
-* The Plugin is for free
-* No tracking, no cookies, no sessions
-* No external ressources
-* Easy to use
-* SEO-friendly
-* Only necessary code
-* Optionally messages can be flagged instead of blocking them
+= Works with =
 
-== Examples Wordpress ==
-* Login Form
-* Registration Form
-* Password Reset Form
-* Comments Form
+**WordPress:** Login, Registration, Password Reset, Comments
 
-== Examples WooCommerce ==
-* Checkout
-* Login Form
-* Registration Form
-* Password Reset Form
-* Comments form
-* Product Evaluation Form
+**WooCommerce:** Checkout, Login, Registration, Password Reset, Comments, Product Reviews
 
-== Examples other Plugins ==
-* Elementor Pro Forms, Contact Form 7, Fluent Forms, Jetpack Forms, Divi Forms, WPForms, Forminator, Thrive Architect & Thrive Apprentice, Gravity Forms, Formidable Forms, Mailchimp for WordPress Forms, BuddyPress Registration Form, bbPress Create Topic & Reply Forms, Ultimate Member Forms, wpDiscuz Custom Comments Form, Easy Digital Downloads Forms, Paid Memberships Pro Forms, MemberPress Forms, WP-Members Forms, WP User Frontend Forms, CheckoutWC & Flux Checkout, Ninja Forms, Everest Forms, Formidable Forms, WS Forms, Quform, Otter Blocks, Typeform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, Jotform, Page Builder, Metform, Calculated Fields Form, JetFormBuilder, weForms, Responsive Contact Form Builder, Zoho Forms, Smart Forms, Kali Forms, Happyforms, ApplyOnline, Subscribe Forms, FormCraft, Advanced Forms, CRM Perks Forms, Tripetto, Formstack, BuddyForms, vcita, Easy Form Builder, SimpleForm
+**Form and page builders:** Elementor Pro Forms, Contact Form 7, Fluent Forms, Jetpack Forms, Divi Forms, WPForms, Forminator, Thrive Architect & Thrive Apprentice, Gravity Forms, Formidable Forms, Mailchimp for WordPress Forms, BuddyPress Registration Form, bbPress Create Topic & Reply Forms, Ultimate Member Forms, wpDiscuz Custom Comments Form, Easy Digital Downloads Forms, Paid Memberships Pro Forms, MemberPress Forms, WP-Members Forms, WP User Frontend Forms, CheckoutWC & Flux Checkout, Ninja Forms, Everest Forms, WS Forms, Quform, Otter Blocks, Typeform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, Jotform, Page Builder, Metform, Calculated Fields Form, JetFormBuilder, weForms, Responsive Contact Form Builder, Zoho Forms, Smart Forms, Kali Forms, Happyforms, ApplyOnline, Subscribe Forms, FormCraft, Advanced Forms, CRM Perks Forms, Tripetto, Formstack, BuddyForms, vcita, Easy Form Builder, SimpleForm
 
-== Thank you! ==
-I hope you enjoy using the CAPTCHA plugin! If you are happy with it, I would be glad to get your review and probably a coffee too.
+Anything not on the list can be added in minutes with the built-in analysis modes — no code required.
 
 == Installation ==
-1. Watch the setup video
-2. Install & activate the plugin via the WordPress Plugins page
-3. Check if all forms are correctly recognized by the spam protection system 
-4. Manually add missing actions/patterns for any unrecognized forms using direct analysis mode
-5. (Optional) Adjust settings to block, flag, or save spam submissions
+
+1. Install & activate the plugin via the WordPress Plugins page — protection starts immediately with balanced defaults, and popular form builders are configured automatically
+2. Watch the short setup video (see above) to understand the message inbox and the analysis modes
+3. After a few days, check the message inbox: real submissions arrive as messages, spam lands in the spam folder
+4. Using a custom or exotic form that was not recognized? Turn on **direct analysis mode** and add it with one click, straight from the live form
+5. (Optional) Decide how to treat spam: block it, deliver it flagged, or just collect it
 
 == Frequently Asked Questions ==
-= Submissions are incorrectly treated as spam =
-1. The problem occasionally occurs right after installation due to caching. In such cases, the necessary JavaScript for proof-of-work isn't loaded as intended. To resolve this, clear the cache on your webserver (WordPress caching is typically managed by plugins, which offer an option to clear the cache) and in your browser.
-2. JavaScript might crash due to incompatibility between this plugin and another one you're using. If you notice this, please report it to me. I usually address such issues within the same day. Additionally, it's crucial to ensure that JavaScript is functioning correctly on all your pages, even without this plugin. In most browsers, you can identify JavaScript errors by pressing F12 on your page and navigating to the console. Here, you can observe what's happening on your page.
-= Neither messages, nore spam is shown in the inbox =
-1. Activate the **Analysis mode 🔍**, 
-2. Submit the form and look for the message that has been saved for the new submission in the <strong>Analytic Box</strong>
-3. Open the message and enhance the scope of the spam to this type of message
-4. If the message doesn't appear here, or is already in scope, please give me a note
-= Problems with Borlabs Script Blocker =
-When you use the Borlabs Script Blocker to scan for JavaScripts, the scan doesn't work properly, as it doesn't show any JavaScripts. Just deactivate this plugin for the scan and activate it again after the scan.
-= Can't get my problems fixed =
-1. Important messages could be shown in browser console (F12) on problematic page
-2. Whenever you post something to the support forum, try to hand over all details
-3. If the recaptcha doesn't work on any form, give me a notice and I will try to fix that
 
-= How to disable this plugin? =
-* Use standard WordPress plugins page for deactivation and deletion of the plugin
-* When deactivating the plugin you will be asked for the reason. If you face any problems I would be glad if you report to it me as detailed as possible. Usually I will fix them quickly. If you give me contcat details, I may inform you as soon as it is fixed.
+= Does it actually work? =
+Yes. For the kind of spam that plagues almost every site — automated, mass-sent — the typical experience after activation is that it simply stops: every message now costs the sender real computing power, which breaks the economics of sending thousands of them. That result has held up across years of production use. And the protection is actively maintained: when a new generation of protocol-aware bots learned to reuse a solved challenge across many submissions, version 5.0 closed that route with single-use, signed tokens. For the rare rest — targeted spam written by humans — the flag-and-inbox workflow keeps you in control instead of promising magic.
+
+= Will my visitors notice anything? =
+No. There is nothing to see, click or solve. The proof-of-work runs in the background while the visitor fills in the form and is typically finished in milliseconds — long before they hit *Send*.
+
+= Do I need an account or API keys? =
+No. Unlike reCAPTCHA, hCaptcha or Turnstile there is no external service involved — no keys, no registration, no third-party scripts, no rate limits.
+
+= Will it slow down my site? =
+No. The plugin ships a few kilobytes of JavaScript, loads no external resources and causes no layout shift. The computation happens on the visitor's device in the background; the server-side check is a single fast lookup.
+
+= Does it work with caching plugins? =
+Yes. The challenge token is fetched via Ajax at runtime, so fully cached pages stay protected. One thing to know: right after installing or updating, clear your page cache once so the plugin's JavaScript is included everywhere.
+
+= Which forms are supported? =
+All public forms — including hand-coded and custom ones. The plugin recognizes submissions by their signature (the request's characteristic fields and actions) instead of integrating with specific form plugins, so it is not limited to a fixed list. WordPress core, WooCommerce and the several dozen builders listed above come pre-configured; any other form is added without code in under a minute via direct analysis mode: submit it once, click save.
+
+= What data is stored? Is it GDPR compliant? =
+Everything stays on your server: no cookies, no sessions, no tracking, no external requests. IP addresses are only stored as SHA-256 hashes, and password fields are never stored with saved messages. That means no consent banner is needed for the spam protection — friendly to GDPR (DSGVO, RGPD) and similar privacy laws.
+
+= Does it protect WooCommerce? =
+Yes: checkout, login, registration, password reset, comments and product reviews are covered out of the box.
+
+= What spam does it stop — and what not? =
+Every submission has to pay for itself with a small proof-of-work computation. This makes mass spam economically expensive and silently filters out low-effort bots — the vast majority of spam. Like any anti-spam solution (including CAPTCHAs), it cannot fully prevent targeted, low-volume spam sent by a determined human or a bot that invests real computing power per message; for those rare cases, use the flag-instead-of-block option and the spam inbox to keep an eye on what comes through.
+
+= Submissions are incorrectly treated as spam =
+1. Right after installation this is usually a caching issue: the proof-of-work JavaScript is not yet included in cached pages. Clear the cache on your webserver (or caching plugin) and in your browser.
+2. JavaScript might crash due to an incompatibility with another plugin. Press F12 on the affected page and check the browser console for errors — and please report the issue in the support forum; such reports are usually addressed within a day.
+
+= Neither messages nor spam show up in the inbox =
+1. Activate the **Analysis mode**
+2. Submit the affected form and look for the captured entry in the **Analytic Box**
+3. Open the entry and add it to the protection scope
+4. If the submission does not appear there either, please post in the support forum
+
+= Problems with Borlabs Script Blocker =
+When you use the Borlabs Script Blocker to scan for JavaScript, the scan does not work properly while this plugin is active. Deactivate this plugin for the scan and reactivate it afterwards.
+
+= Still stuck? =
+1. Check the browser console (F12) on the problematic page for messages
+2. Post in the support forum with as many details as possible — issues are usually fixed quickly
+3. If the protection does not work on a specific form, a short note with the form plugin's name is enough to get it looked at
+
+== Screenshots ==
+
+1. Settings at a glance: protection status strip, topic tabs and short explanations with built-in help for every option
+2. The message inbox: real submissions and spam side by side — open any message to see exactly which fields were submitted
+3. Direct analysis mode: teach the spam check a new form with one click, straight from the live page
+4. Every option explained in place — no documentation hunting
+
+== Upgrade Notice ==
+
+= 5.0 =
+Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.0 =
+* Major anti-spam hardening against protocol-aware bots: every proof-of-work is now bound to a single-use, HMAC-signed token per submission (replay of one solved challenge no longer works), with a per-token and per-IP usage limit
+* Forwarded-For/Client-IP headers are only trusted behind a configurable trusted-proxy list (new option) — closes IP-spoofing of the whitelist
+* Adaptive difficulty with an automatic site-wide "under-attack mode" (new option): the puzzle gets harder for everyone while a spam wave is running; no per-visitor data involved
+* Proof-of-work now uses the browser's native crypto engine where available (about 10x faster), with a fallback for older browsers and http-only sites
+* Faster spam-check path: worker no longer sleeps up to 5 seconds under a spam flood
+* Redesigned settings page: status strip, topic tabs, short descriptions with progressive-disclosure help on every option
+* Reworked direct analysis mode: persistent guide bar with live coverage instead of stacked popups, entries persist server-side
+* Security: password fields are never stored in captured submissions — neither in the classic analysis inbox nor in direct-analysis entries
+* Security: CSRF protection (nonce) added to the direct-analysis pattern-save endpoint
+* Security: SQL statements consistently use prepared placeholders; full WordPress coding-standards pass across the whole codebase
+* Recognition patterns can no longer accidentally match on the plugin's own injected fields
+* All option texts are now translatable via the WordPress.org community catalog (translate.wordpress.org)
+* Requires PHP 7.1 or newer (was effectively required before, now declared honestly)
 = 4.1.2 =
 * CSRF vulnerability fixed
 = 4.1.1 =
