@@ -66,7 +66,7 @@ class Message_Page {
 			$page = add_menu_page(
 				$main_menu_entry,
 				$main_menu_entry . $this->entry_counter( $overall_count ),
-				'edit_pages',
+				'manage_options',
 				Option::PREFIX . 'messages',
 				array( $this, 'message_page' ),
 				'dashicons-email-alt2',
@@ -78,7 +78,7 @@ class Message_Page {
 				Option::PREFIX . 'messages',
 				$messages_menu_entry,
 				$messages_menu_entry . $this->entry_counter( $messages_count ),
-				'edit_pages',
+				'manage_options',
 				Option::PREFIX . 'messages',
 				array( $this, 'message_page' )
 			);
@@ -88,7 +88,7 @@ class Message_Page {
 				Option::PREFIX . 'messages',
 				$spam_menu_entry,
 				$spam_menu_entry . $this->entry_counter( $spam_count ),
-				'edit_pages',
+				'manage_options',
 				Option::PREFIX . 'spam',
 				array( $this, 'spam_page' )
 			);
@@ -98,7 +98,7 @@ class Message_Page {
 				Option::PREFIX . 'messages',
 				$trash_menu_entry,
 				$trash_menu_entry . $this->entry_counter( $trash_count ),
-				'edit_pages',
+				'manage_options',
 				Option::PREFIX . 'trash',
 				array( $this, 'trash_page' )
 			);
@@ -108,7 +108,7 @@ class Message_Page {
 				Option::PREFIX . 'messages',
 				$analyse_menu_entry,
 				$analyse_menu_entry . $this->entry_counter( $analyse_count ),
-				'edit_pages',
+				'manage_options',
 				Option::PREFIX . 'analyse',
 				array( $this, 'analyse_page' )
 			);
@@ -156,10 +156,10 @@ class Message_Page {
 			4 => __( 'Analytic Box', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 		$search = null;
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- capability-gated admin page load (edit_pages); read-only display filter, no state change.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- capability-gated admin page load (manage_options); read-only display filter, no state change.
 		if ( array_key_exists( 'search', $_POST ) ) {
 			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- see above; sanitized read of the search term for listing only.
-			$search = filter_var( $_POST['search'], FILTER_UNSAFE_RAW );
+			$search = sanitize_text_field( wp_unslash( $_POST['search'] ) );
 		}
 		$rows = Option::get_rows( $search, $message_type );
 		$this->show_evaluation_request( $message_type, $rows );
@@ -295,7 +295,7 @@ class Message_Page {
 			$message_type  = filter_var( $_POST['messageType'], FILTER_SANITIZE_NUMBER_INT );
 			$message_id    = filter_var( $_POST['messageID'], FILTER_SANITIZE_NUMBER_INT );
 			$message_nonce = filter_var( $_POST['message_nonce'], FILTER_UNSAFE_RAW );
-			if ( ! wp_verify_nonce( $message_nonce, 'get-detail-' . $message_id . $message_type ) ) {
+			if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $message_nonce, 'get-detail-' . $message_id . $message_type ) ) {
 				$array_result = array(
 					'success'       => 0,
 					'error_message' => __( 'Render action is invalid!', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -390,11 +390,14 @@ class Message_Page {
 	/** List Ajax-Action*/
 	public function save_list_parameter_callback() {
 
-		// Überprüfen der Sicherheitsnonce
-		$message_type   = filter_var( $_POST['messageType'], FILTER_VALIDATE_INT );
-		$security_nonce = filter_var( $_POST['security_nonce'], FILTER_UNSAFE_RAW );
+		// Check capability + security nonce. Editing the explicit-actions / hide lists
+		// writes plugin configuration, so require manage_options (consistent with
+		// block_value_callback and save_pattern_callback), not merely the edit_pages
+		// the admin page is rendered under.
+		$message_type   = filter_var( isset( $_POST['messageType'] ) ? wp_unslash( $_POST['messageType'] ) : '', FILTER_VALIDATE_INT );
+		$security_nonce = isset( $_POST['security_nonce'] ) ? filter_var( wp_unslash( $_POST['security_nonce'] ), FILTER_UNSAFE_RAW ) : '';
 
-		if ( ! wp_verify_nonce( $security_nonce, 'save_list_nonce_' . $message_type ) ) {
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $security_nonce, 'save_list_nonce_' . $message_type ) ) {
 			$array_result = array(
 				'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			);
@@ -403,9 +406,9 @@ class Message_Page {
 		}
 
 		// Get whitelisting parameters
-		$list_key = sanitize_text_field( $_POST['listKey'] );
+		$list_key = isset( $_POST['listKey'] ) ? sanitize_text_field( wp_unslash( $_POST['listKey'] ) ) : '';
 		// Sanitize the boolean using filter_var()
-		$hide = filter_var( $_POST['hide'], FILTER_VALIDATE_BOOLEAN );
+		$hide = isset( $_POST['hide'] ) ? filter_var( wp_unslash( $_POST['hide'] ), FILTER_VALIDATE_BOOLEAN ) : false;
 
 		$existing_option = null;
 		if ( $hide ) {
@@ -442,11 +445,15 @@ class Message_Page {
 	/** Save Pattern*/
 	public function save_pattern_callback() {
 
-		// Check security nonce
-		$message_type   = filter_var( $_POST['messageType'], FILTER_VALIDATE_INT );
-		$security_nonce = filter_var( $_POST['security_nonce'], FILTER_UNSAFE_RAW );
+		// Check capability + security nonce. Managing spam patterns writes plugin
+		// configuration, so require manage_options (not merely the edit_pages the
+		// admin page is rendered under) — this narrows the SQLi attack surface from
+		// Editor+ to admins (CVE-2026-16094 / CVE-2026-16146, defense in depth on top
+		// of the esc_sql() at the LIKE sinks in Option::get_rows()/get_messages()).
+		$message_type   = filter_var( isset( $_POST['messageType'] ) ? wp_unslash( $_POST['messageType'] ) : '', FILTER_VALIDATE_INT );
+		$security_nonce = isset( $_POST['security_nonce'] ) ? filter_var( wp_unslash( $_POST['security_nonce'] ), FILTER_UNSAFE_RAW ) : '';
 
-		if ( ! wp_verify_nonce( $security_nonce, 'save_pattern_nonce_' . $message_type ) ) {
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $security_nonce, 'save_pattern_nonce_' . $message_type ) ) {
 			$array_result = array(
 				'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			);
@@ -454,9 +461,11 @@ class Message_Page {
 			exit;
 		}
 
-		// Get whitelisting parameters
-		$pattern = stripslashes( sanitize_text_field( $_POST['key'] ) );
-		$hide    = filter_var( $_POST['hide'], FILTER_VALIDATE_BOOLEAN );
+		// Get whitelisting parameters. wp_unslash() reverses WordPress' magic-quote
+		// slashing so the stored JSON pattern stays valid; sanitize_text_field()
+		// cleans it. The SQL safety itself is enforced at the LIKE sinks via esc_sql().
+		$pattern = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
+		$hide    = isset( $_POST['hide'] ) ? filter_var( wp_unslash( $_POST['hide'] ), FILTER_VALIDATE_BOOLEAN ) : false;
 
 		$existing_option = null;
 		if ( $hide ) {
@@ -577,10 +586,12 @@ class Message_Page {
 			exit;
 		} else {
 
-			$search       = filter_var( $_POST['search'], FILTER_UNSAFE_RAW );
-			$message_type = filter_var( $_POST['messageType'], FILTER_VALIDATE_INT );
-			$search_nonce = filter_var( $_POST['search_nonce'], FILTER_UNSAFE_RAW );
-			if ( ! wp_verify_nonce( $search_nonce, 'render-messages_' . $message_type ) ) {
+			$search       = sanitize_text_field( wp_unslash( $_POST['search'] ) );
+			$message_type = filter_var( wp_unslash( $_POST['messageType'] ), FILTER_VALIDATE_INT );
+			$search_nonce = filter_var( wp_unslash( $_POST['search_nonce'] ), FILTER_UNSAFE_RAW );
+			// A nonce guards against CSRF but is not an authorisation check; this page
+			// exposes captured submissions (incl. personal data), so require manage_options.
+			if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $search_nonce, 'render-messages_' . $message_type ) ) {
 				$array_result = array(
 					'success'       => 0,
 					'error_message' => __( 'Multiple render action is invalid!', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -588,12 +599,12 @@ class Message_Page {
 				wp_send_json( $array_result );
 				exit;
 			}
-			$this->listed_actions    = isset( $_POST['listedActions'] ) ? $_POST['listedActions'] : null;
-			$this->listed_patterns   = isset( $_POST['listedPatterns'] ) ? $_POST['listedPatterns'] : null;
-			$this->whitelisted_sites = isset( $_POST['whitelistedSites'] ) ? $_POST['whitelistedSites'] : null;
-			$this->whitelisted_ips   = isset( $_POST['whitelistedIPs'] ) ? $_POST['whitelistedIPs'] : null;
-			$this->hidden_actions    = isset( $_POST['hiddenActions'] ) ? $_POST['hiddenActions'] : null;
-			$this->hidden_patterns   = isset( $_POST['hiddenPatterns'] ) ? $_POST['hiddenPatterns'] : null;
+			$this->listed_actions    = isset( $_POST['listedActions'] ) ? filter_var( wp_unslash( $_POST['listedActions'] ), FILTER_VALIDATE_BOOLEAN ) : null;
+			$this->listed_patterns   = isset( $_POST['listedPatterns'] ) ? filter_var( wp_unslash( $_POST['listedPatterns'] ), FILTER_VALIDATE_BOOLEAN ) : null;
+			$this->whitelisted_sites = isset( $_POST['whitelistedSites'] ) ? filter_var( wp_unslash( $_POST['whitelistedSites'] ), FILTER_VALIDATE_BOOLEAN ) : null;
+			$this->whitelisted_ips   = isset( $_POST['whitelistedIPs'] ) ? filter_var( wp_unslash( $_POST['whitelistedIPs'] ), FILTER_VALIDATE_BOOLEAN ) : null;
+			$this->hidden_actions    = isset( $_POST['hiddenActions'] ) ? filter_var( wp_unslash( $_POST['hiddenActions'] ), FILTER_VALIDATE_BOOLEAN ) : null;
+			$this->hidden_patterns   = isset( $_POST['hiddenPatterns'] ) ? filter_var( wp_unslash( $_POST['hiddenPatterns'] ), FILTER_VALIDATE_BOOLEAN ) : null;
 		}
 
 		$existing_actions_list  = get_option( Option::POW_EXPLICIT_ACTION );
@@ -657,14 +668,26 @@ class Message_Page {
 			$rgm_date   = esc_attr( $message->rgm_date );
 			$rgm_ajax   = esc_attr( $message->rgm_ajax );
 			$rgm_action = esc_attr( $message->rgm_action );
-			$rgm_ip     = esc_attr( $message->rgm_ip );
-			$rgm_site   = esc_attr( $message->rgm_site );
+			// Separate JS-string-safe escaping for the value emitted inside the
+			// single-quoted argument of the inline onSubmit handlers below. esc_attr()
+			// only encodes for the HTML-attribute layer; the browser HTML-decodes
+			// &#039; back to ' before the JS engine parses the handler, so a quote in
+			// rgm_action would break out of the JS string. esc_js() escapes the quote
+			// for the JS-string context (CVE-2026-16145).
+			$rgm_action_js = esc_js( $message->rgm_action );
+			$rgm_ip        = esc_attr( $message->rgm_ip );
+			$rgm_site      = esc_attr( $message->rgm_site );
 
 			$message_details       = $this->get_message_details( $rgm_id, $message_type );
 			$message_details_array = Option::convert_to_json_object( $message_details, 'rgd_attribute', 'rgd_value' );
 
-			// Check, whether the whitelisting-parameter already exists
-			$action_listed    = trim( $rgm_action ) && in_array( trim( $rgm_action ), $existing_actions_lines, true );
+			// Check, whether the whitelisting-parameter already exists. Compare the RAW
+			// action against the raw option lines: $rgm_action is esc_attr()-encoded, so
+			// an action containing & or ' (e.g. "a&b") would never match its own stored
+			// line and the "Enhance spam check"/"Hide action" buttons would keep
+			// reappearing after listing it.
+			$rgm_action_raw   = trim( (string) $message->rgm_action );
+			$action_listed    = '' !== $rgm_action_raw && in_array( $rgm_action_raw, $existing_actions_lines, true );
 			$site_whitelisted = trim( $rgm_site ) && in_array( trim( $rgm_site ), $existing_whitelist_sites_lines, true );
 			$ip_whitelisted   = trim( $rgm_ip ) && in_array( trim( $rgm_ip ), $existing_whitelist_ips_lines, true );
 			$html            .= '
@@ -717,13 +740,13 @@ class Message_Page {
 			if ( $rgm_ajax && $rgm_action && ! $action_listed ) {
 				$html .= '
                     <td>
-                    <form id="whiteList' . $rgm_id . '" onSubmit="saveListParameter(event, \'' . $rgm_action . '\', \'list_Button_' . $rgm_id . '\', false);">
+                    <form id="whiteList' . $rgm_id . '" onSubmit="saveListParameter(event, \'' . $rgm_action_js . '\', \'list_Button_' . $rgm_id . '\', false);">
                         <input type="hidden" name="messsageID" id="messsageID" value="' . $rgm_id . '" />
                         <input type="submit" id="list_Button_' . $rgm_id . '" class="listButton button-primary" name="listButton" value="' . __( 'Enhance spam check on type of action', 'gdpr-compliant-recaptcha-for-all-forms' ) . '" />
                     </form>
                     </td>
                     <td>
-                    <form id="hideList' . $rgm_id . '" onSubmit="saveListParameter(event, \'' . $rgm_action . '\', \'hide_Button_' . $rgm_id . '\', true);">
+                    <form id="hideList' . $rgm_id . '" onSubmit="saveListParameter(event, \'' . $rgm_action_js . '\', \'hide_Button_' . $rgm_id . '\', true);">
                         <input type="hidden" name="messsageID" id="messsageID" value="' . $rgm_id . '" />
                         <input type="submit" id="hide_Button_' . $rgm_id . '" class="hideButton button-primary" name="hideButton" value="' . __( 'Hide action', 'gdpr-compliant-recaptcha-for-all-forms' ) . '" />
                     </form>
@@ -863,9 +886,9 @@ class Message_Page {
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "')";
 				} else {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "' AND rgd.rgd_value = '" . esc_sql( $value ) . "')";
 				}
 			}
 
@@ -884,9 +907,9 @@ class Message_Page {
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "')";
 				} else {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "' AND rgd.rgd_value = '" . esc_sql( $value ) . "')";
 				}
 			}
 
@@ -961,10 +984,26 @@ class Message_Page {
 
 		global $wpdb;
 		$message;
-		$message_type = filter_var( $_POST['messageType'], FILTER_VALIDATE_INT );
+		$message_type   = filter_var( wp_unslash( $_POST['messageType'] ), FILTER_VALIDATE_INT );
+		$security_nonce = filter_var( wp_unslash( $_POST['search_nonce'] ), FILTER_UNSAFE_RAW );
+
+		// Authorisation + CSRF gate BEFORE any DELETE. The "delete all" branch below
+		// runs whenever $_POST['messages'] is not a valid JSON array, so a missing or
+		// blank messages param must never reach a DELETE without a verified capability
+		// and nonce. Previously only the presence of search_nonce was checked (its value
+		// was first verified in the closing render_messages() call — after the delete),
+		// which let any logged-in user (down to Subscriber) wipe a whole message type.
+		// The search_nonce is the same 'render-messages_' . $message_type token that the
+		// closing render_messages() already requires, so the admin UI keeps working.
+		if ( ! current_user_can( 'manage_options' )
+			|| ! wp_verify_nonce( $security_nonce, 'render-messages_' . $message_type ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
 		$wpdb->query( 'START TRANSACTION' );
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- each decoded message carries its own deleteNonce, verified per item at wp_verify_nonce() below.
-		$array_variable = json_decode( stripslashes( $_POST['messages'] ) );
+		$raw_messages   = isset( $_POST['messages'] ) ? wp_unslash( $_POST['messages'] ) : '';
+		$array_variable = json_decode( $raw_messages );
 
 		if ( $array_variable ) {
 			foreach ( $array_variable as $raw_message ) {
@@ -1050,10 +1089,21 @@ class Message_Page {
 
 		global $wpdb;
 		$message;
-		$message_type = filter_var( $_POST['messageType'], FILTER_VALIDATE_INT );
-		$change_type  = filter_var( $_POST['changeType'], FILTER_VALIDATE_INT );
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- each decoded message carries its own moveNonce, verified per item at wp_verify_nonce() below.
-		$array_variable = json_decode( stripslashes( $_POST['messages'] ) );
+		$message_type   = filter_var( wp_unslash( $_POST['messageType'] ), FILTER_VALIDATE_INT );
+		$change_type    = filter_var( wp_unslash( $_POST['changeType'] ), FILTER_VALIDATE_INT );
+		$security_nonce = filter_var( wp_unslash( $_POST['search_nonce'] ), FILTER_UNSAFE_RAW );
+
+		// Authorisation + CSRF gate before any state change. Per-item moveNonce is still
+		// verified in the loop below, but the top-level search_nonce was previously only
+		// checked for presence, not validity, and no capability was required.
+		if ( ! current_user_can( 'manage_options' )
+			|| ! wp_verify_nonce( $security_nonce, 'render-messages_' . $message_type ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
+		$raw_messages   = isset( $_POST['messages'] ) ? wp_unslash( $_POST['messages'] ) : '';
+		$array_variable = json_decode( $raw_messages );
 
 		foreach ( $array_variable as $raw_message ) {
 			parse_str( $raw_message, $message );

@@ -585,7 +585,7 @@ var gdpr_compliant_recaptcha_analysis = {
 	},
 	/**Ajax-Call to get patterns and actions for submission type recognition */
 	getPatterns : function(callback){
-		fetch(gdprAnalysis.ajaxUrl + '?action=get_patterns', {
+		fetch(gdprAnalysis.ajaxUrl + '?action=get_patterns&_ajax_nonce=' + encodeURIComponent(gdprAnalysis.storeNonce), {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded'

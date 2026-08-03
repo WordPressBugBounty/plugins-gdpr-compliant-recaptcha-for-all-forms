@@ -1297,6 +1297,16 @@ class Settings_Menu {
 					$post_value = filter_input( INPUT_POST, $key, $this->get_option_filter( $type ) );
 				}
 
+				// The fail2ban log path is a filesystem location the plugin writes to. On
+				// multisite a plain site admin (manage_options) must not be able to aim it
+				// at an arbitrary path — restrict that to super admins — and reject path
+				// traversal on any install. An invalid value is left unchanged (the old
+				// path stays), never silently redirected.
+				if ( Option::POW_FAIL_2_BAN_PATH === $key && ! empty( $post_value )
+					&& ( ( is_multisite() && ! is_super_admin() ) || 0 !== validate_file( (string) $post_value ) ) ) {
+					continue;
+				}
+
 				if ( Option::BOOL === $type && ( null === $post_value || false === $post_value ) ) {
 					// Checkbox unchecked: persist an explicit '0' instead of
 					// delete_option(). Bestand: delete_option() + the options-matrix

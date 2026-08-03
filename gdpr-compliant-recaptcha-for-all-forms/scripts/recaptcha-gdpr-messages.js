@@ -70,7 +70,7 @@ function messageSearch( page ) {
 		headers: {
 			'Content-Type': 'application/x-www-form-urlencoded'
 		},
-		body: `action=render_messages&page=${page}&search=${search}&messageType=${gdprMsg.messageType}&search_nonce=${gdprMsg.nonces.search}${listedActions}${listedPatterns}${whitelistedSites}${whitelistedIPs}${hiddenActions}${hiddenPatterns}`
+		body: `action=render_messages&page=${page}&search=${encodeURIComponent(search)}&messageType=${gdprMsg.messageType}&search_nonce=${gdprMsg.nonces.search}${listedActions}${listedPatterns}${whitelistedSites}${whitelistedIPs}${hiddenActions}${hiddenPatterns}`
 	})
 	.then(response => response.json())
 	.then(function(response) {
@@ -101,6 +101,44 @@ function messageSearch( page ) {
 	});
 }
 
+/**
+ * Highlight every case-insensitive occurrence of `needle` inside the direct text
+ * nodes of `element`. User-controlled submission values must NEVER be routed through
+ * innerHTML here: the server escapes them (esc_attr), but reading element.textContent
+ * decodes that escaping again, so `innerHTML = textContent.replace(...)` reintroduces
+ * a stored XSS (a captured `<img onerror>` would execute in the admin's session).
+ * Building the highlight with createTextNode/textContent keeps everything inert, and
+ * only text nodes are touched so element children (e.g. the Block-sender/-domain
+ * buttons in the value cell) survive. `needle` is guaranteed non-empty by the caller,
+ * which also avoids the previous `new RegExp(search)` throwing on regex metacharacters.
+ */
+function highlightTextNodes(element, needle) {
+	Array.prototype.slice.call(element.childNodes).forEach(function (node) {
+		if (node.nodeType !== 3) {
+			return;
+		}
+		var text = node.nodeValue;
+		var lower = text.toLowerCase();
+		var idx = lower.indexOf(needle);
+		if (idx === -1) {
+			return;
+		}
+		var frag = document.createDocumentFragment();
+		var from = 0;
+		while (idx !== -1) {
+			frag.appendChild(document.createTextNode(text.slice(from, idx)));
+			var mark = document.createElement("span");
+			mark.style.backgroundColor = "yellow";
+			mark.textContent = text.slice(idx, idx + needle.length);
+			frag.appendChild(mark);
+			from = idx + needle.length;
+			idx = lower.indexOf(needle, from);
+		}
+		frag.appendChild(document.createTextNode(text.slice(from)));
+		element.replaceChild(frag, node);
+	});
+}
+
 function getDetail(id) {
 	var search = document.querySelector('.messageSearch').value;
 	showSpinner();
@@ -115,12 +153,12 @@ function getDetail(id) {
 	.then(function (response) {
 		if (response.success === 1) {
 			const elements = document.createRange().createContextualFragment(response.result);
-			elements.querySelectorAll(".returnAttribute").forEach(function(element) {
-				const regex = new RegExp(search, "gi");
-				element.innerHTML = element.textContent.replace(regex, function(x) {
-				return '<span style="background-color:yellow;">' + x + "</span>";
+			const needle = search ? search.toLowerCase() : "";
+			if (needle) {
+				elements.querySelectorAll(".returnAttribute").forEach(function (element) {
+					highlightTextNodes(element, needle);
 				});
-			});
+			}
 			document.querySelector("#messageDetails" + id).innerHTML = "";
 			document.querySelector("#messageDetails" + id).appendChild(elements);
 		} else {
@@ -242,7 +280,7 @@ function changeMessageType( messages, changeType, search ) {
 			"&messageType=" + gdprMsg.messageType +
 			"&changeType=" + changeType +
 			"&messages=" + encodeURIComponent(JSON.stringify(messages)) +
-			"&search=" + search +
+			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
 			listedActions +
 			listedPatterns +
@@ -342,7 +380,7 @@ function deleteMessage( messages, search ) {
 			"action=delete_message" +
 			"&messageType=" + gdprMsg.messageType +
 			"&messages=" + encodeURIComponent(JSON.stringify(messages)) +
-			"&search=" + search +
+			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
 			listedActions +
 			listedPatterns +
@@ -407,10 +445,10 @@ function saveListParameter(e, listKey, buttonId, hide = false) {
 	xhr.send(
 		"action=save_list_parameter" +
 		"&messageType=" + gdprMsg.messageType +
-		"&listKey=" + listKey +
+		"&listKey=" + encodeURIComponent(listKey) +
 		"&hide=" + hide +
 		"&security_nonce=" + gdprMsg.nonces.saveList +
-		"&search=" + search +
+		"&search=" + encodeURIComponent(search) +
 		"&search_nonce=" + gdprMsg.nonces.search +
 		listedActions +
 		listedPatterns +
@@ -517,10 +555,10 @@ function savePattern(e, messageID, buttonId, hide = false) {
 		xhr.send(
 			"action=save_pattern" +
 			"&messageType=" + gdprMsg.messageType +
-			"&key=" + JSON.stringify(patternArray) +
+			"&key=" + encodeURIComponent(JSON.stringify(patternArray)) +
 			"&hide=" + hide +
 			"&security_nonce=" + gdprMsg.nonces.savePattern +
-			"&search=" + search +
+			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
 			listedActions +
 			listedPatterns +

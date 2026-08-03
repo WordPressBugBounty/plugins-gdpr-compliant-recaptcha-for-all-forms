@@ -767,12 +767,23 @@ class Stamp {
 		if ( $this->plugin_spam && ! $quarantine_only_spam ) {
 			// Hook into failed login attempts in WordPress
 			if ( isset( $this->whole_request_data ['wp-submit'] ) || ( isset( $this->whole_request_data ['log'] ) && isset( $this->whole_request_data ['pwd'] ) ) ) {
-				$username = $this->whole_request_data ['log'] ?? 'unknown_user';
-				$this->log_fail2ban_event( "Failed login attempt for user '$username' from IP " . $_SERVER['REMOTE_ADDR'], true );
+				// The submitted login name is unauthenticated attacker input. Without
+				// strict sanitisation a value containing CR/LF would forge extra fail2ban
+				// log lines (e.g. an "<34>… auth: Failed login … from IP 8.8.8.8" line),
+				// letting an attacker get arbitrary IPs banned. sanitize_user(strict)
+				// drops everything outside a safe whitelist; the length is capped too.
+				$username = ( isset( $this->whole_request_data ['log'] ) && is_string( $this->whole_request_data ['log'] ) )
+					? substr( sanitize_user( wp_unslash( $this->whole_request_data ['log'] ), true ), 0, 60 )
+					: '';
+				if ( '' === $username ) {
+					$username = 'unknown_user';
+				}
+				$this->log_fail2ban_event( "Failed login attempt for user '$username' from IP " . $this->get_client_ip(), true );
 			}
 
-			// Logging a general spam-related event
-			$this->log_fail2ban_event( 'Possible spam attempt from IP ' . $_SERVER['REMOTE_ADDR'] );
+			// Logging a general spam-related event. Use the validated client IP (honours
+			// the trusted-proxy list), never the raw REMOTE_ADDR.
+			$this->log_fail2ban_event( 'Possible spam attempt from IP ' . $this->get_client_ip() );
 		}
 
 		// If spam shall be blocked and message is spam. This applies to EVERY spam
@@ -838,9 +849,19 @@ class Stamp {
 		// Generate timestamp in ISO 8601 format (UTC)
 		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date -- fail2ban log timestamp; behaviour deliberately preserved (existing logs/filters parse this exact server-local format), so no gmdate() switch.
 		$timestamp     = date( 'Y-m-d\TH:i:s\Z' );
-		$hostname      = $_SERVER['SERVER_NAME'] ?? 'unknown_host'; // Get the server hostname
+		$hostname      = isset( $_SERVER['SERVER_NAME'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_NAME'] ) ) : 'unknown_host'; // Get the server hostname
 		$priority_spam = '<42>'; // Priority for spam logs
 		$priority_auth = '<34>'; // Priority for authentication logs
+
+		// Defence in depth: fail2ban parses one event per line, so nothing interpolated
+		// into a line may carry CR/LF or other control characters (log-injection → forged
+		// ban lines). Callers already sanitise the username, but normalise here as well,
+		// and restrict the hostname (Host header on a misconfigured vhost) to safe chars.
+		$message  = preg_replace( '/[\x00-\x1F\x7F]+/', ' ', (string) $message );
+		$hostname = preg_replace( '/[^A-Za-z0-9.\-:_]/', '', $hostname );
+		if ( '' === (string) $hostname ) {
+			$hostname = 'unknown_host';
+		}
 
 		// Create the spam log entry (always logged)
 		$spam_log_entry = sprintf( "%s%s %s spam: %s\n", $priority_spam, $timestamp, $hostname, $message );
@@ -967,12 +988,20 @@ class Stamp {
 				$posted_site = $_SERVER['HTTP_HOST'] . preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['REQUEST_URI'] );
 			}
 			$forbidden_fields = array();
-			if ( isset( $fields['hashPWFields'] ) ) {
+			// is_string()/is_array() guards: hashPWFields is unauthenticated request
+			// input. Passing an array (hashPWFields[]=x) to base64_decode() is a fatal
+			// TypeError on PHP 8, and iterating a non-array json_decode() result raises
+			// warnings — both are unauthenticated DoS/log-noise vectors here.
+			if ( isset( $fields['hashPWFields'] ) && is_string( $fields['hashPWFields'] ) ) {
 				// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- benign: hashPWFields is the plugin's own base64-encoded password-field skip list (client twin in recaptcha-gdpr-analysis.js), not obfuscated code.
 				$decoded_values = json_decode( base64_decode( $fields['hashPWFields'] ), true );
-				foreach ( $decoded_values as $decoded_value ) {
-					foreach ( $decoded_value as $forbidden_key => $forbidden_field ) {
-						$forbidden_fields[ $forbidden_key ] = $forbidden_field;
+				if ( is_array( $decoded_values ) ) {
+					foreach ( $decoded_values as $decoded_value ) {
+						if ( is_array( $decoded_value ) ) {
+							foreach ( $decoded_value as $forbidden_key => $forbidden_field ) {
+								$forbidden_fields[ $forbidden_key ] = $forbidden_field;
+							}
+						}
 					}
 				}
 			}
@@ -1426,13 +1455,15 @@ class Stamp {
 			$client_difficulty = filter_var( $fields['hashDifficulty'], FILTER_SANITIZE_NUMBER_INT );
 		}
 
-		// The same holds for the nonce
-		if ( ctype_digit( $fields['hashNonce'] ?? '' ) ) {
+		// The same holds for the nonce. is_string() guard: a posted hashNonce[] array
+		// would make ctype_digit() a fatal TypeError on PHP 8 (unauthenticated).
+		if ( is_string( $fields['hashNonce'] ?? '' ) && ctype_digit( $fields['hashNonce'] ?? '' ) ) {
 			$nonce = filter_var( $fields['hashNonce'], FILTER_SANITIZE_NUMBER_INT );
 		}
 
-		// Validation of IP
-		if ( ! empty( $fields['clientIP'] ) ) {
+		// Validation of IP. is_string() guard: a posted clientIP[] array would make
+		// trim() a fatal TypeError on PHP 8 (unauthenticated) — treat it as absent.
+		if ( ! empty( $fields['clientIP'] ) && is_string( $fields['clientIP'] ) ) {
 			$raw_client_ip = trim( $fields['clientIP'] );
 			$ips           = explode( ',', $raw_client_ip );
 			$all_valid     = true;

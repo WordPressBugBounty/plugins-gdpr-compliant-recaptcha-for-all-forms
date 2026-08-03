@@ -58,6 +58,15 @@ class Analysis {
 	 */
 	public function get_patterns() {
 
+		// Same CSRF + capability gate as the other direct-analysis endpoints. The
+		// hook-time gate in run() only registers this action for manage_options users,
+		// but relying on that alone is fragile (any refactor of run() reopens it) and a
+		// callback without check_ajax_referer is a certain review finding — it returns
+		// the full spam-detection configuration.
+		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( self::STORE_NONCE_ACTION, '_ajax_nonce', false ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+		}
+
 		$existing_pattern       = get_option( Option::POW_PARAMETER_PATTERN );
 		$existing_lines_pattern = null;
 		$existing_action        = get_option( Option::POW_EXPLICIT_ACTION );
@@ -97,9 +106,17 @@ class Analysis {
 			);
 		}
 
-		// Get whitelisting parameters
-		$pattern  = stripslashes( sanitize_text_field( $_POST['key'] ) );
-		$standard = filter_var( $_POST['standard'], FILTER_VALIDATE_BOOLEAN );
+		// Get whitelisting parameters. Consistent with Message_Page::save_pattern_callback():
+		// wp_unslash() before sanitize; guard against a blank line, which would make
+		// Option::get_rows() build "WHERE  GROUP BY" (empty OR-list) and throw a SQL error
+		// on every message page.
+		$pattern  = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
+		$standard = isset( $_POST['standard'] ) ? filter_var( wp_unslash( $_POST['standard'] ), FILTER_VALIDATE_BOOLEAN ) : false;
+
+		if ( '' === $pattern ) {
+			wp_send_json_error( array( 'error_message' => __( 'Empty pattern.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
 
 		$existing_option = null;
 		if ( $standard ) {

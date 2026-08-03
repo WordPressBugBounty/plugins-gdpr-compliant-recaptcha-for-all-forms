@@ -1,4 +1,9 @@
 <?php
+
+namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
+
+defined( 'ABSPATH' ) || die( 'Are you ok?' );
+
 /**
  * Pure, WordPress-independent gibberish detection (BACKLOG "Gibberish-Erkennung:
  * Binnen-Case-Wechsel-Regel").
@@ -72,13 +77,7 @@
  * is the only caller on the server side.
  *
  * @package gdpr-compliant-recaptcha-for-all-forms
- */
-
-namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
-
-defined( 'ABSPATH' ) || die( 'Are you ok?' );
-
-/**
+ *
  * Stateless gibberish-token/-message detection.
  */
 final class Gibberish_Detector {

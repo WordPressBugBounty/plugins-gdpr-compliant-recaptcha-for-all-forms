@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.1
+Stable tag: 5.1.1
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -153,13 +153,23 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 
 == Upgrade Notice ==
 
+= 5.1.1 =
+Security release. Fixes three reported vulnerabilities (SQL injection and stored XSS in the admin message views) plus related access-control hardening. Update recommended for all sites.
+
 = 5.1 =
-Recommended for everyone. Strengthens the spam protection (gibberish detection, a repeat-sender lock, an adaptive solve-time re-challenge) and fixes the case where some sites flagged every submission as spam. If forms still misbehave right after updating, flush your server's OPcache and any page/object cache once (see the "everything flagged as spam" FAQ).
+Recommended for everyone. Stronger spam protection (gibberish detection, repeat-sender lock, adaptive re-challenge) and a fix for sites that flagged every submission. If forms misbehave right after updating, flush OPcache and any page/object cache once.
 
 = 5.0 =
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.1.1 =
+Security release. Fixes the three reported vulnerabilities and, after a full internal review, several related hardenings across the message-management area.
+* Security (SQL injection): admin-defined spam-analysis patterns are now escaped before they are interpolated into the LIKE conditions of the message queries. Closes an authenticated (Editor+) SQL injection via the pattern key/value (CVE-2026-16094, CVE-2026-16146).
+* Security (stored XSS): the form "action" value shown on the Spam/Messages admin pages is now JavaScript-escaped inside the inline submit handlers, not only HTML-attribute-escaped, so a quote in a captured action can no longer break out into script (CVE-2026-16145). A second highlighting sink in the detail view that re-decoded escaped values is now built via DOM text nodes, so captured content can never execute there either.
+* Security (access control / CSRF): every message action — viewing, moving, deleting (including "delete all") and saving patterns / action lists — now verifies its nonce before acting and requires the manage_options capability. Previously the "delete all" path ran without a verified nonce or capability, and the whole message area was reachable with edit_pages. NOTE: managing captured messages is now limited to administrators.
+* Security (log injection): the Fail2Ban integration now strictly sanitises the login name and strips line breaks, so a crafted login can no longer forge log lines / ban arbitrary IPs; it also logs the validated client IP instead of the raw remote address.
+* Hardening: consistent unslashing/sanitising of admin-AJAX input; guards against malformed unauthenticated requests that could raise PHP errors on the spam-check path; and, on multisite, the Fail2Ban log path can only be set by super admins (with path-traversal rejected).
 = 5.1 =
 This release brings stronger anti-spam layers to every site, alongside important reliability fixes.
 * New: gibberish detection — obvious keyboard-mash and random-string submissions are recognised and filtered, language-neutrally, while legitimate codes (VAT ids, serials, order numbers, product names) are left untouched.

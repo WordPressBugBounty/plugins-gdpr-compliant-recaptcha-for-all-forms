@@ -312,9 +312,9 @@ class Option {
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "')";
 				} else {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "' AND rgd.rgd_value = '" . esc_sql( $value ) . "')";
 				}
 			}
 
@@ -333,9 +333,9 @@ class Option {
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "')";
 				} else {
-					$conditions[] = "(rgd.rgd_attribute LIKE '{$param_path}' AND rgd.rgd_value = '{$value}')";
+					$conditions[] = "(rgd.rgd_attribute LIKE '" . esc_sql( $param_path ) . "' AND rgd.rgd_value = '" . esc_sql( $value ) . "')";
 				}
 			}
 
