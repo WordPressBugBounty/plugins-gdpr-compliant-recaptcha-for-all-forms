@@ -23,6 +23,37 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 final class ProofOfWork {
 
 	/**
+	 * Generous upper bound on a legitimate BROWSER hash rate (hashes/second), used
+	 * to derive the solve-time plausibility threshold below. Real crypto.subtle
+	 * throughput on a top desktop is ~0.2–0.5 MH/s (async overhead per digest call);
+	 * 2 MH/s is deliberately well above that, so the derived threshold is a HARD
+	 * lower bound on the real elapsed time — a legitimate solve can never physically
+	 * beat it, and network latency (which only ADDS) never produces a false positive.
+	 * Native/GPU solvers (SHA-NI, ~ms) fall far below it. See BACKLOG (now HANDBUCH §4).
+	 */
+	const H_MAX = 2000000;
+
+	/**
+	 * Minimum plausible server-measured solve time, in milliseconds, for a puzzle of
+	 * the given difficulty: floor( 1000 * 2^d / H_MAX ). A solve reported faster than
+	 * this cannot have done the work at any browser hash rate and triggers a
+	 * difficulty-scaled re-challenge (never a hard block — a single fast solve is
+	 * legitimate luck, solve time being exponentially distributed; only the cumulative
+	 * Erlang time over several rounds is decisive, see ChainToken / HANDBUCH §4).
+	 *
+	 * Below d ~= 16 the threshold drops under real network latency, so the gate can
+	 * never fire there (fail-safe by construction — documented in the settings hint).
+	 *
+	 * Pure arithmetic, no WordPress dependency → unit-tested in ProofOfWorkTest.
+	 *
+	 * @param int $difficulty Number of leading zero bits the PoW targets.
+	 * @return int Threshold in milliseconds (>= 0).
+	 */
+	public static function solve_time_threshold_ms( $difficulty ) {
+		return (int) floor( 1000 * pow( 2, (int) $difficulty ) / self::H_MAX );
+	}
+
+	/**
 	 * The hash function underlying stamps and proof-of-work.
 	 *
 	 * @param string $x Input.

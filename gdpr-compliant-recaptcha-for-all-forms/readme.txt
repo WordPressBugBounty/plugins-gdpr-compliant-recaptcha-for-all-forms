@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.0
+Stable tag: 5.1
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -127,6 +127,15 @@ Every submission has to pay for itself with a small proof-of-work computation. T
 3. Open the entry and add it to the protection scope
 4. If the submission does not appear there either, please post in the support forum
 
+= After updating, (almost) every submission is flagged as spam =
+The protection works by having the visitor's browser silently solve a small puzzle before a form is submitted. If that puzzle is never solved, a genuine submission looks exactly like a bot, so it gets flagged. Right after an update there are three common reasons for this, all quick to rule out:
+
+1. **Stale server code / OPcache.** The update changed the database schema, but your server may still be running the previous version's PHP code from its OPcache — the two no longer match. Flush the OPcache (restart PHP-FPM, or use your host's "Flush OPcache" button), then clear any page/object cache. 5.1 also tries to do this automatically on update, but some hosts still need it done once by hand.
+2. **A cached page serving the old script.** If a full-page cache is serving pre-update HTML, browsers load the previous version's script against the new server. Purge your page cache (and CDN) once after updating.
+3. **A reverse proxy / CDN without Trusted Proxies set.** If your site sits behind Cloudflare, a load balancer or similar and the plugin sees the proxy's IP instead of the visitor's, the check cannot line up. Set your proxy's address under Settings → Trusted proxies.
+
+To confirm which one it is: open the affected page, press F12 → Console, and look for a warning from "gdpr-recaptcha"; on the Network tab, check that the `get_stamp` request returns clean JSON (no PHP notice/HTML before it). Sharing that in the support forum pins it down immediately.
+
 = Problems with Borlabs Script Blocker =
 When you use the Borlabs Script Blocker to scan for JavaScript, the scan does not work properly while this plugin is active. Deactivate this plugin for the scan and reactivate it afterwards.
 
@@ -144,10 +153,25 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 
 == Upgrade Notice ==
 
+= 5.1 =
+Recommended for everyone. Strengthens the spam protection (gibberish detection, a repeat-sender lock, an adaptive solve-time re-challenge) and fixes the case where some sites flagged every submission as spam. If forms still misbehave right after updating, flush your server's OPcache and any page/object cache once (see the "everything flagged as spam" FAQ).
+
 = 5.0 =
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.1 =
+This release brings stronger anti-spam layers to every site, alongside important reliability fixes.
+* New: gibberish detection — obvious keyboard-mash and random-string submissions are recognised and filtered, language-neutrally, while legitimate codes (VAT ids, serials, order numbers, product names) are left untouched.
+* New: repeat-sender ("echo") lock — once a message is classified as spam, its core values (sender, linked domain, phone, long-text hash) are briefly remembered as one-way hashes with a short lifetime, so the same sender is caught again on any form and any IP. It can be switched off, and its remembered values reset, on the settings page; registered users' and admins' addresses are excluded so an injected spam mail can never lock them out of login or password reset.
+* New: an adaptive solve-time re-challenge makes implausibly fast (likely non-browser) solves pay more, without ever hard-blocking a genuine visitor.
+* New: form builders you activate AFTER installing the plugin are now covered automatically (previously only builders present at install time were). A one-time notice lets you review and confirm any that were already active but not yet covered — your own custom entries, and anything you removed, are never touched.
+* Fix: on a small number of sites, every submission could be flagged as spam. The browser-side puzzle is now resilient — a stray PHP notice, a byte-order mark or a proxy error page in the get_stamp response no longer aborts it, and if the request cannot be made at all it falls back to the token already embedded in the page.
+* Fix: a password field without a name attribute could abort the script's setup on some themes/builders; hardened so it can no longer break token injection into Ajax form submissions.
+* Fix: the challenge-renew timer is now clamped to a sane minimum, so an empty/zero "Time Window" option can no longer cause rapid background requests to admin-ajax.
+* Fix: the invisible token is no longer added to GET forms (e.g. a theme's search box), so searching no longer appends a long "gdpr_pow_token=..." to the URL. POST forms are unaffected and stay protected.
+* Compatibility: a third-party script that wraps fetch/XHR before the visitor first interacts is no longer overwritten by the plugin.
+* Hardening: after an update the plugin proactively invalidates the PHP OPcache for its own files, reducing the chance of old code running against the new database schema. On some hosts an OPcache flush / PHP-FPM restart may still be needed once — see the FAQ.
 = 5.0 =
 * Major anti-spam hardening against protocol-aware bots: every proof-of-work is now bound to a single-use, HMAC-signed token per submission (replay of one solved challenge no longer works), with a per-token and per-IP usage limit
 * Forwarded-For/Client-IP headers are only trusted behind a configurable trusted-proxy list (new option) — closes IP-spoofing of the whitelist

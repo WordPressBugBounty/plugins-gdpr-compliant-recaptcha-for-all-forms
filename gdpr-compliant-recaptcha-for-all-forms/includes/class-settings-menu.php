@@ -22,6 +22,9 @@ class Settings_Menu {
 	/** What to do with the action */
 	const UPDATE = 'update';
 
+	/** Action value for the "reset repeat-sender echo lock" status-strip button. */
+	const RESET_ECHO = 'reset_echo';
+
 	/** Constructor of the class
 	 */
 	public function __construct() {
@@ -33,7 +36,7 @@ class Settings_Menu {
 	 *
 	 * @param string $message The message to be displayed.
 	 */
-	public function display_admin_notice( $message ) {
+	public static function display_admin_notice( $message ) {
 		if ( ! is_admin() || get_option( Option::POW_INSTALLED ) ) {
 			return;
 		}
@@ -45,7 +48,7 @@ class Settings_Menu {
 		);
 	}
 
-	public function get_default_ajax_actions() {
+	public static function get_default_ajax_actions() {
 		include_once ABSPATH . 'wp-admin/includes/plugin.php';
 		$actions           = array();
 		$installed_plugins = get_plugins();
@@ -54,67 +57,67 @@ class Settings_Menu {
 		// *** Thrive Architect Forms (custom submission method) ***
 		if ( array_key_exists( 'thrive-architect/thrive-architect.php', $installed_plugins ) ) {
 			$actions[] = 'tve_api_form_submit';
-			$this->display_admin_notice( __( 'Thrive Architect detected – added recognition pattern: {"thrive_architect_form_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Thrive Architect detected – added action: tve_api_form_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Forminator (uses WordPress AJAX) ***
 		if ( is_plugin_active( 'forminator/forminator.php' ) || array_key_exists( 'forminator/forminator.php', $installed_plugins ) ) {
 			$actions[] = 'forminator_submit_form_custom-forms';
-			$this->display_admin_notice( __( 'Forminator detected – added action: forminator_submit_form_custom-forms', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Forminator detected – added action: forminator_submit_form_custom-forms', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** WPForms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'wpforms/wpforms.php', $installed_plugins ) || array_key_exists( 'wpforms-lite/wpforms.php', $installed_plugins ) ) {
 			$actions[] = 'wpforms_submit';
-			$this->display_admin_notice( __( 'WPForms detected – added action: wpforms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'WPForms detected – added action: wpforms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Ninja Forms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'ninja-forms/ninja-forms.php', $installed_plugins ) ) {
 			$actions[] = 'nf_ajax_submit';
-			$this->display_admin_notice( __( 'Ninja Forms detected – added action: nf_ajax_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Ninja Forms detected – added action: nf_ajax_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Fluent Forms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'fluentform/fluentform.php', $installed_plugins ) ) {
 			$actions[] = 'fluentform_submit';
-			$this->display_admin_notice( __( 'Fluent Forms detected – added action: fluentform_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Fluent Forms detected – added action: fluentform_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Jetpack Forms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'jetpack/jetpack.php', $installed_plugins ) ) {
 			$actions[] = 'jetpack_contact_form_submit';
-			$this->display_admin_notice( __( 'Jetpack Forms detected – added action: jetpack_contact_form_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Jetpack Forms detected – added action: jetpack_contact_form_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Everest Forms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'everest-forms/everest-forms.php', $installed_plugins ) ) {
 			$actions[] = 'everest_forms_submit';
-			$this->display_admin_notice( __( 'Everest Forms detected – added action: everest_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Everest Forms detected – added action: everest_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** WS Forms (uses WordPress AJAX) ***
 		if ( array_key_exists( 'ws-forms/ws-forms.php', $installed_plugins ) ) {
 			$actions[] = 'ws_forms_submit';
-			$this->display_admin_notice( __( 'WS Forms detected – added action: ws_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'WS Forms detected – added action: ws_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Otter Blocks (uses WordPress AJAX) ***
 		if ( array_key_exists( 'otter-blocks/otter-blocks.php', $installed_plugins ) ) {
 			$actions[] = 'otter_blocks_submit';
-			$this->display_admin_notice( __( 'Otter Blocks detected – added action: otter_blocks_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Otter Blocks detected – added action: otter_blocks_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Elementor Pro Forms (correct action) ***
 		if ( array_key_exists( 'elementor-pro/elementor-pro.php', $installed_plugins ) ) {
 			$actions[] = 'elementor_pro_forms_send_form';
-			$this->display_admin_notice( __( 'Elementor Pro Forms detected – added action: elementor_pro_forms_send_form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Elementor Pro Forms detected – added action: elementor_pro_forms_send_form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		return implode( "\n", $actions );
 	}
 
-	public function get_default_recognition_patterns() {
+	public static function get_default_recognition_patterns() {
 		include_once ABSPATH . 'wp-admin/includes/plugin.php';
 		$patterns          = array();
 		$installed_plugins = get_plugins();
@@ -129,7 +132,7 @@ class Settings_Menu {
 			$patterns[] = '{"wpcf7_attachment":null}';
 			$patterns[] = '{"wpcf7_post_submission":null}';
 			$patterns[] = '{"wpcf7_save_post":null}';
-			$this->display_admin_notice( __( 'Contact Form 7 detected – added default recognition patterns', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Contact Form 7 detected – added default recognition patterns', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** WooCommerce ***
@@ -144,74 +147,74 @@ class Settings_Menu {
 			$patterns[] = '{"woocommerce_login":null}';
 			$patterns[] = '{"woocommerce_review":null}';
 			$patterns[] = '{"woocommerce_comment":null}';
-			$this->display_admin_notice( __( 'WooCommerce detected – added recognition patterns for cart, checkout, and user actions', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'WooCommerce detected – added recognition patterns for cart, checkout, and user actions', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Gravity Forms (custom submission method) ***
 		if ( array_key_exists( 'gravityforms/gravityforms.php', $installed_plugins ) ) {
 			$patterns[] = '{"gform_submit":null}';
 			$patterns[] = '{"gform_file_upload":null}';
-			$this->display_admin_notice( __( 'Gravity Forms detected – added recognition patterns for submissions and file uploads', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Gravity Forms detected – added recognition patterns for submissions and file uploads', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Divi Contact Form Module (custom submission method) ***
 		if ( array_key_exists( 'Divi', $installed_themes ) ) {
 			$patterns[] = '{"et_pb_contactform_submit_0":null}';
-			$this->display_admin_notice( __( 'Divi detected – added recognition pattern: {"et_pb_contactform_submit_0":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Divi detected – added recognition pattern: {"et_pb_contactform_submit_0":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Thrive Leads & Thrive Architect (custom submission method) ***
 		if ( array_key_exists( 'thrive-leads/thrive-leads.php', $installed_plugins ) ) {
 			$patterns[] = '{"thrive_leads_submit":null}';
-			$this->display_admin_notice( __( 'Thrive Leads detected – added recognition pattern: {"thrive_leads_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Thrive Leads detected – added recognition pattern: {"thrive_leads_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Thrive Apprentice (Online course signups) ***
 		if ( array_key_exists( 'thrive-apprentice/thrive-apprentice.php', $installed_plugins ) ) {
 			$patterns[] = '{"thrive_apprentice_signup":null}';
-			$this->display_admin_notice( __( 'Thrive Apprentice detected – added recognition pattern: {"thrive_apprentice_signup":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Thrive Apprentice detected – added recognition pattern: {"thrive_apprentice_signup":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Thrive Quiz Builder (Quiz forms) ***
 		if ( array_key_exists( 'thrive-quiz-builder/thrive-quiz-builder.php', $installed_plugins ) ) {
 			$patterns[] = '{"thrive_quiz_submission":null}';
-			$this->display_admin_notice( __( 'Thrive Quiz Builder detected – added recognition pattern: {"thrive_quiz_submission":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Thrive Quiz Builder detected – added recognition pattern: {"thrive_quiz_submission":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Thrive Comments (replaces WordPress comments) ***
 		if ( array_key_exists( 'thrive-comments/thrive-comments.php', $installed_plugins ) ) {
 			$patterns[] = '{"comment_content":null,"comment_post_ID":null,"tva_term":null}';
-			$this->display_admin_notice( __( 'Thrive Comments detected – added recognition pattern: {"thrive_comments_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Thrive Comments detected – added recognition pattern: {"thrive_comments_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Formidable Forms (custom submission method) ***
 		if ( array_key_exists( 'formidable/formidable.php', $installed_plugins ) ) {
 			$patterns[] = '{"formidable_submit":null}';
-			$this->display_admin_notice( __( 'Formidable Forms detected – added recognition pattern: {"formidable_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Formidable Forms detected – added recognition pattern: {"formidable_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** WP User Frontend Forms (custom submission method) ***
 		if ( array_key_exists( 'wp-user-frontend/wp-user-frontend.php', $installed_plugins ) ) {
 			$patterns[] = '{"wpuf_submit":null}';
-			$this->display_admin_notice( __( 'WP User Frontend Forms detected – added recognition pattern: {"wpuf_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'WP User Frontend Forms detected – added recognition pattern: {"wpuf_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Jotform (custom submission method) ***
 		if ( array_key_exists( 'jotform/jotform.php', $installed_plugins ) ) {
 			$patterns[] = '{"jotform_submit":null}';
-			$this->display_admin_notice( __( 'Jotform detected – added recognition pattern: {"jotform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Jotform detected – added recognition pattern: {"jotform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Typeform (custom submission method) ***
 		if ( array_key_exists( 'typeform/typeform.php', $installed_plugins ) ) {
 			$patterns[] = '{"typeform_submit":null}';
-			$this->display_admin_notice( __( 'Typeform detected – added recognition pattern: {"typeform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Typeform detected – added recognition pattern: {"typeform_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Zoho Forms (custom submission method) ***
 		if ( array_key_exists( 'zoho-forms/zoho-forms.php', $installed_plugins ) ) {
 			$patterns[] = '{"zoho_forms_submit":null}';
-			$this->display_admin_notice( __( 'Zoho Forms detected – added recognition pattern: {"zoho_forms_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			self::display_admin_notice( __( 'Zoho Forms detected – added recognition pattern: {"zoho_forms_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		return implode( "\n", $patterns );
@@ -281,7 +284,7 @@ class Settings_Menu {
 		);
 
 		$this->options = array(
-			Option::POW_DIRECT_ANALYSIS_MODE => new Option(
+			Option::POW_DIRECT_ANALYSIS_MODE    => new Option(
 				__( 'Direct analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -304,7 +307,7 @@ class Settings_Menu {
 				'🕵️',
 				__( 'Adds an inline helper to your live forms so you can teach the spam check about them without leaving the page.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ANALYSIS_MODE        => new Option(
+			Option::POW_ANALYSIS_MODE           => new Option(
 				__( 'Analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -332,10 +335,10 @@ class Settings_Menu {
 				'🔍',
 				__( 'Records every incoming POST submission so you can add unrecognized form types to the spam check.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_EXPLICIT_ACTION      => new Option(
+			Option::POW_EXPLICIT_ACTION         => new Option(
 				__( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
-				$this->get_default_ajax_actions(),
+				self::get_default_ajax_actions(),
 				sprintf(
 					/* translators: 1: opening anchor tag linking to the message inbox, 2: closing anchor tag, 3: URL to the Analytic Box */
 					__(
@@ -356,10 +359,10 @@ class Settings_Menu {
 				'⚙️✔️',
 				__( 'Names the specific AJAX/form actions that the spam check should apply to when running in Explicit mode.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_PARAMETER_PATTERN    => new Option(
+			Option::POW_PARAMETER_PATTERN       => new Option(
 				__( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
-				$this->get_default_recognition_patterns(),
+				self::get_default_recognition_patterns(),
 				sprintf(
 					/* translators: 1: opening anchor tag linking to the Analytic Box, 2: closing anchor tag */
 					__(
@@ -377,7 +380,7 @@ class Settings_Menu {
 				'🔍✔️',
 				__( 'Defines field/value patterns that identify a submission type so the spam check applies to it.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK_LOGIN          => new Option(
+			Option::POW_BLOCK_LOGIN             => new Option(
 				__( 'Apply for WordPress-Login', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -393,7 +396,7 @@ class Settings_Menu {
 				'🔒',
 				__( 'Applies the proof-of-work check to the WordPress login form in addition to your other forms.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK                => new Option(
+			Option::POW_BLOCK                   => new Option(
 				__( 'Block spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -402,7 +405,7 @@ class Settings_Menu {
 				'⛔', // Blocking
 				__( 'Blocks submissions classified as spam instead of letting them through.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SPAM            => new Option(
+			Option::POW_FLAG_SPAM               => new Option(
 				__( 'Flag spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -411,7 +414,7 @@ class Settings_Menu {
 				'🚩',
 				__( 'Lets spam through but marks it so your mail client can filter it into a spam folder.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SUFFIXES        => new Option(
+			Option::POW_FLAG_SUFFIXES           => new Option(
 				__( 'Fieldname:prefix to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -420,7 +423,7 @@ class Settings_Menu {
 				'_*',
 				__( 'Adds a text prefix such as [spam] to a chosen field when a message is flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_TAGS            => new Option(
+			Option::POW_FLAG_TAGS               => new Option(
 				__( 'New "POST" field to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -446,7 +449,7 @@ class Settings_Menu {
 				'+',
 				__( 'Adds a brand-new field with a fixed value to messages that are flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ERROR_MESSAGE        => new Option(
+			Option::POW_ERROR_MESSAGE           => new Option(
 				__( 'Error message', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::STRING,
 				__( 'Your message has been classified as spam! If you are a human, we are very sorry. Please give us notice via email.', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -462,7 +465,7 @@ class Settings_Menu {
 				'❌',
 				__( 'Sets the message shown to visitors on the frontend when their submission is blocked as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SIMULATE_SPAM        => new Option(
+			Option::POW_SIMULATE_SPAM           => new Option(
 				__( 'Simulate spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -474,7 +477,7 @@ class Settings_Menu {
 				'📈',
 				__( 'Treats every incoming submission as spam so you can safely test blocking and flagging before going live.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FAIL_2_BAN_PATH      => new Option(
+			Option::POW_FAIL_2_BAN_PATH         => new Option(
 				__( 'Path to save spam approaches to syslog', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -501,7 +504,7 @@ class Settings_Menu {
 				'🛡',
 				__( 'Writes failed logins and spam attempts to log files that tools like Fail2Ban can monitor.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_CLEAN           => new Option(
+			Option::POW_SAVE_CLEAN              => new Option(
 				__( 'Save clean messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -514,7 +517,7 @@ class Settings_Menu {
 				'💾',
 				__( 'Stores non-spam submissions in the message inbox so you can review them later.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_SPAM            => new Option(
+			Option::POW_SAVE_SPAM               => new Option(
 				__( 'Save spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -523,7 +526,7 @@ class Settings_Menu {
 				'💾',
 				__( 'Stores submissions classified as spam in the spam inbox so you can review them later.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_LOGIN           => new Option(
+			Option::POW_SAVE_LOGIN              => new Option(
 				__( 'Save Logins', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -532,7 +535,7 @@ class Settings_Menu {
 				'🔒💾',
 				__( 'Records successful WordPress logins in the message inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SAVE            => new Option(
+			Option::POW_FLAG_SAVE               => new Option(
 				__( 'Save spam messages with flag', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -541,7 +544,7 @@ class Settings_Menu {
 				'🚩💾',
 				__( 'Keeps the spam flag on messages that are saved, instead of stripping it before saving.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_IP              => new Option(
+			Option::POW_SAVE_IP                 => new Option(
 				__( 'Save spam messages with IP', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -550,7 +553,7 @@ class Settings_Menu {
 				'🛡️💾',
 				__( "Stores the submitter's IP address with saved spam messages (not GDPR-compliant).", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SKIP_FIELDS          => new Option(
+			Option::POW_SKIP_FIELDS             => new Option(
 				__( 'Skip fields from saving', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -586,7 +589,7 @@ class Settings_Menu {
 				'🚫▭',
 				__( 'Excludes specific fields, such as passwords, from being saved with messages.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MESSAGE_HEADS        => new Option(
+			Option::POW_MESSAGE_HEADS           => new Option(
 				__( 'Subject fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -615,7 +618,7 @@ class Settings_Menu {
 				'🔤',
 				__( 'Builds a readable subject line for saved messages from one or more submitted fields.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_CART            => new Option(
+			Option::POW_SAVE_CART               => new Option(
 				__( 'Save WooCommerce shopping carts', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -624,7 +627,7 @@ class Settings_Menu {
 				'🛒',
 				__( 'Saves WooCommerce shopping cart activity as messages in the inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_INBOX    => new Option(
+			Option::POW_CRON_DELETE_INBOX       => new Option(
 				__( 'Automatic Message Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -633,7 +636,7 @@ class Settings_Menu {
 				'🗑️✉️',
 				__( 'Automatically deletes messages from the inbox after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_SPAM     => new Option(
+			Option::POW_CRON_DELETE_SPAM        => new Option(
 				__( 'Automatic Spam Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -642,7 +645,7 @@ class Settings_Menu {
 				'🗑️📩',
 				__( 'Automatically deletes messages from the spam inbox after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_TRASH    => new Option(
+			Option::POW_CRON_DELETE_TRASH       => new Option(
 				__( 'Automatic Trash Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -651,7 +654,7 @@ class Settings_Menu {
 				'🗑️📨',
 				__( 'Automatically deletes messages from the trash after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_APPLY_REST           => new Option(
+			Option::POW_APPLY_REST              => new Option(
 				__( 'Apply on REST-API', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -660,7 +663,7 @@ class Settings_Menu {
 				'🖥️',
 				__( 'Applies the proof-of-work check to WordPress REST API requests as well as forms.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_IP_WHITELIST         => new Option(
+			Option::POW_IP_WHITELIST            => new Option(
 				__( 'IP-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -669,7 +672,7 @@ class Settings_Menu {
 				'🌐',
 				__( 'Exempts the listed IP addresses from the spam check entirely.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SITE_WHITELIST       => new Option(
+			Option::POW_SITE_WHITELIST          => new Option(
 				__( 'Site-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -686,7 +689,7 @@ class Settings_Menu {
 				'📄',
 				__( 'Exempts the listed URLs (without protocol) from the spam check entirely.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_TRUSTED_PROXIES      => new Option(
+			Option::POW_TRUSTED_PROXIES         => new Option(
 				__( 'Trusted proxies', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -704,7 +707,7 @@ class Settings_Menu {
 				'🛰️',
 				__( "Lists proxy IPs allowed to supply the visitor's real IP via forwarding headers.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_HIDE_ACTION          => new Option(
+			Option::POW_HIDE_ACTION             => new Option(
 				__( 'Hide actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -720,7 +723,7 @@ class Settings_Menu {
 				'⚙️🚫',
 				__( 'Hides the listed action names from the Analytic Box while Analysis mode is recording.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_HIDE_PATTERN         => new Option(
+			Option::POW_HIDE_PATTERN            => new Option(
 				__( 'Hide Patterns', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -738,7 +741,7 @@ class Settings_Menu {
 				'🔍🚫',
 				__( 'Hides submissions matching the listed patterns from the Analytic Box.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MENU_POSITION        => new Option(
+			Option::POW_MENU_POSITION           => new Option(
 				__( 'Messages Inbox Position', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -751,7 +754,7 @@ class Settings_Menu {
 				'📌', //Number symbol
 				__( 'Sets where the message inbox appears in the WordPress admin menu.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_DASHBOARD            => new Option(
+			Option::POW_DASHBOARD               => new Option(
 				__( 'Message counters on the Wordpress Dashboard', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -760,7 +763,7 @@ class Settings_Menu {
 				'📊', //Dashboard symbol
 				__( 'Shows message counters as a widget on the WordPress dashboard.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SALT                 => new Option(
+			Option::POW_SALT                    => new Option(
 				__( 'Salt', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::STRING,
 				hash( 'sha256', gmdate( 'Y-m-d H:i:s.u' ) ),
@@ -769,7 +772,7 @@ class Settings_Menu {
 				'🔑',
 				__( "Adds a secret random string to the proof-of-work puzzle so it can't be pre-computed client-side.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_TIME_WINDOW          => new Option(
+			Option::POW_TIME_WINDOW             => new Option(
 				__( 'Time Window', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				10,
@@ -778,12 +781,14 @@ class Settings_Menu {
 				'⌛',
 				__( 'Sets how many minutes a generated hash-puzzle stays valid before it must be solved again.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_DIFFICULTY           => new Option(
+			Option::POW_DIFFICULTY              => new Option(
 				__( 'Difficulty', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				14,
-				__(
-					"If you don't know about the concept of proof-of-work, don't change this.
+				sprintf(
+					/* translators: 1: under-attack difficulty bonus in bits (Stamp::UNDER_ATTACK_BONUS), 2: hard difficulty cap (Stamp::DIFFICULTY_CAP), 3: base difficulty at which the bonus starts getting clipped by the cap (cap minus bonus plus one) */
+					__(
+						"If you don't know about the concept of proof-of-work, don't change this.
                         <br>
                         <br><strong>Approximate number of hash guesses required per difficulty target:</strong>
                         <ul>
@@ -796,14 +801,22 @@ class Settings_Menu {
                             <li>Difficulty 25-28: 10,000,000</li>
                             <li>Difficulty 29-32: 100,000,000</li>
                         </ul>
-                        Modern browsers solve the puzzle via crypto.subtle, which is roughly 10x faster than the plain-JavaScript fallback used by older browsers — a difficulty of 14-16 is recommended as a new baseline.",
-					'gdpr-compliant-recaptcha-for-all-forms'
+                        Modern browsers solve the puzzle via crypto.subtle, which is roughly 10x faster than the plain-JavaScript fallback used by older browsers.
+                        <br>
+                        <br><strong>Recommended base: 15–16.</strong> Under-attack mode temporarily adds %1\$d bits on top of your base difficulty, but the effective difficulty is always capped at %2\$d — so once your base reaches %3\$d or higher, the boost gets clipped (partially, or at %2\$d entirely). A base of 15–16 keeps the full +%1\$d headroom available for the under-attack boost.
+                        <br>
+                        <br>The built-in solve-time plausibility gate (which re-challenges implausibly fast, likely non-browser solves) is effectively inactive below base ~16, where its threshold falls under normal network latency — another reason to keep the base at 15–16; from 16 upward it starts yielding a useful signal.",
+						'gdpr-compliant-recaptcha-for-all-forms'
+					),
+					Stamp::UNDER_ATTACK_BONUS,
+					Stamp::DIFFICULTY_CAP,
+					Stamp::DIFFICULTY_CAP - Stamp::UNDER_ATTACK_BONUS + 1
 				),
 				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🧩',
-				__( "Controls how much computing power a visitor's browser must spend solving the proof-of-work puzzle.", 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( "Controls how much computing power a visitor's browser must spend solving the proof-of-work puzzle. Recommended base: 15–16, to leave headroom for the under-attack boost.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MAX_USES             => new Option(
+			Option::POW_MAX_USES                => new Option(
 				__( 'Max submissions per solved challenge', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				10,
@@ -812,7 +825,7 @@ class Settings_Menu {
 				'🔁',
 				__( 'Caps how many form submissions a single solved proof-of-work may be used for within the validity window.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_UNDER_ATTACK_MODE    => new Option(
+			Option::POW_UNDER_ATTACK_MODE       => new Option(
 				__( 'Under-attack mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -820,6 +833,38 @@ class Settings_Menu {
 				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🚨',
 				__( 'Temporarily raises the puzzle difficulty for all visitors when site-wide spam suddenly spikes (+3 bits, roughly 8x the computing time, whenever 15+ blocked/flagged submissions occur within about 10 minutes).', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_UNDER_ATTACK_QUARANTINE => new Option(
+				__( 'Under-attack quarantine', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				__(
+					'<strong>What it does:</strong> While a spam wave is detected (the same site-wide counter that drives under-attack mode), submissions that pass every individual check are treated like spam: they land in the spam folder for review, and your regular spam handling applies — with "Block spam" enabled they are held back instead of being delivered.
+					<br>
+					<br><strong>Nothing is lost:</strong> quarantined messages are never discarded — they wait in the spam folder, and you rehabilitate genuine ones from there, exactly as with any other spam. Quarantined submissions never feed the wave counter itself, so the quarantine cannot keep the wave alive on its own.
+					<br>
+					<br><strong>Use this if:</strong> during an attack you would rather review grey-zone messages by hand than risk a spam submission slipping through. Be aware that with "Block spam" enabled, genuine visitors submitting during a wave will also see the spam error until the wave subsides. It only ever acts while a wave is in progress.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🛡️',
+				__( 'During a detected spam wave, treat otherwise-clean submissions as spam and hold them in the spam folder for review. Off by default; nothing is ever lost.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_ECHO_LOCK_ENABLED       => new Option(
+				__( 'Repeat-sender echo lock', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				true,
+				__(
+					'<strong>What it does:</strong> Whenever a submission is classified as spam, the echo lock briefly remembers its core values (sender email, linked domain, phone number, and the hash of a long message body) as one-way hashes with a short lifetime. A later submission carrying the same value — on <em>any</em> form and from <em>any</em> IP — is then caught as well, so a returning spammer is stopped even after switching forms or rotating addresses.
+					<br>
+					<br><strong>Just a bonus layer:</strong> this only <em>adds</em> to the proof-of-work check; it never replaces it. Values are stored as hashes only (never in plain text) and expire on their own after about a day and a half.
+					<br>
+					<br><strong>Turn it off if</strong> (rarely) you would rather not carry values over between submissions at all — for example while diagnosing a false positive. Addresses of your registered users are already excluded automatically, so this is seldom necessary. You can also clear all currently held values at any time via <em>Reset repeat-sender lock</em> in the status bar at the top of this page.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🔁',
+				__( 'Briefly remembers the core values of spam submissions (as hashes) so the same sender/domain is caught again on any form. A bonus layer over the proof-of-work; on by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 		);
 
@@ -839,6 +884,7 @@ class Settings_Menu {
 		$this->plugin_name = __( 'Invisible Anti-Spam', 'gdpr-compliant-recaptcha-for-all-forms' );
 
 		$this->update_settings();
+		$this->maybe_reset_echo_store();
 
 		foreach ( $this->options as $id => $option ) {
 
@@ -960,10 +1006,35 @@ class Settings_Menu {
 			Option::POW_BLOCK       => $warn,
 			Option::POW_APPLY_REST  => $warn,
 			Option::POW_BLOCK_LOGIN => $warn,
-			Option::POW_DIFFICULTY  => array(
-				'class' => 'gdpr-badge gdpr-badge-recommend',
-				'text'  => __( 'Recommended: 14–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			),
+			Option::POW_DIFFICULTY  => $this->get_difficulty_badge(),
+		);
+	}
+
+	/** Dynamic badge for POW_DIFFICULTY: warns when the configured base difficulty
+	 * leaves the under-attack boost (Stamp::UNDER_ATTACK_BONUS) partially or fully
+	 * clipped by Stamp::DIFFICULTY_CAP, otherwise shows the recommendation. Evaluates
+	 * the actually configured value (post-save), not a static hint.
+	 *
+	 * @return array{class: string, text: string}
+	 */
+	private function get_difficulty_badge() {
+		$base_difficulty = (int) $this->options[ Option::POW_DIFFICULTY ]->get_value();
+
+		if ( $base_difficulty + Stamp::UNDER_ATTACK_BONUS > Stamp::DIFFICULTY_CAP ) {
+			return array(
+				'class' => 'gdpr-badge gdpr-badge-warn',
+				'text'  => sprintf(
+					/* translators: 1: under-attack difficulty bonus in bits, 2: hard difficulty cap */
+					__( 'Under-attack boost (+%1$d) is capped at %2$d — recommended base: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					Stamp::UNDER_ATTACK_BONUS,
+					Stamp::DIFFICULTY_CAP
+				),
+			);
+		}
+
+		return array(
+			'class' => 'gdpr-badge gdpr-badge-recommend',
+			'text'  => __( 'Recommended: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 	}
 
@@ -1072,10 +1143,35 @@ class Settings_Menu {
 			);
 		}
 
+		// Quarantine is gated on the raw wave detection (Stamp::is_under_attack()),
+		// independent of POW_UNDER_ATTACK_MODE (which only gates the difficulty boost
+		// above) — so it can be actively sorting even when $under_attack is false here.
+		// Surface a subtle hint only while it is actually acting (option on + wave +
+		// not simulating, mirroring the check_submit() gate).
+		if ( ! $simulate && get_option( Option::POW_UNDER_ATTACK_QUARANTINE ) && Stamp::is_under_attack() ) {
+			$items[] = array(
+				'class' => '',
+				'text'  => __( 'Quarantine active', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			);
+		}
+
 		$items[] = array(
 			'class' => '',
 			/* translators: %d: number of spam messages blocked in the last 7 days */
 			'text'  => sprintf( __( '%d spam blocked this week', 'gdpr-compliant-recaptcha-for-all-forms' ), $spam_this_week ),
+		);
+
+		// Repeat-sender echo lock: how many values it currently holds, plus a one-click
+		// reset (offered only when non-empty). The count reflects the store even when
+		// the feature is toggled off, so a stale value can still be released.
+		$echo_count = Echo_Store::count();
+		$items[]    = array(
+			'class' => '',
+			'text'  => sprintf(
+				/* translators: %d: number of values currently held in the repeat-sender echo lock */
+				_n( '%d value in repeat-sender lock', '%d values in repeat-sender lock', $echo_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
+				$echo_count
+			),
 		);
 		?>
 		<div class="gdpr-status-strip">
@@ -1083,6 +1179,16 @@ class Settings_Menu {
 				<span class="gdpr-status-item <?php echo esc_attr( $item['class'] ); ?>"><?php echo esc_html( $item['text'] ); ?></span>
 			<?php endforeach; ?>
 		</div>
+		<?php if ( $echo_count > 0 ) : ?>
+			<form method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>" class="gdpr-echo-reset">
+				<?php wp_nonce_field( 'gdpr_reset_echo_nonce', 'gdpr_reset_echo_nonce_field' ); ?>
+				<input type="hidden" name="<?php echo esc_attr( self::RCM_ACTION ); ?>" value="<?php echo esc_attr( self::RESET_ECHO ); ?>">
+				<button type="submit" class="button button-secondary"><?php esc_html_e( 'Reset repeat-sender lock', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></button>
+				<span class="gdpr-echo-reset-hint">
+					<?php esc_html_e( 'The repeat-sender lock briefly remembers values from spam submissions (as one-way hashes) so the same sender is caught again on any form. Resetting releases every currently held value at once — use it if a legitimate address got caught. No data is lost, and the lock rebuilds itself as new spam arrives.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+				</span>
+			</form>
+		<?php endif; ?>
 		<?php
 	}
 
@@ -1219,6 +1325,33 @@ class Settings_Menu {
 				'updated'
 			);
 		}
+	}
+
+	/** Handle the "reset repeat-sender echo lock" status-strip button.
+	 *
+	 * Native admin-post-style flow: the button submits a normal form to the settings
+	 * page carrying self::RESET_ECHO plus its own CSRF nonce. Runs on admin_init (via
+	 * prepare_options()) BEFORE the page renders, so the status strip already shows the
+	 * emptied store. Gated by both a valid nonce and the manage_options capability.
+	 *
+	 * @return void
+	 */
+	public function maybe_reset_echo_store() {
+		$post_action = strval( filter_input( INPUT_POST, self::RCM_ACTION, FILTER_SANITIZE_SPECIAL_CHARS ) );
+		if ( self::RESET_ECHO !== $post_action || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$nonce = isset( $_POST['gdpr_reset_echo_nonce_field'] ) ? sanitize_text_field( wp_unslash( $_POST['gdpr_reset_echo_nonce_field'] ) ) : '';
+		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'gdpr_reset_echo_nonce' ) ) {
+			wp_die( esc_html__( 'Security check failed. This request was blocked by an active CSRF protection mechanism. It may have been triggered by another webpage you recently visited or an unrelated browser tab. To resolve this issue, close untrusted sites, check browser extensions, and refresh your WordPress session by logging in again.', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+		Echo_Store::clear();
+		add_settings_error(
+			Option::PREFIX . 'options',
+			'gdpr-echo-reset',
+			__( 'The repeat-sender lock has been reset — all currently held values were released.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'updated'
+		);
 	}
 
 	/** Filter special chars if not int

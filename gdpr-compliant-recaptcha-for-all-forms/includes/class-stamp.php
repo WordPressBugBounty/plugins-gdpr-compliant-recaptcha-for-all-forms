@@ -79,6 +79,19 @@ class Stamp {
 	 */
 	public function __construct() {
 		$this->capture_request_data();
+		// Register the plugin's OWN token endpoints unconditionally, BEFORE any
+		// whitelist/referrer gating below. get_stamp only issues a stateless token and
+		// check_stamp verifies a PoW — neither decides whether a submission is spam, so
+		// this cannot weaken the spam check. Gating them (as before) meant a get_stamp
+		// admin-ajax POST carrying an HTTP_REFERER under /wp-admin/ skipped registration
+		// entirely, so WordPress answered with its "0"/400 unknown-action fallback and
+		// the client could never obtain a token (frontend re-init/hung-tab loops).
+		$this->register_token_endpoints();
+		// Keep the registered-user-email exclude cache fresh: attach the invalidation
+		// hooks unconditionally (like the token endpoints above) so a user create/
+		// update/delete in THIS request drops the cached hash set. Cheap — add_action
+		// only, the actual rebuild is lazy on the next echo record()/matches().
+		Echo_Store::register_cache_hooks();
 		$referrer_without_protocol = null;
 		$posted_site               = null;
 		if ( array_key_exists( 'HTTP_REFERER', $_SERVER ) ) {
@@ -269,6 +282,53 @@ class Stamp {
 		return $fields;
 	}
 
+	/**
+	 * Field names whose values must never be gibberish-scored, beyond the
+	 * name-heuristic built into Gibberish_Detector: the request's own
+	 * hashPWFields password skip list (real passwords ARE random strings — e.g.
+	 * a signup form posting two custom-named password fields would otherwise
+	 * contribute two "gibberish" tokens and cross the message threshold) plus
+	 * the admin-configured POW_SKIP_FIELDS entries ("site:field" per line, same
+	 * format save_message() consumes). Collects every key and string leaf from
+	 * the nested hashPWFields structure — a safe superset of the exact path
+	 * matching save_message() performs, fine for an exemption list.
+	 *
+	 * @param mixed $fields The submission's field map (pre strip_plugin_fields);
+	 *                      request-/hook-derived, so not guaranteed to be an array.
+	 * @return string[]
+	 */
+	private function gibberish_exempt_field_names( $fields ) {
+		$names = array();
+		if ( is_array( $fields ) && isset( $fields['hashPWFields'] ) && is_string( $fields['hashPWFields'] ) ) {
+			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- benign: hashPWFields is the plugin's own base64-encoded password-field skip list (client twin in recaptcha-gdpr-analysis.js), not obfuscated code.
+			$decoded = json_decode( base64_decode( $fields['hashPWFields'] ), true );
+			if ( is_array( $decoded ) ) {
+				$stack = array( $decoded );
+				while ( $stack ) {
+					$node = array_pop( $stack );
+					foreach ( $node as $key => $value ) {
+						if ( is_string( $key ) && '' !== $key ) {
+							$names[] = $key;
+						}
+						if ( is_array( $value ) ) {
+							$stack[] = $value;
+						} elseif ( is_string( $value ) && '' !== $value ) {
+							$names[] = $value;
+						}
+					}
+				}
+			}
+		}
+		$lines = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_SKIP_FIELDS ), -1, PREG_SPLIT_NO_EMPTY );
+		foreach ( $lines as $line ) {
+			$args = explode( ':', $line );
+			if ( 2 === count( $args ) ) {
+				$names[] = trim( $args[1] );
+			}
+		}
+		return $names;
+	}
+
 	private function check_existing_patterns() {
 		$pattern_found = false;
 		//Specific posts as proprietary ajax calls
@@ -288,7 +348,36 @@ class Stamp {
 				}
 			}
 		}
+		// Wildcard value patterns ({"*":"value"}) also make an otherwise-unmonitored
+		// form monitored, so the wildcard classification in check_submit() can fire
+		// on ANY form (the whole point of "across all forms"). Evaluated over the
+		// user-content POST fields only (Echo_Values skips technical keys).
+		if ( $this->matches_wildcard_patterns( self::strip_plugin_fields( $this->request_data ) ) ) {
+			$pattern_found = true;
+		}
 		return $pattern_found;
+	}
+
+	/**
+	 * Whether any user-content field of $fields equals an admin-configured wildcard
+	 * value pattern ({"*":"value"}) in POW_PARAMETER_PATTERN (normalized trim +
+	 * lowercase). The pattern parsing and the field walk are the pure Echo_Values
+	 * class; this method is only the get_option() glue.
+	 *
+	 * @param mixed $fields Field map to test.
+	 * @return bool
+	 */
+	private function matches_wildcard_patterns( $fields ) {
+		$option = (string) get_option( Option::POW_PARAMETER_PATTERN );
+		if ( '' === trim( $option ) ) {
+			return false;
+		}
+		$lines           = preg_split( '/\r\n|\n|\r/', $option, -1, PREG_SPLIT_NO_EMPTY );
+		$wildcard_values = Echo_Values::wildcard_values_from_lines( $lines );
+		if ( empty( $wildcard_values ) ) {
+			return false;
+		}
+		return Echo_Values::matches_wildcard_values( $fields, $wildcard_values, Echo_Store::site_domains() );
 	}
 
 	private function check_pattern( $a, $b ) {
@@ -320,14 +409,24 @@ class Stamp {
 		return true;
 	}
 
-	/** When the plugin is run
+	/** Register the plugin's own get_stamp/check_stamp admin-ajax handlers.
+	 *
+	 * Called unconditionally from the constructor (NOT from the referrer-gated run()):
+	 * these are the plugin's token-issue/verify endpoints and must always be reachable,
+	 * regardless of referrer, whitelist or admin context. They are stateless w.r.t. the
+	 * spam decision, so always-on registration does not weaken the check.
 	 */
-	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- signature kept for WP hook / manual-call compatibility (registered as an 'init' action callback).
-	public function run( $form_builder = null ) {
+	public function register_token_endpoints() {
 		add_action( 'wp_ajax_nopriv_get_stamp', array( $this, 'get_stamp_call' ) );
 		add_action( 'wp_ajax_nopriv_check_stamp', array( $this, 'check_stamp' ) );
 		add_action( 'wp_ajax_get_stamp', array( $this, 'get_stamp_call' ) );
 		add_action( 'wp_ajax_check_stamp', array( $this, 'check_stamp' ) );
+	}
+
+	/** When the plugin is run
+	 */
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- signature kept for WP hook / manual-call compatibility (registered as an 'init' action callback).
+	public function run( $form_builder = null ) {
 		$ajax = defined( 'DOING_AJAX' ) && DOING_AJAX;
 		if ( ! $ajax ) {
 			add_action( 'wp_enqueue_scripts', array( $this, 'add_script_to_header' ) );
@@ -448,6 +547,149 @@ class Stamp {
 			$this->plugin_spam = true;
 		}
 
+		// Value-based deterministic spam signals (BACKLOG "Wertbasierte Spam-Pattern
+		// über alle Formulare"), evaluated BEFORE gibberish so they take precedence
+		// as the more deliberate, value-based classification. Both run only on
+		// an otherwise-clean submission and only over user-content fields (Echo_Values
+		// skips technical keys — invariant 1).
+		//
+		// (1) Auto-echo lock: an incoming submission whose core values (sender email,
+		//     payload domain, phone, long-text hash) match a value auto-recorded from
+		//     a recent spam-folder message — catches the same sender/domain on ANY
+		//     form / ANY IP within the TTL window (would have caught field datum #2).
+		//     Cheap: one get_transient() + hash lookups.
+		// strip_plugin_fields() first: gdpr_pow_token (92 chars → always a text hash)
+		// and hashPWFields (constant per form → would self-match every submission)
+		// are the plugin's OWN fields, not user content, and must never seed or match
+		// an echo/wildcard value (they are not caught by Echo_Values' technical-key
+		// rule, which only knows generic key patterns).
+		$content_fields = self::strip_plugin_fields( $gdpr_fields );
+		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields ) ) {
+			$this->print_debug_information( 'Echo value match' );
+			$this->plugin_spam = true;
+			// Additively feed the under-attack wave counter (same bucket as PoW/token
+			// fails and gibberish), never in simulation mode. This does NOT change that
+			// echo/wildcard act from the first attempt on their own (POW_BLOCK applies,
+			// single message sorted immediately) — the feed only widens the wave-
+			// detection signal so a determined echo/wildcard spammer also trips
+			// is_under_attack(). Wildcard hits are the same deterministic value-based
+			// class as echo, so both feed the counter.
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+
+		// (2) Wildcard value pattern: a user-content field equals an admin-configured
+		//     {"*":"value"} line in POW_PARAMETER_PATTERN.
+		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_wildcard_patterns( $content_fields ) ) {
+			$this->print_debug_information( 'Wildcard value match' );
+			$this->plugin_spam = true;
+			// Feed the wave counter too — same deterministic value class as the echo
+			// hit above (see that comment). Additive only; not in simulation mode.
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+
+		// Gibberish detection (BACKLOG "Gibberish-Erkennung: Binnen-Case-Wechsel-Regel"):
+		// only evaluated when the submission passed every check above and would
+		// otherwise be clean ($this->plugin_spam still false here) — a genuine
+		// PoW/token failure or the simulation above already routed the message
+		// through $this->plugin_spam. A hit is treated EXACTLY like any other spam
+		// classification from here on (same rgm_type-2 save gated by POW_SAVE_SPAM/
+		// POW_FLAG_SAVE, same POW_FLAG_SPAM field-flagging, same Fail2Ban log line,
+		// same POW_BLOCK gate — reusing $this->plugin_spam instead of a parallel
+		// one-off save call also avoids double-saving the message when
+		// POW_SAVE_CLEAN is on). An earlier revision exempted gibberish-only hits
+		// from POW_BLOCK ("sort, never block"); dropped by user decision
+		// 2026-07-17: a spam classification must always interrupt delivery to the
+		// original target — the spam folder is an analysis/rescue archive, not a
+		// delivery path, and the saved copy (written before the block gate) keeps
+		// false positives rescuable while the block's error message tells a
+		// genuine sender how to reach the site instead.
+		//
+		// $quarantine_only_spam marks the under-attack quarantine below, which —
+		// unlike every other classification — is neither counter-fed nor
+		// echo-recorded nor fail2ban-logged (see the quarantine block below and the
+		// guards on Echo_Store::record() and the fail2ban block).
+		$quarantine_only_spam = false;
+		if ( $gdpr_fields && ! $this->plugin_spam
+			&& Gibberish_Detector::is_gibberish_message(
+				self::strip_plugin_fields( $gdpr_fields ),
+				$this->gibberish_exempt_field_names( $gdpr_fields )
+			)
+		) {
+			$this->print_debug_information( 'Gibberish detected' );
+			$this->plugin_spam = true;
+			// Feed the same under-attack wave counter as a real PoW/token failure —
+			// but only in the real (non-simulated) mode, matching the existing
+			// increment_spam_counter() call above. (POW_SIMULATE_SPAM can be on while
+			// $this->plugin_spam is still false here for the wp_authenticate_user/
+			// wp_signon hooks the simulation branch above deliberately excludes, so
+			// this check is not redundant with the "still false" guard above.)
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+
+		// Under-attack quarantine (BACKLOG "Under-Attack-Eskalationsstufe"): opt-in
+		// second stage of the under-attack response, evaluated LAST so it only ever
+		// fires on a submission that passed every individual check above
+		// ($this->plugin_spam still false). While a spam wave is in progress, such
+		// grey-zone submissions are treated like any other spam classification — the
+		// NORMAL spam path applies, including POW_BLOCK ("under-attack mode with
+		// teeth": during the wave, grey-zone messages are held for review instead of
+		// being delivered as clean; a sort-only copy would leave delivery untouched
+		// and give the mode no teeth at all). Deterministic and lossless: nothing is
+		// discarded, the message lands in the spam folder and the admin rehabilitates
+		// genuine ones from there.
+		//
+		// The gate uses the quarantine's OWN opt-in (POW_UNDER_ATTACK_QUARANTINE) plus
+		// the raw wave DETECTION (is_under_attack()). It deliberately does NOT also
+		// require POW_UNDER_ATTACK_MODE: that option only gates the difficulty *boost*
+		// in get_stamp(); the wave-detection primitive is independent, and the
+		// quarantine's dedicated opt-in is already the admin's explicit choice — an
+		// admin wanting quarantine without the boost (or vice versa) must be able to
+		// have either.
+		//
+		// THREE hard exceptions vs. every other classification (critical, all via
+		// $quarantine_only_spam):
+		//  1. NO increment_spam_counter() — a grey-zone submission counted as spam
+		//     during the wave would keep the wave alive by itself (every clean
+		//     submission would re-trip is_under_attack() → self-reinforcing endless
+		//     escalation). Simply never calling it here IS exception #1.
+		//  2. NO Echo_Store::record() — grey-zone submissions are presumed innocent;
+		//     echoing their core values would deterministically spam-classify a
+		//     legitimate sender for the full 36h TTL, even AFTER the wave ends
+		//     (cascading false positive). Enforced via the Echo_Store::record() guard
+		//     below.
+		//  3. NO fail2ban logging — a genuine visitor submitting during a wave must
+		//     not have their IP fed to an out-of-band ban tool (see the fail2ban
+		//     guard below).
+		if ( $gdpr_fields && self::should_quarantine(
+			(bool) get_option( Option::POW_UNDER_ATTACK_QUARANTINE ),
+			self::is_under_attack(),
+			$this->plugin_spam,
+			(bool) get_option( Option::POW_SIMULATE_SPAM )
+		) ) {
+			$this->print_debug_information( 'Under-attack quarantine' );
+			$this->plugin_spam    = true;
+			$quarantine_only_spam = true;
+		}
+
+		// Auto-echo record (BACKLOG "Auto-Echo-Sperre mit TTL"): once a submission is
+		// classified as spam for ANY reason (PoW/token failure, echo, wildcard,
+		// gibberish) it will land in the spam folder — remember its core values
+		// (hashed, TTL) so the same sender/domain/text is caught on any form / any IP
+		// within the window. Never in simulation mode (everything is "spam" there,
+		// which would poison the store with legitimate submissions). The under-attack
+		// quarantine is EXCLUDED ($quarantine_only_spam, exception #2 above): its
+		// grey-zone submissions are presumed innocent and must not seed echo values
+		// that would spam-classify legitimate senders after the wave ends.
+		if ( $gdpr_fields && $this->plugin_spam && ! $quarantine_only_spam && ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+			Echo_Store::record( self::strip_plugin_fields( $gdpr_fields ) );
+		}
+
 		// If message shall be saved before flagging
 		if (
 			( get_option( Option::POW_SAVE_SPAM ) && ! get_option( Option::POW_FLAG_SAVE ) && $this->plugin_spam )
@@ -517,8 +759,12 @@ class Stamp {
 			return $return_value;
 		}
 
-		// Write log for Fail2Ban
-		if ( $this->plugin_spam ) {
+		// Write log for Fail2Ban — but never for a quarantine-only classification:
+		// those submissions passed every individual check and are presumed innocent;
+		// logging them would let fail2ban BAN the IPs of genuine visitors submitting
+		// during a wave — a lasting, out-of-band lockout, unlike the per-message
+		// quarantine hold (exception #3 in the quarantine block above).
+		if ( $this->plugin_spam && ! $quarantine_only_spam ) {
 			// Hook into failed login attempts in WordPress
 			if ( isset( $this->whole_request_data ['wp-submit'] ) || ( isset( $this->whole_request_data ['log'] ) && isset( $this->whole_request_data ['pwd'] ) ) ) {
 				$username = $this->whole_request_data ['log'] ?? 'unknown_user';
@@ -529,7 +775,11 @@ class Stamp {
 			$this->log_fail2ban_event( 'Possible spam attempt from IP ' . $_SERVER['REMOTE_ADDR'] );
 		}
 
-		// If spam shall be blocked and message is spam
+		// If spam shall be blocked and message is spam. This applies to EVERY spam
+		// classification including gibberish (see the user decision documented at
+		// the gibberish check above) — blocked messages were already saved to the
+		// spam folder before this gate, so false positives stay rescuable, and the
+		// error message below tells a genuine sender how to reach the site.
 		if ( get_option( Option::POW_BLOCK ) && $this->plugin_spam ) {
 			$error_message = get_option( Option::POW_ERROR_MESSAGE );
 			if ( ! $error_message ) {
@@ -919,6 +1169,26 @@ class Stamp {
 		return ( $current + $previous ) >= self::UNDER_ATTACK_THRESHOLD;
 	}
 
+	/**
+	 * Whether an otherwise-clean submission should be quarantined (sorted into the
+	 * spam folder for review) purely because a spam wave is in progress. Pure
+	 * decision helper with explicit bool inputs (no WP calls, no $this) so the
+	 * three-way gate is unit-testable in isolation — see StampQuarantineTest.
+	 *
+	 * The caller wires the WP-dependent inputs (option reads, is_under_attack()).
+	 *
+	 * @param bool $quarantine_enabled POW_UNDER_ATTACK_QUARANTINE opt-in is on.
+	 * @param bool $under_attack       is_under_attack() — a wave is currently detected.
+	 * @param bool $already_spam       The submission was already classified as spam by
+	 *                                 an earlier check (then quarantine is a no-op).
+	 * @param bool $simulation         POW_SIMULATE_SPAM is on (never quarantine then —
+	 *                                 the simulation already marks everything spam).
+	 * @return bool
+	 */
+	public static function should_quarantine( $quarantine_enabled, $under_attack, $already_spam, $simulation ) {
+		return $quarantine_enabled && $under_attack && ! $already_spam && ! $simulation;
+	}
+
 	/** Function to generate a submission-binding token (AP3).
 	 *
 	 * The token is a self-contained, HMAC-bound, single-issue string (see
@@ -1029,11 +1299,14 @@ class Stamp {
 	 * attempt — worst case is (max_attempts - 1) * 100ms ≈ 2s instead of blocking
 	 * the PHP worker for 5s under a spam flood.
 	 *
-	 * @param callable $consume Zero-arg callable returning affected-rows (int).
+	 * @param callable $consume      Zero-arg callable returning affected-rows (int).
+	 * @param int      $max_attempts Attempt budget (default 20 ≈ 2s). A valid chain
+	 *                               token widens this (ChainToken::poll_attempts_for_difficulty)
+	 *                               to bridge an in-flight re-challenge round.
 	 * @return int Affected rows from the winning attempt (0 if the budget ran out).
 	 */
-	private function poll_for_row( callable $consume ) {
-		$max_attempts = 20;
+	private function poll_for_row( callable $consume, $max_attempts = 20 ) {
+		$max_attempts = max( 1, (int) $max_attempts );
 		$attempts     = 0;
 		$valid        = 0;
 
@@ -1073,6 +1346,31 @@ class Stamp {
 		$token = isset( $this->request_data['gdpr_pow_token'] ) && is_string( $this->request_data['gdpr_pow_token'] )
 			? preg_replace( '/[^a-zA-Z0-9]/', '', $this->request_data['gdpr_pow_token'] )
 			: '';
+
+		// Chain-token path (112 chars): a submission carrying a VALID re-challenge chain
+		// token gets an adaptive, difficulty-scaled poll window (up to 8s) to bridge an
+		// in-flight re-challenge round. Reachable ONLY after a paid first solve (a chain
+		// token is issued only in response to a verified fast solve), so the protocol-
+		// blind mass never gets this longer hold — no free worker-blocking vector.
+		if ( ChainToken::LENGTH === strlen( $token ) ) {
+			$now_ms = (int) round( microtime( true ) * 1000 );
+			if ( ChainToken::verify( $token, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, $time_window ) ) {
+				$parsed   = ChainToken::parse( $token );
+				$attempts = ChainToken::poll_attempts_for_difficulty( $parsed ? $parsed['difficulty'] : 0 );
+				$valid    = $this->poll_for_row(
+					function () use ( $token, $time_window ) {
+						return $this->consume_token_row( $token, $time_window );
+					},
+					$attempts
+				);
+				if ( $valid ) {
+					return $valid;
+				}
+				// Chain row never landed within the (extended) window — one IP-fallback
+				// consumption, no further polling, mirroring the 92 token path below.
+				return $this->consume_ip_row( $time_window, $max_uses );
+			}
+		}
 
 		$token_valid = '' !== $token && StampToken::verify(
 			$token,
@@ -1161,10 +1459,17 @@ class Stamp {
 		$this->print_debug_information( "nonce: $nonce" );
 		$this->print_debug_information( "client-IP: $client_ip" );
 
-		// Length decides the format: 92 = AP3 token, 64 = pre-AP3 legacy bucket-stamp.
-		// Both are exclusively hex/decimal, so this replaces the old single-length
-		// (sha256 hex = 64) gate.
+		// Length decides the format: 92 = AP3 base token, 112 = re-challenge chain
+		// token (solve-time plausibility), 64 = pre-AP3 legacy bucket-stamp. All are
+		// exclusively hex/decimal, so this replaces the old single-length gate.
 		$stamp_length = strlen( $stamp );
+
+		// Whether to answer a successful, PERSISTED solve with the new JSON
+		// {accepted:true} body (92 plausible / 112 accepted) instead of the classic
+		// empty wp_die(). Legacy (64) keeps the empty wp_die() — old cached JS clients
+		// never read the body, so JSON success answers are safe new behaviour and the
+		// legacy path is deliberately left untouched.
+		$send_accepted = false;
 
 		if ( StampToken::LENGTH === $stamp_length ) {
 			// Token path (AP3): verified exclusively against the server-resolved IP —
@@ -1196,6 +1501,115 @@ class Stamp {
 				$this->print_debug_information( 'Difficulty target was not met.' );
 				wp_die();
 			}
+
+			// Solve-time plausibility gate (BACKLOG "Solve-Zeit-Plausibilität", now
+			// HANDBUCH §4). issued_at is HMAC-bound (StampToken), so the elapsed span is
+			// unforgeable and — since network latency only ADDS — a hard LOWER bound on
+			// the real solve time. The base token has 1-second granularity (deliberately
+			// coarse); at cap difficulty this quantises ~1/5 of legit solves to 0ms,
+			// costing them one invisible re-challenge round (accepted per spec).
+			$measured_ms = max( 0, time() - $parsed['issued_at'] ) * 1000;
+			$threshold   = ProofOfWork::solve_time_threshold_ms( $token_difficulty );
+			if ( $measured_ms < $threshold ) {
+				// Too fast — do NOT insert. A single fast solve is legitimate luck
+				// (memoryless exponential distribution), so never block: issue a
+				// difficulty-scaled re-challenge chain token instead. KK=1 → this first
+				// re-challenge does NOT feed the under-attack counter (see should_feed_counter).
+				$this->print_debug_information( 'Solve too fast — issuing re-challenge.' );
+				$d1       = min( $token_difficulty + 1, self::DIFFICULTY_CAP );
+				$now_ms   = (int) round( microtime( true ) * 1000 );
+				$required = $threshold + ProofOfWork::solve_time_threshold_ms( $d1 );
+				$chain    = ChainToken::create(
+					$this->get_client_ip(),
+					get_option( Option::POW_SALT ),
+					$d1,
+					$now_ms,
+					1,
+					$measured_ms,
+					$required,
+					bin2hex( random_bytes( 8 ) )
+				);
+				wp_send_json(
+					array(
+						'rechallenge' => true,
+						'stamp'       => $chain,
+						'difficulty'  => $d1,
+					)
+				);
+				// wp_send_json() sends the body and calls wp_die() — execution stops here.
+			}
+
+			// Plausible solve → persist the base token below and answer {accepted:true}.
+			$send_accepted = true;
+		} elseif ( ChainToken::LENGTH === $stamp_length ) {
+			// Re-challenge chain path (solve-time plausibility). The sanitisation above
+			// already keeps only [a-zA-Z0-9]; a chain token is pure hex, so it survives.
+			$parsed = ChainToken::parse( $stamp );
+			$dd     = $parsed ? (int) $parsed['difficulty'] : null;
+
+			// Difficulty gate mirrors the 92 path: the DD is HMAC-bound inside the chain
+			// token, so a client cannot lower it — accept anything from the current base
+			// up to the cap (base/boost may have shifted between rounds).
+			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) || $dd > self::DIFFICULTY_CAP ) {
+				$this->print_debug_information( 'Chain token difficulty below base, above cap, or unparseable.' );
+				wp_die();
+			}
+
+			// Verify ALWAYS against the server-resolved IP, never the posted clientIP.
+			// Both issuing and measuring use microtime milliseconds here.
+			$now_ms = (int) round( microtime( true ) * 1000 );
+			if ( ! ChainToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) ) ) {
+				$this->print_debug_information( 'Chain token is incorrect or expired.' );
+				wp_die();
+			}
+
+			// PoW target with the chain token's own difficulty.
+			if ( ! $this->check_proof_of_work( $dd, $stamp, $nonce ) ) {
+				$this->print_debug_information( 'Chain difficulty target was not met.' );
+				wp_die();
+			}
+
+			$measured_ms = max( 0, $now_ms - $parsed['issued_at_ms'] );
+
+			if ( ChainToken::is_accepted( $parsed['measured_ms'], $measured_ms, $parsed['required_ms'] ) ) {
+				// Cumulative measured time reached the required Erlang budget → accept:
+				// persist the chain token as rgs_stamp below (same duplicate/replay
+				// protection as the 92 path) and answer {accepted:true}.
+				$this->print_debug_information( 'Chain accepted (cumulative time sufficient).' );
+				$send_accepted = true;
+			} else {
+				// Still too fast in aggregate → next re-challenge round, NO insert.
+				$d_next = ChainToken::next_difficulty( $dd, self::DIFFICULTY_CAP );
+				$k_next = ChainToken::next_round( $parsed['round'] );
+				$ss     = ChainToken::accumulate_ms( $parsed['measured_ms'], $measured_ms );
+				$qq     = ChainToken::accumulate_ms( $parsed['required_ms'], ProofOfWork::solve_time_threshold_ms( $d_next ) );
+				$chain  = ChainToken::create(
+					$this->get_client_ip(),
+					get_option( Option::POW_SALT ),
+					$d_next,
+					$now_ms,
+					$k_next,
+					$ss,
+					$qq,
+					bin2hex( random_bytes( 8 ) )
+				);
+				// Feed the site-wide under-attack counter ONLY from round 2 on (KK>=2 in
+				// the freshly issued token) — a sharp verdict after >=2 rounds, never on
+				// the legitimate first lucky solve. check_stamp has no simulation
+				// semantics (that is a check_submit concern), so the KK>=2 gate suffices.
+				if ( ChainToken::should_feed_counter( $k_next ) ) {
+					$this->increment_spam_counter();
+				}
+				$this->print_debug_information( 'Chain continues — issuing next re-challenge.' );
+				wp_send_json(
+					array(
+						'rechallenge' => true,
+						'stamp'       => $chain,
+						'difficulty'  => $d_next,
+					)
+				);
+				// wp_send_json() sends the body and calls wp_die() — execution stops here.
+			}
 		} elseif ( 64 === $stamp_length ) {
 			// Legacy path: pre-AP3 IP+salt+time-bucket stamp (AP1). Kept for a staged
 			// rollout — a stale cache of the `action=get_stamp` GET response (CDN/object
@@ -1222,7 +1636,7 @@ class Stamp {
 				wp_die();
 			}
 		} else {
-			$this->print_debug_information( "stamp size: $stamp_length expected: " . StampToken::LENGTH . ' or 64' );
+			$this->print_debug_information( "stamp size: $stamp_length expected: " . StampToken::LENGTH . ', ' . ChainToken::LENGTH . ' or 64' );
 			wp_die();
 		}
 
@@ -1262,6 +1676,13 @@ class Stamp {
 				$stamp
 			)
 		);
+
+		// Answer a persisted solve. 92-plausible / 112-accepted → {accepted:true}
+		// (new behaviour, safely ignored by old cached JS clients that never read the
+		// body); legacy (64) keeps the classic empty wp_die(). wp_send_json() exits.
+		if ( $send_accepted ) {
+			wp_send_json( array( 'accepted' => true ) );
+		}
 		// Don't forget to stop execution afterwards.
 		wp_die();
 	}

@@ -553,3 +553,37 @@ function savePattern(e, messageID, buttonId, hide = false) {
 	}
 }
 
+// One-click "Block this sender"/"Block this domain" (BACKLOG baustein 2). Global,
+// invoked from the inline onclick in the per-detail-row HTML. The server extracts
+// the final email/domain again and enforces the self-DoS guard.
+function blockValue(button) {
+	var kind = button.getAttribute('data-kind');
+	var value = button.getAttribute('data-value');
+	showSpinner();
+	var xhr = new XMLHttpRequest();
+	xhr.open('POST', gdprMsg.ajaxUrl, true);
+	xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+	xhr.onload = function () {
+		hideSpinner();
+		var response = {};
+		try {
+			response = JSON.parse(xhr.responseText);
+		} catch (e) {
+			response = {};
+		}
+		if (xhr.status === 200 && response.success) {
+			button.disabled = true;
+			showSuccess((response.data && response.data.message) || gdprMsg.i18n.blocked);
+		} else {
+			showAlert((response.data && response.data.error_message) || gdprMsg.i18n.blockFailed);
+		}
+	};
+	xhr.send(
+		'action=gdpr_block_value' +
+		'&messageType=' + encodeURIComponent(gdprMsg.messageType) +
+		'&kind=' + encodeURIComponent(kind) +
+		'&value=' + encodeURIComponent(value) +
+		'&security_nonce=' + encodeURIComponent(gdprMsg.nonces.blockValue)
+	);
+}
+

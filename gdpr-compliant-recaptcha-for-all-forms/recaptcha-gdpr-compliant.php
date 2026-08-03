@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.0
+	 * Version: 5.1
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.0';
+	const VERSION = '5.1';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -67,11 +67,16 @@ class RCM_Main {
 	public static function get_instance() {
 		require_once __DIR__ . '/includes/class-option.php';
 		require_once __DIR__ . '/includes/class-proof-of-work.php';
+		require_once __DIR__ . '/includes/class-echo-values.php';
+		require_once __DIR__ . '/includes/class-echo-store.php';
 		require_once __DIR__ . '/includes/class-message-page.php';
 		require_once __DIR__ . '/includes/class-client-ip.php';
 		require_once __DIR__ . '/includes/class-stamp-token.php';
+		require_once __DIR__ . '/includes/class-chain-token.php';
+		require_once __DIR__ . '/includes/class-gibberish-detector.php';
 		require_once __DIR__ . '/includes/class-stamp.php';
 		require_once __DIR__ . '/includes/class-settings-menu.php';
+		require_once __DIR__ . '/includes/class-scope-sync.php';
 		require_once __DIR__ . '/includes/class-dashboard-widget.php';
 		require_once __DIR__ . '/includes/class-analysis.php';
 
@@ -96,7 +101,10 @@ class RCM_Main {
 		add_action( 'activated_plugin', array( $this, 'activated' ) );
 		$this->instance_message_page  = new Message_Page();
 		$this->instance_settings_menu = new Settings_Menu();
-		$this->dashboard_widget       = new Dashboard_Widget();
+		// Not stored: its constructor registers the admin hooks, which keep the instance
+		// alive for the request (matches WordPress's usual add_action( [$this, …] ) idiom).
+		new Scope_Sync();
+		$this->dashboard_widget = new Dashboard_Widget();
 		if ( get_option( Option::POW_DIRECT_ANALYSIS_MODE ) ) {
 			$this->instance_analysis = new Analysis();
 		}
@@ -517,8 +525,58 @@ class RCM_Main {
 			add_option( Option::POW_TRUSTED_PROXIES, '' );
 			add_option( Option::POW_MAX_USES, 10 );
 			add_option( Option::POW_UNDER_ATTACK_MODE, true );
+			add_option( Option::POW_UNDER_ATTACK_QUARANTINE, false );
 
 			update_option( Option::POW_VERSION, $this->version );
+
+			// Drop stale OPcode-cache entries for the plugin's own PHP files after an
+			// upgrade. Belt-and-suspenders: WordPress core already invalidates updated
+			// files (>=6.2), but on hosts with opcache.validate_timestamps=0, a separate
+			// PHP-FPM pool, or an update applied via WP-CLI, long-lived workers can keep
+			// executing the OLD bytecode while the new DB schema is already in place —
+			// which is exactly what produces the "duplicate rgs_stamp / everything
+			// flagged as spam" mismatch this release addresses. Honest limitation: this
+			// only helps once the NEW code is what runs activate(); a fully stale worker
+			// that never re-reads this file needs an OPcache flush / FPM restart (see
+			// readme.txt Upgrade Notice).
+			$this->invalidate_own_opcache();
+		}
+	}
+
+	/**
+	 * Invalidate the OPcache entries for this plugin's own PHP files. No-op when
+	 * OPcache is disabled or the invalidate API is unavailable/restricted. Never
+	 * calls opcache_reset(): that would nuke every other app's cache on shared hosting.
+	 */
+	private function invalidate_own_opcache() {
+		if ( ! function_exists( 'opcache_invalidate' ) || ! ini_get( 'opcache.enable' ) ) {
+			return;
+		}
+		// Recurse the plugin directory with a portable iterator. Deliberately NOT
+		// glob('{,*/}*.php', GLOB_BRACE): GLOB_BRACE is not defined on every platform
+		// (absent on musl/Alpine, common in containers and on some managed hosts), and
+		// referencing it there is a fatal "undefined constant" — the very kind of
+		// breakage this method is meant to prevent.
+		try {
+			$iterator = new \RecursiveIteratorIterator(
+				new \RecursiveDirectoryIterator( plugin_dir_path( __FILE__ ), \FilesystemIterator::SKIP_DOTS )
+			);
+		} catch ( \Exception $e ) {
+			return;
+		}
+		foreach ( $iterator as $file ) {
+			if ( ! $file->isFile() || 'php' !== strtolower( $file->getExtension() ) ) {
+				continue;
+			}
+			$path = $file->getPathname();
+			// wp_opcache_invalidate() (WP >=5.5) wraps opcache_invalidate() and honours
+			// opcache.restrict_api; fall back to the raw call on older cores.
+			if ( function_exists( 'wp_opcache_invalidate' ) ) {
+				wp_opcache_invalidate( $path, true );
+			} else {
+				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- opcache.restrict_api can make this emit a warning for a path outside the allowed prefix; the invalidation is strictly best-effort hardening, so silence is intended.
+				@opcache_invalidate( $path, true );
+			}
 		}
 	}
 

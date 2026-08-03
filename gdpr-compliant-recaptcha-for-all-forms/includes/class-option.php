@@ -67,6 +67,12 @@ class Option {
 	/** @var string */
 	const POW_UNDER_ATTACK_MODE = self::PREFIX . 'pow_under_attack_mode';
 
+	/** @var string */
+	const POW_UNDER_ATTACK_QUARANTINE = self::PREFIX . 'pow_under_attack_quarantine';
+
+	/** @var string */
+	const POW_ECHO_LOCK_ENABLED = self::PREFIX . 'pow_echo_lock_enabled';
+
 	/** @var bool */
 	const POW_BLOCK_LOGIN = self::PREFIX . 'pow_block_login';
 
@@ -141,6 +147,25 @@ class Option {
 
 	/** @var Text */
 	const POW_PARAMETER_PATTERN = self::PREFIX . 'pow_parameter_pattern';
+
+	/**
+	 * Ledger of default explicit-actions/patterns already OFFERED to the scope
+	 * (Scope_Sync). Not user-facing; tracks which builder defaults have been seen so
+	 * a newly-activated builder's action is added once, while an admin-removed entry
+	 * is never re-added. See class-scope-sync.php.
+	 *
+	 * @var string
+	 */
+	const POW_SEEDED_ACTIONS = self::PREFIX . 'pow_seeded_actions';
+
+	/** @var string */
+	const POW_SEEDED_PATTERNS = self::PREFIX . 'pow_seeded_patterns';
+
+	/**
+	 * Set once the admin has dismissed (or acted on) the one-time "unmonitored form
+	 * builders detected" notice for the pre-existing-install backfill. @var string
+	 */
+	const POW_SCOPE_NOTICE_DISMISSED = self::PREFIX . 'pow_scope_notice_dismissed';
 
 	/** @var Text */
 	const POW_HIDE_ACTION = self::PREFIX . 'pow_hide_action';

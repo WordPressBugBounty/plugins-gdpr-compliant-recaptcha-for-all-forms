@@ -27,6 +27,7 @@ class Message_Page {
 		add_action( 'wp_ajax_delete_message', array( $this, 'delete_message' ) );
 		add_action( 'wp_ajax_save_list_parameter', array( $this, 'save_list_parameter_callback' ) );
 		add_action( 'wp_ajax_save_pattern', array( $this, 'save_pattern_callback' ) );
+		add_action( 'wp_ajax_gdpr_block_value', array( $this, 'block_value_callback' ) );
 	}
 
 
@@ -252,6 +253,7 @@ class Message_Page {
 					'search'      => wp_create_nonce( 'render-messages_' . $message_type ),
 					'saveList'    => wp_create_nonce( 'save_list_nonce_' . $message_type ),
 					'savePattern' => wp_create_nonce( 'save_pattern_nonce_' . $message_type ),
+					'blockValue'  => wp_create_nonce( 'block_value_nonce_' . $message_type ),
 				),
 				'i18n'        => array(
 					// NB: sprintf( __( … ), $title ) — translate the template, then fill in.
@@ -266,6 +268,8 @@ class Message_Page {
 					'whitelisted'      => __( 'Whitelisting successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'patternSaved'     => __( 'Pattern saved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'choosePattern'    => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'blocked'          => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'blockFailed'      => __( 'Could not block this value.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				),
 			)
 		);
@@ -325,6 +329,9 @@ class Message_Page {
                 </thead>
                 <tbody>
         ';
+		// Own registrable domain(s), so the one-click "Block this domain" button is
+		// never offered for the site's own referrer/page URL (self-DoS guard).
+		$own_domains = Echo_Store::site_domains();
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
 			$html_details .= '<tr class="table-body">';
@@ -345,7 +352,30 @@ class Message_Page {
 					$html_details .= '<td class="check_returnValue_' . $message_id . '"> </td>';
 				}
 			}
-			$html_details .= '<td class="returnAttribute">' . esc_attr( $detail->rgd_value ) . '</td>
+			$html_details .= '<td class="returnAttribute">' . esc_attr( $detail->rgd_value );
+			// One-click block buttons (BACKLOG baustein 2), only for user-posted
+			// content fields (rgm_posted) outside the analysis view — never for the
+			// technical from_site/post_on_site rows carrying the site's own URL.
+			// ($message_type is a sanitized numeric string, FILTER_SANITIZE_NUMBER_INT.)
+			if ( 4 !== (int) $message_type && $detail->rgm_posted ) {
+				$value = (string) $detail->rgd_value;
+				$email = Echo_Values::extract_email( $value );
+				if ( null !== $email ) {
+					$html_details .= ' <button type="button" class="gdpr-block-btn" data-kind="sender" data-value="' . esc_attr( $email ) . '" onclick="blockValue(this)">' . esc_html__( 'Block this sender', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
+				}
+				$domain_to_block = null;
+				foreach ( Echo_Values::extract_urls( $value ) as $url ) {
+					$candidate = Echo_Values::registrable_domain( $url, $own_domains );
+					if ( null !== $candidate ) {
+						$domain_to_block = $candidate;
+						break;
+					}
+				}
+				if ( null !== $domain_to_block ) {
+					$html_details .= ' <button type="button" class="gdpr-block-btn" data-kind="domain" data-value="' . esc_attr( $domain_to_block ) . '" onclick="blockValue(this)">' . esc_html__( 'Block this domain', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
+				}
+			}
+			$html_details .= '</td>
                 </tr>';
 		}
 		$html_details .= '</tbody></table>';
@@ -456,6 +486,75 @@ class Message_Page {
 			wp_send_json_error( array( 'error_message' => __( 'Pattern already exists.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
 		}
 
+		exit;
+	}
+
+	/**
+	 * One-click "Block this sender"/"Block this domain" (BACKLOG baustein 2): append
+	 * a wildcard value line {"*":"value"} to POW_PARAMETER_PATTERN. Capability-gated
+	 * (manage_options) + nonce. CRITICAL self-DoS guard: refuses to block a value on
+	 * the site's own registrable domain.
+	 */
+	public function block_value_callback() {
+		$message_type   = filter_var( isset( $_POST['messageType'] ) ? wp_unslash( $_POST['messageType'] ) : '', FILTER_VALIDATE_INT );
+		$security_nonce = isset( $_POST['security_nonce'] ) ? filter_var( wp_unslash( $_POST['security_nonce'] ), FILTER_UNSAFE_RAW ) : '';
+
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $security_nonce, 'block_value_nonce_' . $message_type ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
+		$kind        = isset( $_POST['kind'] ) ? sanitize_text_field( wp_unslash( $_POST['kind'] ) ) : '';
+		$raw         = isset( $_POST['value'] ) ? sanitize_text_field( wp_unslash( $_POST['value'] ) ) : '';
+		$own_domains = Echo_Store::site_domains();
+		$value       = null;
+
+		if ( 'sender' === $kind ) {
+			$email = Echo_Values::extract_email( $raw );
+			if ( null === $email ) {
+				wp_send_json_error( array( 'error_message' => __( 'No valid sender address found.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+			// Self-DoS guard: refuse an address on the site's own domain.
+			$at            = strrpos( $email, '@' );
+			$sender_domain = false !== $at ? Echo_Values::registrable_domain( substr( $email, $at + 1 ), array() ) : null;
+			if ( null !== $sender_domain && in_array( $sender_domain, $own_domains, true ) ) {
+				wp_send_json_error( array( 'error_message' => __( 'Refusing to block an address on your own domain.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+			$value = $email;
+		} elseif ( 'domain' === $kind ) {
+			// registrable_domain() returns null for the own domain(s), an IP, or a
+			// non-domain — the same self-DoS guard, plus input validation.
+			$value = Echo_Values::registrable_domain( $raw, $own_domains );
+			if ( null === $value ) {
+				wp_send_json_error( array( 'error_message' => __( 'Cannot block this value (empty, an IP address, or your own domain).', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+		} else {
+			wp_send_json_error( array( 'error_message' => __( 'Invalid block request.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
+		$line     = (string) wp_json_encode( array( '*' => $value ) );
+		$existing = (string) get_option( Option::POW_PARAMETER_PATTERN );
+		$lines    = '' === trim( $existing ) ? array() : preg_split( "/\r\n|\n|\r/", $existing, -1, PREG_SPLIT_NO_EMPTY );
+
+		foreach ( $lines as $existing_line ) {
+			if ( trim( $existing_line ) === $line ) {
+				wp_send_json_error( array( 'error_message' => __( 'This value is already blocked.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+		}
+
+		$lines[] = $line;
+		update_option( Option::POW_PARAMETER_PATTERN, implode( "\n", $lines ) );
+		wp_send_json_success(
+			array(
+				'message' => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'value'   => $value,
+			)
+		);
 		exit;
 	}
 

@@ -24,6 +24,12 @@
  * (secure contexts only — https/localhost) over the hand-rolled `sha256()`,
  * which stays in this file as the fallback for http:// sites/old browsers.
  */
+// Defensive default: if wp_localize_script somehow did not run (missing/duplicated
+// enqueue, an aborted head), reading gdprPow.* at parse time would throw a
+// ReferenceError and take the WHOLE file down — including the Ajax error-message
+// interception. Fall back to an empty object so the file still parses; without real
+// values it simply no-ops instead of crashing.
+var gdprPow = (typeof window !== 'undefined' && window.gdprPow) ? window.gdprPow : (typeof gdprPow !== 'undefined' ? gdprPow : {});
 var gdpr_compliant_recaptcha_stamp = gdprPow.stamp;
 var gdpr_compliant_recaptcha_ip = gdprPow.clientIp;
 var gdpr_compliant_recaptcha_nonce = null;
@@ -36,10 +42,13 @@ var gdpr_compliant_recaptcha = {
 	originalFetches : [],
 	originalXhrOpens : [],
 	originalXhrSends : [],
-	originalFetch : window.fetch,
-	abortController : new AbortController(),
-	originalXhrOpen : XMLHttpRequest.prototype.open,
-	originalXhrSend : XMLHttpRequest.prototype.send,
+	// typeof guards keep the object literal evaluable outside a browser too (the
+	// Node-based regression tests require this file for its pure helpers) — in the
+	// browser these globals always exist, so behaviour there is unchanged.
+	originalFetch : ( typeof window !== 'undefined' ) ? window.fetch : null,
+	abortController : ( typeof AbortController !== 'undefined' ) ? new AbortController() : null,
+	originalXhrOpen : ( typeof XMLHttpRequest !== 'undefined' ) ? XMLHttpRequest.prototype.open : null,
+	originalXhrSend : ( typeof XMLHttpRequest !== 'undefined' ) ? XMLHttpRequest.prototype.send : null,
 
 	// Function to check if a string is a valid JSON
 	isValidJson : function( str ) {
@@ -49,6 +58,74 @@ var gdpr_compliant_recaptcha = {
 		} catch ( error ) {
 			return false;
 		}
+	},
+
+	// Tolerant JSON-OBJECT parse for Ajax responses that may carry noise before/after
+	// the JSON: a PHP notice/deprecation printed by ANOTHER plugin under display_errors
+	// (common on PHP 8.x hosts), a BOM, or leading/trailing whitespace. Returns the
+	// parsed plain object, or null — it NEVER throws. This matters because initCaptcha()
+	// used response.json() directly: a single stray byte before the "{" made it reject,
+	// which (with no .catch) killed the entire proof-of-work pipeline → no stamp was
+	// ever computed → every submission was classified as spam server-side.
+	//
+	// Strictly a CLIENT-side convenience: it only loosens what THIS browser accepts,
+	// never any server-side verification (check_stamp still HMAC-verifies the token and
+	// re-runs the PoW), so it cannot weaken the spam decision. Arrays/scalars → null.
+	parseJsonLoose : function ( text ) {
+		if ( typeof text !== 'string' || text === '' ) {
+			return null;
+		}
+		var candidates = [ text ];
+		var start = text.indexOf( '{' );
+		var end = text.lastIndexOf( '}' );
+		if ( start !== -1 && end !== -1 && end > start ) {
+			candidates.push( text.slice( start, end + 1 ) );
+		}
+		for ( var i = 0; i < candidates.length; i++ ) {
+			try {
+				var parsed = JSON.parse( candidates[ i ] );
+				if ( parsed && typeof parsed === 'object' && ! Array.isArray( parsed ) ) {
+					return parsed;
+				}
+			} catch ( e ) {
+				// Try the next candidate (e.g. the salvaged { ... } slice).
+			}
+		}
+		return null;
+	},
+
+	// Map a (possibly bracketed) form-field name to a nested object, used to record
+	// password-field paths that must never be stored in the inbox. Returns {} for a
+	// null/empty/unmatchable name instead of throwing — a password <input> without a
+	// name attribute previously made str.match() run on null → TypeError, aborting the
+	// interception setup in addFirstStamp().
+	fieldNameToNestedObject : function ( str ) {
+		var keys = ( typeof str === 'string' ) ? str.match( /[^\[\]]+|\[[^\[\]]+\]/g ) : null;
+		if ( ! keys ) {
+			return {};
+		}
+		var obj = {};
+		var tempObj = obj;
+		for ( var i = 0; i < keys.length; i++ ) {
+			var key = keys[ i ];
+			if ( key.startsWith( '[' ) && key.endsWith( ']' ) ) {
+				key = key.substring( 1, key.length - 1 );
+			}
+			tempObj[ key ] = ( i === keys.length - 1 ) ? null : {};
+			tempObj = tempObj[ key ];
+		}
+		return obj;
+	},
+
+	// Clamp the renew interval to a sane floor. gdprPow.timeout is the raw
+	// POW_TIME_WINDOW option (minutes); if it is empty/0/NaN, `raw * 60000` would be ~0
+	// and setInterval would hammer admin-ajax on every tick (self-DoS). Floor at 1 min.
+	renewIntervalMs : function ( rawTimeout ) {
+		var minutes = parseInt( rawTimeout, 10 );
+		if ( ! ( minutes > 0 ) ) {
+			minutes = 10;
+		}
+		return minutes * 60000;
 	},
 
 	// Whether an outgoing request is the plugin's own get_stamp/check_stamp Ajax call
@@ -125,9 +202,21 @@ var gdpr_compliant_recaptcha = {
 		return body;
 	},
 
-	// Append (once) / refresh a hidden gdpr_pow_token field on every form. Appended at
-	// the END (not prepended like hashPWFields): the field must never become the form's
-	// first key — tooling that names a submission after its first field (e.g. the
+	// Whether a form submits via GET (method="get" or absent — HTML's default).
+	// form.method normalises to "get"/"post"; we treat anything not explicitly "post"
+	// as GET. Hidden fields on a GET form become VISIBLE query parameters, so injecting
+	// the token there would append "&gdpr_pow_token=<92 chars>" to e.g. a theme search
+	// URL ("?s=coffee&gdpr_pow_token=...") — ugly and harmful when the URL is shared.
+	// The plugin only ever inspects POST submissions ($_POST), so a GET form never
+	// needs the token anyway; skipping it costs no protection.
+	isGetForm : function (form) {
+		var method = (form && typeof form.method === 'string') ? form.method.toLowerCase() : 'get';
+		return method !== 'post';
+	},
+
+	// Append (once) / refresh a hidden gdpr_pow_token field on every POST form. Appended
+	// at the END (not prepended like hashPWFields): the field must never become the
+	// form's first key — tooling that names a submission after its first field (e.g. the
 	// direct-analysis overlay's seekName()) would otherwise label every form
 	// "gdpr_pow_token".
 	updateFormTokenFields : function (token) {
@@ -136,6 +225,10 @@ var gdpr_compliant_recaptcha = {
 		}
 		var forms = document.querySelectorAll('form');
 		forms.forEach(function (form) {
+			// Never inject into GET forms (search boxes etc.) — see isGetForm().
+			if (gdpr_compliant_recaptcha.isGetForm(form)) {
+				return;
+			}
 			var field = form.querySelector('input.gdpr_pow_token_field');
 			if (!field) {
 				field = document.createElement('input');
@@ -475,19 +568,72 @@ var gdpr_compliant_recaptcha = {
 					'&hashNonce=' + encodeURIComponent(nonce)
 		})
 		.then(function (response) {
-			// The server has no distinct HTTP failure status for a rejected solve
-			// (wp_die() still answers 200) — same as before AP3, this does not
-			// distinguish accept vs. reject. Remembering the stamp as the current
-			// submission token is a best-effort optimization: if the solve was in
-			// fact rejected server-side, check_request()'s per-token poll simply
-			// finds no row and falls back to the IP path, same as no token at all.
-			gdpr_compliant_recaptcha_token = hashStamp;
-			gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
+			// Read the check_stamp response body to detect a solve-time re-challenge.
+			// window.fetch is wrapped by handleFetchResponse, which consumes the ORIGINAL
+			// body via response.text() and hands us back a CLONE — so calling .json() on
+			// THIS (returned/cloned) response is safe. Defensive: an empty / non-JSON body
+			// (older server builds still answer with an empty wp_die()) falls through to
+			// the legacy behaviour below (just remember the solved token). The server has
+			// no distinct HTTP failure status for a rejected solve, so a genuinely rejected
+			// solve simply yields no token row server-side and check_request() falls back
+			// to the IP path — identical to no token at all.
+			var rememberSolved = function () {
+				gdpr_compliant_recaptcha_token = hashStamp;
+				gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
+			};
+			var handleParsed = function (data) {
+				if (data && data.rechallenge === true && typeof data.stamp === 'string') {
+					// Chain continues: adopt the chain token as the CURRENT submission
+					// token immediately (a mid-chain submit then posts the chain token →
+					// server uses the adaptive poll window) and keep computing without any
+					// user interaction. findHash() is async, so this "recursion" runs in a
+					// microtask — no synchronous stack growth however long the chain runs.
+					gdpr_compliant_recaptcha_stamp = data.stamp;
+					gdpr_compliant_recaptcha_token = data.stamp;
+					if (data.difficulty) {
+						gdpr_compliant_recaptcha_difficulty = data.difficulty;
+					}
+					gdpr_compliant_recaptcha.updateFormTokenFields(data.stamp);
+					gdpr_compliant_recaptcha.findHash();
+					return;
+				}
+				// {accepted:true} or anything else: remember the solved base token.
+				rememberSolved();
+			};
+			try {
+				if (response && typeof response.text === 'function') {
+					return response.text().then(function (bodyText) {
+						handleParsed(gdpr_compliant_recaptcha.parseJsonLoose(bodyText));
+					}).catch(rememberSolved);
+				}
+			} catch (e) {
+				// Fall through to the legacy behaviour below.
+			}
+			rememberSolved();
 		});
 		return true;
 	},
 
-	initCaptcha : function(){
+	// Last resort when get_stamp is unreachable: solve the token that was embedded at
+	// page-render time via wp_localize_script (gdprPow.stamp — already seeded into
+	// gdpr_compliant_recaptcha_stamp at the top of this file). It is a fresh,
+	// server-verifiable StampToken, so the PoW can still run even when the get_stamp
+	// Ajax round-trip fails (a WAF blocking admin-ajax GETs, a stray PHP notice
+	// polluting the JSON, a transient 5xx). On a CACHED page the embedded token is
+	// stale → the server rejects it on check_stamp → no row, exactly as today, never
+	// worse. Fail-closed is untouched: this only changes what the LEGITIMATE client
+	// attempts, never a server-side check.
+	solveWithLocalizedStamp : function () {
+		if ( typeof gdpr_compliant_recaptcha_stamp === 'string' && gdpr_compliant_recaptcha_stamp ) {
+			if ( ! gdpr_compliant_recaptcha_difficulty ) {
+				gdpr_compliant_recaptcha_difficulty = gdprPow.difficulty;
+			}
+			gdpr_compliant_recaptcha.findHash();
+		}
+	},
+
+	initCaptcha : function ( attempt ) {
+		attempt = attempt || 0;
 		fetch(gdprPow.ajaxUrl + '?action=get_stamp', {
 			method: 'GET',
 			headers: {
@@ -495,15 +641,45 @@ var gdpr_compliant_recaptcha = {
 			},
 		})
 		.then(function (response) {
-			return response.json();
+			// Read as text and parse tolerantly: response.json() would REJECT on any
+			// noise before the JSON (a PHP notice under display_errors, a BOM, an HTML
+			// error page from a WAF/5xx). With no .catch that rejection silently killed
+			// the whole pipeline → no stamp ever computed → every submission flagged spam.
+			return response.text();
 		})
-		.then(function (response) {
-			gdpr_compliant_recaptcha_stamp = response.stamp;
-			gdpr_compliant_recaptcha_ip = response.client_ip;
-			gdpr_compliant_recaptcha_difficulty = response.difficulty || gdprPow.difficulty;
-			gdpr_compliant_recaptcha.findHash();
+		.then(function (text) {
+			var data = gdpr_compliant_recaptcha.parseJsonLoose(text);
+			if (data && typeof data.stamp === 'string' && data.stamp) {
+				gdpr_compliant_recaptcha_stamp = data.stamp;
+				gdpr_compliant_recaptcha_ip = data.client_ip;
+				gdpr_compliant_recaptcha_difficulty = data.difficulty || gdprPow.difficulty;
+				gdpr_compliant_recaptcha.findHash();
+				return;
+			}
+			// Unusable body: retry ONCE after a short backoff (self-heals a transient
+			// notice/5xx), then fall back to the render-time embedded token.
+			gdpr_compliant_recaptcha.retryOrFallback(attempt, 'get_stamp returned an unusable body');
+		})
+		.catch(function () {
+			// Network/abort failure: same bounded retry → embedded-token fallback.
+			gdpr_compliant_recaptcha.retryOrFallback(attempt, 'get_stamp request failed');
 		});
+	},
 
+	// One bounded retry, then the localized-stamp fallback. Bounded so a persistently
+	// broken get_stamp cannot turn into a request storm (the setInterval renew already
+	// re-tries on its own cadence).
+	retryOrFallback : function ( attempt, reason ) {
+		if ( attempt < 1 ) {
+			setTimeout( function () {
+				gdpr_compliant_recaptcha.initCaptcha( attempt + 1 );
+			}, 1500 );
+			return;
+		}
+		if ( typeof console !== 'undefined' && console.warn ) {
+			console.warn( 'gdpr-recaptcha: ' + reason + '; falling back to the embedded token.' );
+		}
+		gdpr_compliant_recaptcha.solveWithLocalizedStamp();
 	},
 
 	// Function to display a nice-looking error message
@@ -537,43 +713,53 @@ var gdpr_compliant_recaptcha = {
 		if( ! gdpr_compliant_recaptcha.stampLoaded){
 			gdpr_compliant_recaptcha.stampLoaded = true;
 			gdpr_compliant_recaptcha.initCaptcha();
-			let forms = document.querySelectorAll('form');
-			//This is important to mark password fields. They shall not be posted to the inbox
-			function convertStringToNestedObject(str) {
-				var keys = str.match(/[^\[\]]+|\[[^\[\]]+\]/g); // Extrahiere Wörter und eckige Klammern
-				var obj = {};
-				var tempObj = obj;
-
-				for (var i = 0; i < keys.length; i++) {
-					var key = keys[i];
-
-					// Wenn die eckigen Klammern vorhanden sind
-					if (key.startsWith('[') && key.endsWith(']')) {
-						key = key.substring(1, key.length - 1); // Entferne eckige Klammern
+			// Best-effort password-field harvest (marks password fields so their values
+			// are not stored in the inbox). Wrapped in try/catch so a malformed field
+			// name or exotic third-party markup can never throw out of this init and
+			// starve the fetch/XHR interception + renew installed below.
+			try {
+				let forms = document.querySelectorAll('form');
+				forms.forEach(form => {
+					// Skip GET forms — a hidden hashPWFields on one would leak into the
+					// URL just like the token would (see isGetForm()).
+					if (gdpr_compliant_recaptcha.isGetForm(form)) {
+						return;
 					}
+					let passwordInputs = form.querySelectorAll("input[type='password']");
+					let hashPWFields = [];
+					passwordInputs.forEach(input => {
+						hashPWFields.push(gdpr_compliant_recaptcha.fieldNameToNestedObject(input.getAttribute('name')));
+					});
 
-					tempObj[key] = (i === keys.length - 1) ? null : {};
-					tempObj = tempObj[key];
-				}
-
-				return obj;
-			}
-			forms.forEach(form => {
-				let passwordInputs = form.querySelectorAll("input[type='password']");
-				let hashPWFields = [];
-				passwordInputs.forEach(input => {
-					hashPWFields.push(convertStringToNestedObject(input.getAttribute('name')));
+					if (hashPWFields.length !== 0) {
+						let hashPWFieldsInput = document.createElement('input');
+						hashPWFieldsInput.type = 'hidden';
+						hashPWFieldsInput.classList.add('hashPWFields');
+						hashPWFieldsInput.name = 'hashPWFields';
+						hashPWFieldsInput.value = btoa(JSON.stringify(hashPWFields));
+						form.prepend(hashPWFieldsInput);
+					}
 				});
-				
-				if (hashPWFields.length !== 0) {
-					let hashPWFieldsInput = document.createElement('input');
-					hashPWFieldsInput.type = 'hidden';
-					hashPWFieldsInput.classList.add('hashPWFields');
-					hashPWFieldsInput.name = 'hashPWFields';
-					hashPWFieldsInput.value = btoa(JSON.stringify(hashPWFields));//btoa(hashPWFields);
-					form.prepend(hashPWFieldsInput);
+			} catch (harvestErr) {
+				if (typeof console !== 'undefined' && console.warn) {
+					console.warn('gdpr-recaptcha: password-field harvest skipped', harvestErr);
 				}
-			});
+			}
+
+			// Re-capture the CURRENT fetch/XHR right before wrapping them, instead of
+			// relying on the load-time snapshot taken at the top of this file. A third-
+			// party script may have installed its OWN fetch/XHR wrapper between page load
+			// and this first user interaction; wrapping the current functions keeps that
+			// wrapper in the delegation chain rather than stomping it. (window.fetch is
+			// only replaced below, so at this point it is never our own wrapper yet — the
+			// guard is belt-and-suspenders.)
+			if (typeof window !== 'undefined' && typeof window.fetch === 'function' && window.fetch !== gdpr_compliant_recaptcha.handleFetchResponse) {
+				gdpr_compliant_recaptcha.originalFetch = window.fetch;
+			}
+			if (typeof XMLHttpRequest !== 'undefined') {
+				gdpr_compliant_recaptcha.originalXhrOpen = XMLHttpRequest.prototype.open;
+				gdpr_compliant_recaptcha.originalXhrSend = XMLHttpRequest.prototype.send;
+			}
 
 			// Override open method to store method and URL
 			XMLHttpRequest.prototype.open = function (method, url) {
@@ -632,7 +818,7 @@ var gdpr_compliant_recaptcha = {
 					overrideFunction.apply(this, arguments);
 				});
 
-				result = gdpr_compliant_recaptcha.originalXhrSend.apply(this, [data]);
+				var result = gdpr_compliant_recaptcha.originalXhrSend.apply(this, [data]);
 				if (result instanceof Promise){
 					return result.then(function() {});
 				}else{
@@ -653,13 +839,27 @@ var gdpr_compliant_recaptcha = {
 				}
 			}, true);
 
-			setInterval( gdpr_compliant_recaptcha.initCaptcha, gdprPow.timeout * 60000 );
+			setInterval( gdpr_compliant_recaptcha.initCaptcha, gdpr_compliant_recaptcha.renewIntervalMs( gdprPow.timeout ) );
 		}
 	}
 }
-window.addEventListener( 'load', function gdpr_compliant_recaptcha_load () {
-	document.addEventListener( 'keydown', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-	document.addEventListener( 'mousemove', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-	document.addEventListener( 'scroll', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-	document.addEventListener( 'click', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-} );
+if ( typeof window !== 'undefined' && typeof document !== 'undefined' ) {
+	window.addEventListener( 'load', function gdpr_compliant_recaptcha_load () {
+		document.addEventListener( 'keydown', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
+		document.addEventListener( 'mousemove', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
+		document.addEventListener( 'scroll', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
+		document.addEventListener( 'click', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
+	} );
+}
+
+// Expose the pure, DOM-independent helpers for the Node-based regression tests
+// (tests/js/, run via `node --test`). No effect in the browser: `module` is undefined
+// there, so this block is skipped and the file stays a plain enqueued script.
+if ( typeof module !== 'undefined' && module.exports ) {
+	module.exports = {
+		parseJsonLoose : gdpr_compliant_recaptcha.parseJsonLoose,
+		fieldNameToNestedObject : gdpr_compliant_recaptcha.fieldNameToNestedObject,
+		renewIntervalMs : gdpr_compliant_recaptcha.renewIntervalMs,
+		isGetForm : gdpr_compliant_recaptcha.isGetForm
+	};
+}
