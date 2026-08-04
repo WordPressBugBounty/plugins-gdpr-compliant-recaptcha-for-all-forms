@@ -1161,6 +1161,21 @@ class Settings_Menu {
 			'text'  => sprintf( __( '%d spam blocked this week', 'gdpr-compliant-recaptcha-for-all-forms' ), $spam_this_week ),
 		);
 
+		// Health counter: submissions whose classification reason was "no usable stamp
+		// row" (no_pow:*) in the last 24h — the fingerprint of a broken client-PoW
+		// pipeline (HANDBUCH §12). Amber above the threshold; the decision itself is the
+		// pure Option::health_counter_status().
+		$no_pow_count  = Option::count_no_pow_reasons_since_hours( Option::HEALTH_NO_POW_WINDOW_HOURS );
+		$no_pow_status = Option::health_counter_status( $no_pow_count, Option::HEALTH_NO_POW_WARN_THRESHOLD );
+		$items[]       = array(
+			'class' => $no_pow_status['class'],
+			'text'  => sprintf(
+				/* translators: %d: number of submissions in the last 24 hours that had no usable proof-of-work stamp */
+				_n( '%d submission without a stamp row (24h)', '%d submissions without a stamp row (24h)', $no_pow_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
+				$no_pow_count
+			),
+		);
+
 		// Repeat-sender echo lock: how many values it currently holds, plus a one-click
 		// reset (offered only when non-empty). The count reflects the store even when
 		// the feature is toggled off, so a stale value can still be released.

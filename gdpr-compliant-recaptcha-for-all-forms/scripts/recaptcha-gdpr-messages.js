@@ -9,6 +9,10 @@
  * MUST stay global — do not wrap in an IIFE/module.
  */
 
+function gdprSerializeForm(formFinal) {
+	return Array.from(new FormData(formFinal)).map(kv => kv.join("=")).join("&");
+}
+
 function showSpinner() {
 	var spinner = document.querySelector('.centered-spinner');
 	spinner.removeAttribute('hidden'); // Remove the hidden attribute
@@ -202,7 +206,7 @@ function moveMessages( changeType, form, search ){
 	let messages = Array.from(check_message).map(el => {
 		let id = el.id.split('_')[2];
 		let formFinal = document.querySelector('#' + form + id);
-		let serialized = Array.from(new FormData(formFinal)).map(kv => kv.join("=")).join("&");
+		let serialized = gdprSerializeForm(formFinal);
 		return serialized;
 	});
 
@@ -300,14 +304,14 @@ function deleteMessages( form, search ){
 	let messages = Array.from(check_message).map(el => {
 		let id = el.id.split('_')[2];
 		let formFinal = document.querySelector('#' + form + id);
-		let serialized = Array.from(new FormData(formFinal)).map(kv => kv.join("=")).join("&");
+		let serialized = gdprSerializeForm(formFinal);
 		return serialized;
 	});
 
 	document.querySelectorAll('.check_messages').forEach(function(el) {
 		el.checked = false;
 	});
-	
+
 	if( messages.length > 0 ){
 		deleteMessage( messages, search );
 	}

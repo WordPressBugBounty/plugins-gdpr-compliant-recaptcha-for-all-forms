@@ -341,19 +341,28 @@ final class Gibberish_Detector {
 	 * runs BEFORE the array recursion, so an exempt name shields its entire
 	 * subtree (e.g. a `codes[]` multi-input posts as an array under one name).
 	 *
-	 * Besides the total gibberish count, reports the total number of SCOREABLE
+	 * Besides the gibberish counts, reports the total number of SCOREABLE
 	 * tokens (see is_scoreable_token()) and whether any scalar field value
 	 * consisted of EXACTLY one candidate token that is gibberish — evaluated per
 	 * scalar leaf, so one gibberish-only entry of a `text[]` multi-input counts
-	 * too. is_gibberish_message() combines the three into the solo-token rule.
+	 * too. analyze_message() combines the parts into the solo-token rule.
+	 *
+	 * The gibberish count is reported split by the path that convicted the token
+	 * (pure-letter vs. alphanumeric); their SUM is the message-level count the
+	 * MESSAGE_GIBBERISH_THRESHOLD is compared against. The split is purely
+	 * informational (it names WHY a message was flagged, see
+	 * Classification_Reason::gibberish()) and does not enter any decision.
 	 *
 	 * @param array $fields     Field name => value (value may itself be an array).
 	 * @param array $exempt_map Lowercased extra exempt field name => true.
-	 * @return array{0: int, 1: bool, 2: int} Gibberish-token count, lone-in-its-field
-	 *                                        gibberish hit, scoreable-token count.
+	 * @return array{0: int, 1: int, 2: bool, 3: int} Pure-letter gibberish count,
+	 *                                        alphanumeric gibberish count,
+	 *                                        lone-in-its-field gibberish hit,
+	 *                                        scoreable-token count.
 	 */
 	private static function scan_gibberish_tokens( $fields, $exempt_map ) {
-		$count     = 0;
+		$letters   = 0;
+		$alnum     = 0;
 		$lone      = false;
 		$scoreable = 0;
 		foreach ( $fields as $name => $value ) {
@@ -362,8 +371,9 @@ final class Gibberish_Detector {
 				continue;
 			}
 			if ( is_array( $value ) ) {
-				list( $child_count, $child_lone, $child_scoreable ) = self::scan_gibberish_tokens( $value, $exempt_map );
-				$count     += $child_count;
+				list( $child_letters, $child_alnum, $child_lone, $child_scoreable ) = self::scan_gibberish_tokens( $value, $exempt_map );
+				$letters   += $child_letters;
+				$alnum     += $child_alnum;
 				$lone       = $lone || $child_lone;
 				$scoreable += $child_scoreable;
 				continue;
@@ -379,9 +389,16 @@ final class Gibberish_Detector {
 				}
 				if ( self::is_gibberish_token( $token ) ) {
 					++$field_gibberish;
+					// Which path convicted it: pure ASCII letters take the original
+					// path in is_gibberish_token(), everything else that reaches a
+					// verdict came through the alphanumeric one.
+					if ( 1 === preg_match( '/^[A-Za-z]+$/', (string) $token ) ) {
+						++$letters;
+					} else {
+						++$alnum;
+					}
 				}
 			}
-			$count += $field_gibberish;
 			// Solo-token rule triggers ONLY on a pure-letter gibberish token. A lone
 			// ALPHANUMERIC value as a form's sole content is far more often legitimate
 			// (an order/reference number, a licence key in a field not named *code*),
@@ -394,17 +411,22 @@ final class Gibberish_Detector {
 				$lone = true;
 			}
 		}
-		return array( $count, $lone, $scoreable );
+		return array( $letters, $alnum, $lone, $scoreable );
 	}
 
 	/**
-	 * Whether a whole message (its field name => value map) is suspicious: at
-	 * least MESSAGE_GIBBERISH_THRESHOLD gibberish tokens across all evaluated
-	 * fields, or — solo-token rule, see class docblock — a lone gibberish token
-	 * that is both the entire value of its field AND the only scoreable token in
-	 * the whole form (i.e. the form carries no other substantial free text).
-	 * Callers are responsible for having already stripped the plugin's own
-	 * fields (see Stamp::strip_plugin_fields()) before calling this.
+	 * Score a whole message (its field name => value map) and report both the verdict
+	 * and the components it rests on. The verdict is identical to
+	 * is_gibberish_message() — that method is a thin wrapper over this one; the extra
+	 * components exist so a caller can record WHY a message was flagged
+	 * (Classification_Reason::gibberish()) without re-running the scan.
+	 *
+	 * Verdict: at least MESSAGE_GIBBERISH_THRESHOLD gibberish tokens across all
+	 * evaluated fields, or — solo-token rule, see class docblock — a lone gibberish
+	 * token that is both the entire value of its field AND the only scoreable token
+	 * in the whole form (i.e. the form carries no other substantial free text).
+	 * Callers are responsible for having already stripped the plugin's own fields
+	 * (see Stamp::strip_plugin_fields()) before calling this.
 	 *
 	 * @param mixed    $fields             Field name => value map (values may be nested
 	 *                                     arrays). Accepts non-array input defensively
@@ -415,11 +437,19 @@ final class Gibberish_Detector {
 	 *                                     e.g. the request's hashPWFields password
 	 *                                     skip list and POW_SKIP_FIELDS entries, whose
 	 *                                     values are legitimately random strings.
-	 * @return bool
+	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool} Verdict plus
+	 *                                     its components: gibberish-token counts per
+	 *                                     path (their sum is what the message threshold
+	 *                                     sees) and whether the solo-token rule fired.
 	 */
-	public static function is_gibberish_message( $fields, $extra_exempt_names = array() ) {
+	public static function analyze_message( $fields, $extra_exempt_names = array() ) {
 		if ( ! is_array( $fields ) ) {
-			return false;
+			return array(
+				'gibberish' => false,
+				'letters'   => 0,
+				'alnum'     => 0,
+				'solo'      => false,
+			);
 		}
 		$exempt_map = array();
 		foreach ( $extra_exempt_names as $name ) {
@@ -427,13 +457,32 @@ final class Gibberish_Detector {
 				$exempt_map[ strtolower( $name ) ] = true;
 			}
 		}
-		list( $count, $lone, $scoreable ) = self::scan_gibberish_tokens( $fields, $exempt_map );
+		list( $letters, $alnum, $lone, $scoreable ) = self::scan_gibberish_tokens( $fields, $exempt_map );
 		// Solo-token rule: the lone gibberish token is necessarily scoreable
 		// itself, so "scoreable === 1" means NO other scoreable token exists
 		// anywhere in the form — the "form otherwise empty" guard.
-		if ( $lone && 1 === $scoreable ) {
-			return true;
-		}
-		return $count >= self::MESSAGE_GIBBERISH_THRESHOLD;
+		$solo = $lone && 1 === $scoreable;
+
+		return array(
+			'gibberish' => $solo || ( $letters + $alnum ) >= self::MESSAGE_GIBBERISH_THRESHOLD,
+			'letters'   => $letters,
+			'alnum'     => $alnum,
+			'solo'      => $solo,
+		);
+	}
+
+	/**
+	 * Whether a whole message is suspicious — the verdict of analyze_message(), see
+	 * there for the rule. Kept as the boolean entry point Stamp::check_submit() and
+	 * the existing tests use.
+	 *
+	 * @param mixed    $fields             Field name => value map (values may be nested
+	 *                                     arrays); non-array input is neutral.
+	 * @param string[] $extra_exempt_names Additional field names to skip.
+	 * @return bool
+	 */
+	public static function is_gibberish_message( $fields, $extra_exempt_names = array() ) {
+		$analysis = self::analyze_message( $fields, $extra_exempt_names );
+		return $analysis['gibberish'];
 	}
 }

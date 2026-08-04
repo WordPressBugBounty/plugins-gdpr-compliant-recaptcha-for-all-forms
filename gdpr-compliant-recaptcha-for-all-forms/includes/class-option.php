@@ -188,6 +188,25 @@ class Option {
 	/** @var string */
 	const HASH = self::PREFIX . 'hash';
 
+	/**
+	 * Lookback window (hours) of the "submissions without a stamp row" health counter.
+	 *
+	 * @var int
+	 */
+	const HEALTH_NO_POW_WINDOW_HOURS = 24;
+
+	/**
+	 * At how many no-stamp submissions within HEALTH_NO_POW_WINDOW_HOURS the health
+	 * counter turns amber. NOT an option: plain internal constant, deliberately not in
+	 * prepare_options()/activate() (making it user-configurable is a follow-up, not this
+	 * change). 10/day is a deliberately low bar — a healthy site sees the occasional
+	 * scripted no-stamp POST, but a broken client-PoW pipeline produces this for
+	 * *every* human submission, so double-digit counts mean "look at the console".
+	 *
+	 * @var int
+	 */
+	const HEALTH_NO_POW_WARN_THRESHOLD = 10;
+
 	/** @var string */
 	private $name;
 
@@ -475,5 +494,57 @@ class Option {
 			)
 		);
 		return (int) $count;
+	}
+
+	/**
+	 * Count classification-reason rows of the `no_pow:*` family recorded within the last
+	 * $hours hours — submissions where the client-side PoW never produced a usable stamp
+	 * row (the #1 support case, see HANDBUCH §12). Feeds the health counter in the
+	 * settings status strip and the dashboard widget.
+	 *
+	 * The query filters on rgd_attribute equality + a rgd_value prefix LIKE, which the
+	 * existing composite index idx_rgd_attribute_value on (rgd_attribute(255),
+	 * rgd_value(255)) covers — no new index needed. No rgm_type filter: a no-stamp
+	 * submission counts regardless of which folder it landed in.
+	 *
+	 * NB: this only sees *stored* messages. With POW_SAVE_SPAM disabled nothing is
+	 * persisted and the counter reads 0 — see HANDBUCH §12.
+	 *
+	 * @param int $hours Lookback window in hours.
+	 * @return int
+	 */
+	public static function count_no_pow_reasons_since_hours( $hours ) {
+		global $wpdb;
+		$count = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_details_rgd rgd'
+				. ' INNER JOIN ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm rgm ON rgm.rgm_id = rgd.rgm_id'
+				. ' WHERE rgd.rgd_attribute = %s AND rgd.rgd_value LIKE %s AND rgm.rgm_date >= NOW() - INTERVAL %d HOUR',
+				'_gdpr_reason',
+				// Underscore escaped: `_` is a single-character SQL wildcard, and the
+				// prefix must match literally even if a future reason code differs only
+				// in that position.
+				'no\_pow:%',
+				$hours
+			)
+		);
+		return (int) $count;
+	}
+
+	/**
+	 * Pure threshold decision for a health counter: does $count warrant a warning?
+	 * Deliberately separate from the counting query above so it carries no WordPress
+	 * dependency and is directly unit-testable (tests/unit/OptionHealthCounterTest.php).
+	 *
+	 * @param int $count     Observed value.
+	 * @param int $threshold Value at (and above) which the counter warns.
+	 * @return array{warn: bool, class: string} Warn flag plus the status-strip CSS class.
+	 */
+	public static function health_counter_status( $count, $threshold ) {
+		$warn = (int) $count >= (int) $threshold;
+		return array(
+			'warn'  => $warn,
+			'class' => $warn ? 'gdpr-status-amber' : '',
+		);
 	}
 }

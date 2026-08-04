@@ -71,6 +71,25 @@ class Stamp {
 	/** String that holds the spam-information */
 	private $plugin_spam;
 
+	/**
+	 * WHY the current submission was classified as spam — a Classification_Reason
+	 * string, or null for a clean submission (there is deliberately no "clean" code).
+	 * Pure observation: nothing reads it to decide what check_submit()/check_request()
+	 * return or whether a submission is blocked; it is only persisted as the technical
+	 * field `_gdpr_reason` in save_message(). First cause wins — the first check that
+	 * flips $plugin_spam sets it, nothing downstream overwrites it.
+	 */
+	private $classification_reason;
+
+	/**
+	 * Which PoW/token path failed in check_request() — one of the
+	 * Classification_Reason::NO_POW_* constants. check_request() records this on every
+	 * failing path it takes, without knowing whether its overall result ends up being
+	 * false; check_submit() promotes it to $classification_reason only when
+	 * check_request() actually returned false (the IP fallback may still succeed).
+	 */
+	private $pow_fail_reason;
+
 	/** JSON that holds the data of the request */
 	private $request_data;
 	private $whole_request_data;
@@ -529,13 +548,19 @@ class Stamp {
 	 */
 	public function check_submit( $wp = null, $gdpr_fields = null, $form_builder = '', $action = null, $ajax = null ) {
 
-		$hook_name         = current_filter();
-		$this->plugin_spam = false;
+		$hook_name                   = current_filter();
+		$this->plugin_spam           = false;
+		$this->classification_reason = null;
 
 		// Process the spam check
 		if ( ! ( $this->check_request() ) ) {
 			$this->print_debug_information( 'Classified as spam' );
 			$this->plugin_spam = true;
+			// Promote the NO_POW_* reason check_request() recorded for the path it took.
+			// It only counts as the classification reason once check_request() actually
+			// returned false — a failing path whose IP fallback still succeeded never
+			// gets here. This is the first check in the function, so it always wins.
+			$this->classification_reason = $this->pow_fail_reason;
 			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
 			// genuine PoW/token failures, never for the simulation mode below.
 			$this->increment_spam_counter();
@@ -545,6 +570,14 @@ class Stamp {
 		if ( get_option( Option::POW_SIMULATE_SPAM ) && 'wp_authenticate_user' !== $hook_name && 'wp_signon' !== $hook_name ) {
 			$this->print_debug_information( 'Spam simulated' );
 			$this->plugin_spam = true;
+			// Unlike every check below, this block has NO ! $this->plugin_spam guard —
+			// deliberately, so simulation also catches requests check_request() passed.
+			// The REASON must still follow first-cause-wins, hence the explicit null
+			// check here: a submission that failed PoW AND runs in simulation mode keeps
+			// its no_pow:* reason.
+			if ( null === $this->classification_reason ) {
+				$this->classification_reason = Classification_Reason::CODE_SIMULATION;
+			}
 		}
 
 		// Value-based deterministic spam signals (BACKLOG "Wertbasierte Spam-Pattern
@@ -566,7 +599,8 @@ class Stamp {
 		$content_fields = self::strip_plugin_fields( $gdpr_fields );
 		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields ) ) {
 			$this->print_debug_information( 'Echo value match' );
-			$this->plugin_spam = true;
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::CODE_ECHO_LOCK;
 			// Additively feed the under-attack wave counter (same bucket as PoW/token
 			// fails and gibberish), never in simulation mode. This does NOT change that
 			// echo/wildcard act from the first attempt on their own (POW_BLOCK applies,
@@ -583,7 +617,8 @@ class Stamp {
 		//     {"*":"value"} line in POW_PARAMETER_PATTERN.
 		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_wildcard_patterns( $content_fields ) ) {
 			$this->print_debug_information( 'Wildcard value match' );
-			$this->plugin_spam = true;
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::CODE_WILDCARD;
 			// Feed the wave counter too — same deterministic value class as the echo
 			// hit above (see that comment). Additive only; not in simulation mode.
 			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
@@ -612,15 +647,32 @@ class Stamp {
 		// unlike every other classification — is neither counter-fed nor
 		// echo-recorded nor fail2ban-logged (see the quarantine block below and the
 		// guards on Echo_Store::record() and the fail2ban block).
+		//
+		// analyze_message() rather than its is_gibberish_message() wrapper: the verdict
+		// is identical (the wrapper just returns ['gibberish']), but the same single
+		// scan also yields the scoring components for the reason string — calling both
+		// would score every submission twice.
 		$quarantine_only_spam = false;
-		if ( $gdpr_fields && ! $this->plugin_spam
-			&& Gibberish_Detector::is_gibberish_message(
+		$analysis             = array(
+			'gibberish' => false,
+			'letters'   => 0,
+			'alnum'     => 0,
+			'solo'      => false,
+		);
+		if ( $gdpr_fields && ! $this->plugin_spam ) {
+			$analysis = Gibberish_Detector::analyze_message(
 				self::strip_plugin_fields( $gdpr_fields ),
 				$this->gibberish_exempt_field_names( $gdpr_fields )
-			)
-		) {
+			);
+		}
+		if ( $analysis['gibberish'] ) {
 			$this->print_debug_information( 'Gibberish detected' );
-			$this->plugin_spam = true;
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::gibberish(
+				$analysis['letters'],
+				$analysis['alnum'],
+				$analysis['solo']
+			);
 			// Feed the same under-attack wave counter as a real PoW/token failure —
 			// but only in the real (non-simulated) mode, matching the existing
 			// increment_spam_counter() call above. (POW_SIMULATE_SPAM can be on while
@@ -673,8 +725,9 @@ class Stamp {
 			(bool) get_option( Option::POW_SIMULATE_SPAM )
 		) ) {
 			$this->print_debug_information( 'Under-attack quarantine' );
-			$this->plugin_spam    = true;
-			$quarantine_only_spam = true;
+			$this->plugin_spam           = true;
+			$quarantine_only_spam        = true;
+			$this->classification_reason = Classification_Reason::CODE_QUARANTINE;
 		}
 
 		// Auto-echo record (BACKLOG "Auto-Echo-Sperre mit TTL"): once a submission is
@@ -1081,6 +1134,15 @@ class Stamp {
 			if ( get_option( Option::POW_SAVE_IP ) ) {
 				$technical_fields['IP adress'] = $this->get_client_ip();
 			}
+			// WHY this submission was classified as spam (null = clean → no row at all,
+			// see Classification_Reason). Additive technical field, written like the
+			// ones above with rgm_posted = false, so it never shows up as a "block this
+			// pattern" candidate in the message UI. The leading underscore matters:
+			// Echo_Values::is_technical_key() treats any `_`-prefixed key as technical,
+			// so the reason can never itself seed or match an echo/wildcard value.
+			if ( null !== $this->classification_reason ) {
+				$technical_fields['_gdpr_reason'] = $this->classification_reason;
+			}
 
 			foreach ( $fields as $key => $value ) {
 				if ( is_array( $value ) || is_object( $value ) ) {
@@ -1397,6 +1459,10 @@ class Stamp {
 				}
 				// Chain row never landed within the (extended) window — one IP-fallback
 				// consumption, no further polling, mirroring the 92 token path below.
+				// Record WHY this path failed before the fallback attempt: if the
+				// fallback still succeeds, check_request() returns true and
+				// check_submit() never reads the reason (observe only, no cleanup).
+				$this->pow_fail_reason = Classification_Reason::NO_POW_CHAIN_NO_ROW;
 				return $this->consume_ip_row( $time_window, $max_uses );
 			}
 		}
@@ -1422,10 +1488,18 @@ class Stamp {
 
 			// Token didn't land a usable row within the poll window (e.g. check_stamp()
 			// hasn't landed yet, or the row is already exhausted) — one IP-fallback
-			// consumption, no further polling.
+			// consumption, no further polling. Reason recorded before the fallback for
+			// the same reason as the chain path above.
+			$this->pow_fail_reason = Classification_Reason::NO_POW_TOKEN_NO_ROW;
 			return $this->consume_ip_row( $time_window, $max_uses );
 		}
 
+		// No usable token at all: either none was posted, or one was posted and failed
+		// verification (forged/expired/wrong IP, wrong length, or a chain token whose
+		// ChainToken::verify() returned false above).
+		$this->pow_fail_reason = '' === $token
+			? Classification_Reason::NO_POW_NO_TOKEN
+			: Classification_Reason::NO_POW_INVALID_TOKEN;
 		return $this->poll_for_row(
 			function () use ( $time_window, $max_uses ) {
 				return $this->consume_ip_row( $time_window, $max_uses );

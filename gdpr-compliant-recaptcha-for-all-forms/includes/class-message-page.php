@@ -309,7 +309,29 @@ class Message_Page {
 		if ( isset( $details[0] ) ) {
 			$rgm_ajax = esc_attr( $details[0]->rgm_ajax );
 		}
-		$html_details = '
+		// Classification reason (technical row `_gdpr_reason`, written by
+		// Stamp::save_message() for spam-classified messages only). It is rendered once,
+		// as a labelled badge above the table — so the raw row is skipped in the loop
+		// below. Deliberately a carve-out for this one attribute: every other technical
+		// field (from_site/post_on_site/is_ajax, the type-4 analysis fields) keeps
+		// rendering as a plain row exactly as before.
+		$reason_value = null;
+		foreach ( $details as $detail ) {
+			if ( '_gdpr_reason' === $detail->rgd_attribute ) {
+				$reason_value = (string) $detail->rgd_value;
+				break;
+			}
+		}
+
+		$html_details = '';
+		if ( null !== $reason_value ) {
+			$html_details .= '<p class="gdpr-reason-line">'
+				. esc_html__( 'Blocked because:', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. ' <span class="gdpr-reason-badge">'
+				. esc_html( Classification_Reason::label( $reason_value ) )
+				. '</span></p>';
+		}
+		$html_details .= '
             <table class="widefat striped message">
                 <thead>
                     <tr class="table-header">
@@ -334,6 +356,10 @@ class Message_Page {
 		$own_domains = Echo_Store::site_domains();
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
+			// Already shown as the badge above — do not repeat it as a raw row.
+			if ( '_gdpr_reason' === $detail->rgd_attribute ) {
+				continue;
+			}
 			$html_details .= '<tr class="table-body">';
 			// phpcs:ignore Universal.Operators.StrictComparisons.LooseEqual -- $message_type is a sanitized numeric string (FILTER_SANITIZE_NUMBER_INT); loose comparison intentional.
 			if ( 4 == $message_type && ! $rgm_ajax ) {

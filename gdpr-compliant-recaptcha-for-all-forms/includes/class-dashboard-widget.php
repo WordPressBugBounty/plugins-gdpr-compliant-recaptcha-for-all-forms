@@ -74,5 +74,25 @@ class Dashboard_Widget {
 		}
 
 		echo '</tbody></table>';
+
+		// Health counter: submissions whose classification reason was "no usable stamp
+		// row" (no_pow:*) in the last 24h — the fingerprint of a broken client-PoW
+		// pipeline (HANDBUCH §12). Amber above the threshold, same colours as
+		// .gdpr-status-amber on the settings page (this widget has no stylesheet).
+		$no_pow_count  = Option::count_no_pow_reasons_since_hours( Option::HEALTH_NO_POW_WINDOW_HOURS );
+		$no_pow_status = Option::health_counter_status( $no_pow_count, Option::HEALTH_NO_POW_WARN_THRESHOLD );
+		$no_pow_style  = $no_pow_status['warn']
+			? 'display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px; font-weight: 600; background: #fdf3e1; color: #8a5a00;'
+			: 'display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px; font-weight: 600; background: #f2f2f2; color: #666;';
+
+		echo '<p><span style="' . esc_attr( $no_pow_style ) . '">'
+			. esc_html(
+				sprintf(
+					/* translators: %d: number of submissions in the last 24 hours that had no usable proof-of-work stamp */
+					_n( '%d submission without a stamp row (24h)', '%d submissions without a stamp row (24h)', $no_pow_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
+					$no_pow_count
+				)
+			)
+			. '</span></p>';
 	}
 }
