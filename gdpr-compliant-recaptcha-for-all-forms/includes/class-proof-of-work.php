@@ -139,17 +139,22 @@ final class ProofOfWork {
 	 * so both the deciding-whether-to-boost logic (WP options/transients, in
 	 * Stamp) and this arithmetic stay independently testable.
 	 *
+	 * There is deliberately NO upper ceiling: Stamp::check_stamp() only accepts a
+	 * token whose difficulty is >= the configured base, so any clipping here would
+	 * make the server hand out tokens that fail its own entrance check (with a base
+	 * above the ceiling, EVERY submission became spam). Issued difficulty must
+	 * therefore always be >= max( 1, base ). An absurdly high base is the site
+	 * owner's own choice — see the Difficulty option's help text.
+	 *
 	 * @param int  $base         Configured base difficulty (Option::POW_DIFFICULTY);
 	 *                            clamped to a minimum of 1 so a misconfigured
 	 *                            (empty/zero/negative) option never disables the
 	 *                            puzzle entirely.
 	 * @param bool $under_attack Whether the site-wide under-attack boost applies.
 	 * @param int  $bonus        Extra leading zero bits added while under attack.
-	 * @param int  $cap          Hard ceiling on the returned difficulty.
-	 * @return int Effective difficulty, in [1, $cap] when $cap >= 1.
+	 * @return int Effective difficulty, always >= max( 1, $base ).
 	 */
-	public static function effective_difficulty( $base, $under_attack, $bonus, $cap ) {
-		$effective = max( 1, (int) $base ) + ( $under_attack ? (int) $bonus : 0 );
-		return min( $effective, (int) $cap );
+	public static function effective_difficulty( $base, $under_attack, $bonus ) {
+		return max( 1, (int) $base ) + ( $under_attack ? (int) $bonus : 0 );
 	}
 }

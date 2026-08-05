@@ -48,15 +48,6 @@ class Stamp {
 	public const UNDER_ATTACK_BONUS = 3;
 
 	/**
-	 * Hard difficulty ceiling, regardless of base + bonus. Bounds the worst-case
-	 * wait time an old/low-power device's browser has to burn, so an aggressive
-	 * base setting combined with the under-attack bonus can't make the puzzle
-	 * unsolvable in practice on older hardware.
-	 * Public: read by Settings_Menu for the status-strip effective-difficulty display.
-	 */
-	public const DIFFICULTY_CAP = 20;
-
-	/**
 	 * The plugin's OWN injected request fields. Server-side twin of
 	 * stripPluginFields() in scripts/recaptcha-gdpr-analysis.js — keep both lists in
 	 * sync. Stripped in save_message() so they never become persisted detail rows:
@@ -1294,8 +1285,11 @@ class Stamp {
 		// backfilled (it postdates their POW_INSTALLED-gated defaults writeback in
 		// Settings_Menu::prepare_options()), so an absent option must still default
 		// to "on" here rather than get_option()'s own false-if-missing behaviour.
+		// No ceiling on the issued difficulty on purpose: check_stamp() only accepts a
+		// token whose difficulty is >= the configured base, so a clipped issue difficulty
+		// would make every issued token fail the server's own entrance check.
 		$under_attack_boost = get_option( Option::POW_UNDER_ATTACK_MODE, true ) && self::is_under_attack();
-		$difficulty         = ProofOfWork::effective_difficulty( $base_difficulty, $under_attack_boost, self::UNDER_ATTACK_BONUS, self::DIFFICULTY_CAP );
+		$difficulty         = ProofOfWork::effective_difficulty( $base_difficulty, $under_attack_boost, self::UNDER_ATTACK_BONUS );
 		$token              = StampToken::create( $ip, get_option( Option::POW_SALT ), $difficulty, time(), bin2hex( random_bytes( 8 ) ) );
 		$array_result       = array(
 			'stamp'      => $token, // Field name kept as `stamp` for client compatibility; value is now a token.
@@ -1589,9 +1583,11 @@ class Stamp {
 			// issued — accepting anything >= the CURRENT base option (AP4: the base
 			// or the under-attack boost may have changed between issuing and solving)
 			// is safe and avoids rejecting a just-issued, correctly higher-difficulty
-			// token. DIFFICULTY_CAP is the upper bound get_stamp() itself respects.
-			if ( ! $parsed || $token_difficulty < (int) get_option( Option::POW_DIFFICULTY ) || $token_difficulty > self::DIFFICULTY_CAP ) {
-				$this->print_debug_information( 'Token difficulty below current base, above cap, or unparseable token' );
+			// token. There is deliberately NO upper bound: get_stamp() issues base +
+			// boost without a ceiling, so any ceiling here would reject the server's
+			// own freshly issued tokens.
+			if ( ! $parsed || $token_difficulty < (int) get_option( Option::POW_DIFFICULTY ) ) {
+				$this->print_debug_information( 'Token difficulty below current base, or unparseable token' );
 				wp_die();
 			}
 
@@ -1611,7 +1607,7 @@ class Stamp {
 			// HANDBUCH §4). issued_at is HMAC-bound (StampToken), so the elapsed span is
 			// unforgeable and — since network latency only ADDS — a hard LOWER bound on
 			// the real solve time. The base token has 1-second granularity (deliberately
-			// coarse); at cap difficulty this quantises ~1/5 of legit solves to 0ms,
+			// coarse); at high difficulties this quantises ~1/5 of legit solves to 0ms,
 			// costing them one invisible re-challenge round (accepted per spec).
 			$measured_ms = max( 0, time() - $parsed['issued_at'] ) * 1000;
 			$threshold   = ProofOfWork::solve_time_threshold_ms( $token_difficulty );
@@ -1621,7 +1617,7 @@ class Stamp {
 				// difficulty-scaled re-challenge chain token instead. KK=1 → this first
 				// re-challenge does NOT feed the under-attack counter (see should_feed_counter).
 				$this->print_debug_information( 'Solve too fast — issuing re-challenge.' );
-				$d1       = min( $token_difficulty + 1, self::DIFFICULTY_CAP );
+				$d1       = ChainToken::next_difficulty( $token_difficulty );
 				$now_ms   = (int) round( microtime( true ) * 1000 );
 				$required = $threshold + ProofOfWork::solve_time_threshold_ms( $d1 );
 				$chain    = ChainToken::create(
@@ -1654,9 +1650,10 @@ class Stamp {
 
 			// Difficulty gate mirrors the 92 path: the DD is HMAC-bound inside the chain
 			// token, so a client cannot lower it — accept anything from the current base
-			// up to the cap (base/boost may have shifted between rounds).
-			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) || $dd > self::DIFFICULTY_CAP ) {
-				$this->print_debug_information( 'Chain token difficulty below base, above cap, or unparseable.' );
+			// upwards (base/boost may have shifted between rounds, and every chain round
+			// deliberately escalates one bit above the round before it).
+			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) ) {
+				$this->print_debug_information( 'Chain token difficulty below base, or unparseable.' );
 				wp_die();
 			}
 
@@ -1684,7 +1681,7 @@ class Stamp {
 				$send_accepted = true;
 			} else {
 				// Still too fast in aggregate → next re-challenge round, NO insert.
-				$d_next = ChainToken::next_difficulty( $dd, self::DIFFICULTY_CAP );
+				$d_next = ChainToken::next_difficulty( $dd );
 				$k_next = ChainToken::next_round( $parsed['round'] );
 				$ss     = ChainToken::accumulate_ms( $parsed['measured_ms'], $measured_ms );
 				$qq     = ChainToken::accumulate_ms( $parsed['required_ms'], ProofOfWork::solve_time_threshold_ms( $d_next ) );

@@ -59,6 +59,14 @@ final class ChainToken {
 	const MAX_ROUND = 9;
 
 	/**
+	 * Ceiling for the difficulty field (two decimal digits, DD). NOT a policy cap —
+	 * purely the token format's field width, so create() and next_difficulty() can
+	 * never produce a difficulty the token cannot carry (a mismatch between the
+	 * difficulty sent to the client and the one encoded in the token).
+	 */
+	const MAX_DIFFICULTY = 99;
+
+	/**
 	 * Realistic crypto.subtle browser hash rate (H/s) used to size the adaptive poll
 	 * window — DISTINCT from ProofOfWork::H_MAX (the generous gate bound). Here we want
 	 * the EXPECTED solve time to hold a submission's poll open long enough, so a
@@ -85,7 +93,7 @@ final class ChainToken {
 	 * @return string 112-char token.
 	 */
 	public static function create( $ip, $salt, $difficulty, $issued_at_ms, $round, $measured_ms, $required_ms, $random_hex ) {
-		$dd = sprintf( '%02d', max( 0, min( 99, (int) $difficulty ) ) );
+		$dd = sprintf( '%02d', max( 0, min( self::MAX_DIFFICULTY, (int) $difficulty ) ) );
 		$ii = sprintf( '%013d', max( 0, min( 9999999999999, (int) $issued_at_ms ) ) );
 		$kk = sprintf( '%01d', max( 1, min( self::MAX_ROUND, (int) $round ) ) );
 		$ss = sprintf( '%08d', max( 0, min( self::MAX_CUMULATIVE_MS, (int) $measured_ms ) ) );
@@ -208,14 +216,16 @@ final class ChainToken {
 	}
 
 	/**
-	 * Difficulty of the next round: one bit harder, capped.
+	 * Difficulty of the next round: one bit harder. The only ceiling is the token
+	 * format's own two-digit DD field (MAX_DIFFICULTY) — the escalation itself is
+	 * deliberately unbounded, since a chain only continues while the client keeps
+	 * solving implausibly fast, and every extra bit doubles that client's cost.
 	 *
 	 * @param int $current Current round difficulty.
-	 * @param int $cap     Hard difficulty ceiling (Stamp::DIFFICULTY_CAP).
 	 * @return int
 	 */
-	public static function next_difficulty( $current, $cap ) {
-		return min( (int) $current + 1, (int) $cap );
+	public static function next_difficulty( $current ) {
+		return min( (int) $current + 1, self::MAX_DIFFICULTY );
 	}
 
 	/**

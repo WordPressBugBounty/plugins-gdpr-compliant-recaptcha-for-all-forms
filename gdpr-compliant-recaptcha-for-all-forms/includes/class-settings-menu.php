@@ -786,7 +786,7 @@ class Settings_Menu {
 				Option::INT,
 				14,
 				sprintf(
-					/* translators: 1: under-attack difficulty bonus in bits (Stamp::UNDER_ATTACK_BONUS), 2: hard difficulty cap (Stamp::DIFFICULTY_CAP), 3: base difficulty at which the bonus starts getting clipped by the cap (cap minus bonus plus one) */
+					/* translators: %d: under-attack difficulty bonus in bits (Stamp::UNDER_ATTACK_BONUS) */
 					__(
 						"If you don't know about the concept of proof-of-work, don't change this.
                         <br>
@@ -803,14 +803,12 @@ class Settings_Menu {
                         </ul>
                         Modern browsers solve the puzzle via crypto.subtle, which is roughly 10x faster than the plain-JavaScript fallback used by older browsers.
                         <br>
-                        <br><strong>Recommended base: 15–16.</strong> Under-attack mode temporarily adds %1\$d bits on top of your base difficulty, but the effective difficulty is always capped at %2\$d — so once your base reaches %3\$d or higher, the boost gets clipped (partially, or at %2\$d entirely). A base of 15–16 keeps the full +%1\$d headroom available for the under-attack boost.
+                        <br><strong>Recommended base: 15–16.</strong> Under-attack mode temporarily adds %d bits on top of your base difficulty, so the value you set here is what every visitor pays in normal operation — the table above shows what each step costs them.
                         <br>
                         <br>The built-in solve-time plausibility gate (which re-challenges implausibly fast, likely non-browser solves) is effectively inactive below base ~16, where its threshold falls under normal network latency — another reason to keep the base at 15–16; from 16 upward it starts yielding a useful signal.",
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
-					Stamp::UNDER_ATTACK_BONUS,
-					Stamp::DIFFICULTY_CAP,
-					Stamp::DIFFICULTY_CAP - Stamp::UNDER_ATTACK_BONUS + 1
+					Stamp::UNDER_ATTACK_BONUS
 				),
 				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🧩',
@@ -1006,35 +1004,12 @@ class Settings_Menu {
 			Option::POW_BLOCK       => $warn,
 			Option::POW_APPLY_REST  => $warn,
 			Option::POW_BLOCK_LOGIN => $warn,
-			Option::POW_DIFFICULTY  => $this->get_difficulty_badge(),
-		);
-	}
-
-	/** Dynamic badge for POW_DIFFICULTY: warns when the configured base difficulty
-	 * leaves the under-attack boost (Stamp::UNDER_ATTACK_BONUS) partially or fully
-	 * clipped by Stamp::DIFFICULTY_CAP, otherwise shows the recommendation. Evaluates
-	 * the actually configured value (post-save), not a static hint.
-	 *
-	 * @return array{class: string, text: string}
-	 */
-	private function get_difficulty_badge() {
-		$base_difficulty = (int) $this->options[ Option::POW_DIFFICULTY ]->get_value();
-
-		if ( $base_difficulty + Stamp::UNDER_ATTACK_BONUS > Stamp::DIFFICULTY_CAP ) {
-			return array(
-				'class' => 'gdpr-badge gdpr-badge-warn',
-				'text'  => sprintf(
-					/* translators: 1: under-attack difficulty bonus in bits, 2: hard difficulty cap */
-					__( 'Under-attack boost (+%1$d) is capped at %2$d — recommended base: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					Stamp::UNDER_ATTACK_BONUS,
-					Stamp::DIFFICULTY_CAP
-				),
-			);
-		}
-
-		return array(
-			'class' => 'gdpr-badge gdpr-badge-recommend',
-			'text'  => __( 'Recommended: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			// Static recommendation: there is no difficulty ceiling any more, so there
+			// is nothing left to warn about here (the boost is never clipped).
+			Option::POW_DIFFICULTY  => array(
+				'class' => 'gdpr-badge gdpr-badge-recommend',
+				'text'  => __( 'Recommended: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			),
 		);
 	}
 
@@ -1104,7 +1079,7 @@ class Settings_Menu {
 		// Same gate as Stamp::get_stamp(): the boost only applies while the
 		// under-attack option is enabled (explicit `true` fallback, see there).
 		$under_attack   = get_option( Option::POW_UNDER_ATTACK_MODE, true ) && Stamp::is_under_attack();
-		$effective      = ProofOfWork::effective_difficulty( $base_difficulty, $under_attack, Stamp::UNDER_ATTACK_BONUS, Stamp::DIFFICULTY_CAP );
+		$effective      = ProofOfWork::effective_difficulty( $base_difficulty, $under_attack, Stamp::UNDER_ATTACK_BONUS );
 		$spam_this_week = Option::count_messages_since_days( 2, 7 );
 
 		$items = array();

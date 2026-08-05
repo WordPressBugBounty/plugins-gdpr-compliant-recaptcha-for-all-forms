@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.2.0
+Stable tag: 5.2.1
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.2.1 =
+Maintenance release — see the changelog for details.
 = 5.2.0 =
 Maintenance release — see the changelog for details.
 
@@ -165,6 +167,8 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.2.1 =
+* Fix: a difficulty above 20 made every submission spam — the server issued challenges its own check rejected.
 = 5.2.0 =
 * Spam messages now show why they were blocked, plus a health counter for submissions without a proof-of-work stamp.
 = 5.1.1 =
