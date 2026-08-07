@@ -119,9 +119,6 @@ class Option {
 	const POW_TRUSTED_PROXIES = self::PREFIX . 'pow_trusted_proxies';
 
 	/** @var bool */
-	const POW_APPLY_REST = self::PREFIX . 'pow_apply_rest';
-
-	/** @var bool */
 	const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
 
 	/** @var string */
@@ -149,6 +146,17 @@ class Option {
 	const POW_PARAMETER_PATTERN = self::PREFIX . 'pow_parameter_pattern';
 
 	/**
+	 * Third signature class alongside actions/patterns (REST_ROUTES_PLAN.md AP3):
+	 * one REST route/namespace per line, matched against the route
+	 * `RestRoute::extract()` reads off a POST (see Stamp::check_rest_routes()).
+	 * Segment wildcard `*` and namespace-suffix wildcard `/*` supported, see
+	 * class-rest-route.php.
+	 *
+	 * @var string
+	 */
+	const POW_REST_ROUTES = self::PREFIX . 'pow_rest_routes';
+
+	/**
 	 * Ledger of default explicit-actions/patterns already OFFERED to the scope
 	 * (Scope_Sync). Not user-facing; tracks which builder defaults have been seen so
 	 * a newly-activated builder's action is added once, while an admin-removed entry
@@ -160,6 +168,15 @@ class Option {
 
 	/** @var string */
 	const POW_SEEDED_PATTERNS = self::PREFIX . 'pow_seeded_patterns';
+
+	/**
+	 * Ledger of default REST routes already OFFERED to POW_REST_ROUTES
+	 * (Scope_Sync's third domain, REST_ROUTES_PLAN.md AP4). Same semantics as
+	 * POW_SEEDED_ACTIONS/POW_SEEDED_PATTERNS above.
+	 *
+	 * @var string
+	 */
+	const POW_SEEDED_ROUTES = self::PREFIX . 'pow_seeded_routes';
 
 	/**
 	 * Set once the admin has dismissed (or acted on) the one-time "unmonitored form
@@ -187,6 +204,67 @@ class Option {
 
 	/** @var string */
 	const HASH = self::PREFIX . 'hash';
+
+	/**
+	 * Ledger of the one-off cleanup that redacts credential values older releases
+	 * stored in cleartext (see class-credential-cleanup.php). NOT an option in the
+	 * settings sense: deliberately absent from prepare_options()/activate() seeding
+	 * — nothing here is a user decision, it is migration bookkeeping (layout
+	 * version, per-pass cursor and done flag, frozen rgd_id upper bound), same
+	 * category as the HEALTH_* constants below. Autoloaded on purpose: once both
+	 * passes are done, Credential_Cleanup::maybe_run() must cost a cached
+	 * get_option() and nothing else.
+	 *
+	 * @var string
+	 */
+	const POW_CREDENTIAL_CLEANUP = self::PREFIX . 'pow_credential_cleanup';
+
+	/**
+	 * Admin-maintained list of LEARNED credential field names, one per line (see
+	 * class-learned-credential-fields.php). A real setting — rendered on the
+	 * settings page as the transparency/correction surface — but NOT the main
+	 * entrance: entries normally arrive via the one-click confirmations (admin
+	 * notice / message inbox). Deliberately a separate option from
+	 * POW_SKIP_FIELDS: skip means "the row never exists" and is site-scoped,
+	 * credential means "the row stays, the value reads [redacted]".
+	 *
+	 * @var string
+	 */
+	const POW_CREDENTIAL_FIELDS = self::PREFIX . 'pow_credential_fields';
+
+	/**
+	 * Ledger of PROPOSED credential field names (see
+	 * class-credential-suggestion-ledger.php). Bookkeeping, not a setting:
+	 * absent from prepare_options()/activate() seeding, same category as
+	 * POW_CREDENTIAL_CLEANUP. Fed from unauthenticated request data, therefore
+	 * capped in every direction; nothing ever moves from here to
+	 * POW_CREDENTIAL_FIELDS without an explicit admin click.
+	 *
+	 * @var string
+	 */
+	const POW_CREDENTIAL_SUGGESTIONS = self::PREFIX . 'pow_credential_suggestions';
+
+	/**
+	 * Fingerprint diagnosis counters (see Stamp::record_fp_status()): how many accepted
+	 * solves came back from the SAME address the token was issued to, how many from a
+	 * different one, and when the last mismatch was seen (unix timestamp).
+	 *
+	 * Bookkeeping, not settings: absent from prepare_options()/activate() seeding, same
+	 * category as POW_CREDENTIAL_CLEANUP, and written with autoload=no — they are read
+	 * on two admin screens, never on a front-end request. Monotonic totals on purpose
+	 * (no rolling window): the ratio answers a STRUCTURAL question — "is a cache/proxy
+	 * in front of this site?" — where inertia is harmless and a window would only add
+	 * moving parts. Resettable from the settings status strip.
+	 *
+	 * @var string
+	 */
+	const POW_FP_MATCHED_TOTAL = self::PREFIX . 'pow_fp_matched_total';
+
+	/** @var string */
+	const POW_FP_MISMATCHED_TOTAL = self::PREFIX . 'pow_fp_mismatched_total';
+
+	/** @var string */
+	const POW_FP_LAST_MISMATCH_AT = self::PREFIX . 'pow_fp_last_mismatch_at';
 
 	/**
 	 * Lookback window (hours) of the "submissions without a stamp row" health counter.
@@ -545,6 +623,32 @@ class Option {
 		return array(
 			'warn'  => $warn,
 			'class' => $warn ? 'gdpr-status-amber' : '',
+		);
+	}
+
+	/**
+	 * Share of accepted solves that came back from a different address than the token
+	 * was issued to, in whole percent. Pure arithmetic over the two fingerprint
+	 * counters (POW_FP_*_TOTAL), so the display can be unit-tested — see
+	 * tests/unit/OptionHealthCounterTest.php.
+	 *
+	 * Returns 0 when nothing has been measured yet: with no data, "0 %" is the honest
+	 * reading of the question ("do solves arrive from elsewhere?" — none did), and the
+	 * callers hide the whole item at total 0 anyway. Negative/garbage inputs are
+	 * floored at 0 rather than producing a nonsensical percentage.
+	 *
+	 * @param int $matched    POW_FP_MATCHED_TOTAL.
+	 * @param int $mismatched POW_FP_MISMATCHED_TOTAL.
+	 * @return array{total:int,percent:int} Measured solves and the mismatch share.
+	 */
+	public static function fp_mismatch_share( $matched, $mismatched ) {
+		$matched    = max( 0, (int) $matched );
+		$mismatched = max( 0, (int) $mismatched );
+		$total      = $matched + $mismatched;
+
+		return array(
+			'total'   => $total,
+			'percent' => $total > 0 ? (int) round( ( $mismatched * 100 ) / $total ) : 0,
 		);
 	}
 }

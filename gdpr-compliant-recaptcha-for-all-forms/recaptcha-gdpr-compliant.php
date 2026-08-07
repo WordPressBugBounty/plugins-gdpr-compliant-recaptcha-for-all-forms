@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.2.1
+	 * Version: 5.3.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.2.1';
+	const VERSION = '5.3.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -71,10 +71,16 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-echo-store.php';
 		require_once __DIR__ . '/includes/class-message-page.php';
 		require_once __DIR__ . '/includes/class-client-ip.php';
+		require_once __DIR__ . '/includes/class-rest-route.php';
 		require_once __DIR__ . '/includes/class-stamp-token.php';
 		require_once __DIR__ . '/includes/class-chain-token.php';
 		require_once __DIR__ . '/includes/class-gibberish-detector.php';
 		require_once __DIR__ . '/includes/class-classification-reason.php';
+		require_once __DIR__ . '/includes/class-credential-fields.php';
+		require_once __DIR__ . '/includes/class-learned-credential-fields.php';
+		require_once __DIR__ . '/includes/class-credential-suggestion-ledger.php';
+		require_once __DIR__ . '/includes/class-credential-learning.php';
+		require_once __DIR__ . '/includes/class-credential-cleanup.php';
 		require_once __DIR__ . '/includes/class-stamp.php';
 		require_once __DIR__ . '/includes/class-settings-menu.php';
 		require_once __DIR__ . '/includes/class-scope-sync.php';
@@ -105,6 +111,9 @@ class RCM_Main {
 		// Not stored: its constructor registers the admin hooks, which keep the instance
 		// alive for the request (matches WordPress's usual add_action( [$this, …] ) idiom).
 		new Scope_Sync();
+		// Same idiom: registers the credential-field proposal notice, its two
+		// one-click handlers and the message-inbox rescue ajax endpoint.
+		new Credential_Learning();
 		$this->dashboard_widget = new Dashboard_Widget();
 		if ( get_option( Option::POW_DIRECT_ANALYSIS_MODE ) ) {
 			$this->instance_analysis = new Analysis();
@@ -206,6 +215,10 @@ class RCM_Main {
 	public function activate() {
 
 		$current_version = get_option( Option::POW_VERSION );
+
+		// No stored version means the tables are about to be created for the first
+		// time — remembered here because update_option() below erases the evidence.
+		$is_fresh_install = ! $current_version;
 
 		// Check the plugin version
 		if ( ! $current_version || version_compare( $this->version, $current_version, '>' ) ) {
@@ -523,6 +536,14 @@ class RCM_Main {
 			add_option( Option::POW_MAX_USES, 10 );
 			add_option( Option::POW_UNDER_ATTACK_MODE, true );
 			add_option( Option::POW_UNDER_ATTACK_QUARANTINE, false );
+			add_option( Option::POW_CREDENTIAL_FIELDS, '' );
+
+			if ( $is_fresh_install ) {
+				// Brand-new tables: there is no legacy cleartext credential to redact,
+				// so short-circuit the migration instead of letting it walk (and query)
+				// an empty table on the next loads.
+				Credential_Cleanup::mark_done_fresh_install();
+			}
 
 			update_option( Option::POW_VERSION, $this->version );
 
@@ -538,6 +559,15 @@ class RCM_Main {
 			// readme.txt Upgrade Notice).
 			$this->invalidate_own_opcache();
 		}
+
+		// DELIBERATELY OUTSIDE the version gate above. That gate fires only when
+		// RCM_Main::VERSION exceeds the stored POW_VERSION, i.e. once per release
+		// and in a single request — useless for a migration that has to walk a table
+		// of unknown size, and dead on installs where it already fired. Called on
+		// every load instead, the cleanup keeps its own ledger, does a time-budgeted
+		// slice per request, and costs one cached get_option() once finished. It
+		// therefore needs no version bump to reach existing installs.
+		Credential_Cleanup::maybe_run();
 	}
 
 	/**

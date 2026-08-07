@@ -28,6 +28,7 @@ class Message_Page {
 		add_action( 'wp_ajax_save_list_parameter', array( $this, 'save_list_parameter_callback' ) );
 		add_action( 'wp_ajax_save_pattern', array( $this, 'save_pattern_callback' ) );
 		add_action( 'wp_ajax_gdpr_block_value', array( $this, 'block_value_callback' ) );
+		add_action( 'wp_ajax_gdpr_monitor_route', array( $this, 'monitor_route_callback' ) );
 	}
 
 
@@ -250,10 +251,14 @@ class Message_Page {
 				'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
 				'messageType' => (string) $message_type,
 				'nonces'      => array(
-					'search'      => wp_create_nonce( 'render-messages_' . $message_type ),
-					'saveList'    => wp_create_nonce( 'save_list_nonce_' . $message_type ),
-					'savePattern' => wp_create_nonce( 'save_pattern_nonce_' . $message_type ),
-					'blockValue'  => wp_create_nonce( 'block_value_nonce_' . $message_type ),
+					'search'       => wp_create_nonce( 'render-messages_' . $message_type ),
+					'saveList'     => wp_create_nonce( 'save_list_nonce_' . $message_type ),
+					'savePattern'  => wp_create_nonce( 'save_pattern_nonce_' . $message_type ),
+					'blockValue'   => wp_create_nonce( 'block_value_nonce_' . $message_type ),
+					'monitorRoute' => wp_create_nonce( 'monitor_route_nonce_' . $message_type ),
+					// Rescue path of the learned credential-field list: the handler
+					// lives in Credential_Learning, only the nonce is minted here.
+					'credential'   => wp_create_nonce( Credential_Learning::AJAX_NONCE . $message_type ),
 				),
 				'i18n'        => array(
 					// NB: sprintf( __( … ), $title ) — translate the template, then fill in.
@@ -270,6 +275,11 @@ class Message_Page {
 					'choosePattern'    => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'blocked'          => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'blockFailed'      => __( 'Could not block this value.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialAsk'    => __( 'Treat this field as a password field? Its value is removed from this message and from every other saved message, and future submissions never store it. This cannot be undone for messages already received.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialSaved'  => __( 'Field is now treated as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialFailed' => __( 'Could not mark this field as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'routeMonitored'   => __( 'Now monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'monitorFailed'    => __( 'Could not start monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				),
 			)
 		);
@@ -323,6 +333,20 @@ class Message_Page {
 			}
 		}
 
+		// REST route this submission targeted (technical row `_gdpr_route`, written by
+		// Stamp::save_message(), REST_ROUTES_PLAN.md AP5). Same carve-out as the reason
+		// badge above: pulled out and rendered once with a one-click "Monitor this route"
+		// button, the raw row is skipped in the loop below. Present on BOTH type-4
+		// analysis rows and normally classified messages — analysis mode is precisely
+		// how an admin discovers a REST route worth monitoring.
+		$route_value = null;
+		foreach ( $details as $detail ) {
+			if ( '_gdpr_route' === $detail->rgd_attribute ) {
+				$route_value = (string) $detail->rgd_value;
+				break;
+			}
+		}
+
 		$html_details = '';
 		if ( null !== $reason_value ) {
 			$html_details .= '<p class="gdpr-reason-line">'
@@ -330,6 +354,28 @@ class Message_Page {
 				. ' <span class="gdpr-reason-badge">'
 				. esc_html( Classification_Reason::label( $reason_value ) )
 				. '</span></p>';
+
+			// THE CAUSE, not just the kind. Four different failures share the label
+			// "No proof of work", and the badge alone cannot tell a blocked bot from a
+			// caching layer breaking the handshake for every real visitor. The detail was
+			// recorded in `_gdpr_reason` all along — it was simply never shown, because
+			// label() strips everything after the colon. Rendering it here changes no
+			// stored value and no corpus label; it only stops the one datum that settles a
+			// diagnosis from sitting invisibly in the database.
+			$reason_detail = Classification_Reason::detail_label( $reason_value );
+			if ( '' !== $reason_detail ) {
+				$html_details .= '<p class="gdpr-reason-detail">'
+					. esc_html( $reason_detail )
+					. '</p>';
+			}
+		}
+		if ( null !== $route_value ) {
+			$html_details .= '<p class="gdpr-route-line">'
+				. esc_html__( 'REST route:', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. ' <code>' . esc_html( $route_value ) . '</code>'
+				. ' <button type="button" class="gdpr-monitor-route-btn" data-route="' . esc_attr( $route_value ) . '" onclick="monitorRoute(this)">'
+				. esc_html__( 'Monitor this route', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. '</button></p>';
 		}
 		$html_details .= '
             <table class="widefat striped message">
@@ -354,10 +400,14 @@ class Message_Page {
 		// Own registrable domain(s), so the one-click "Block this domain" button is
 		// never offered for the site's own referrer/page URL (self-DoS guard).
 		$own_domains = Echo_Store::site_domains();
+		// Already-learned credential names, read once for the whole table (the
+		// "Treat as credential field" button is pointless on a field that is
+		// redacted already).
+		$learned_names = Credential_Learning::learned_names();
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
-			// Already shown as the badge above — do not repeat it as a raw row.
-			if ( '_gdpr_reason' === $detail->rgd_attribute ) {
+			// Already shown as the badge/route line above — do not repeat as a raw row.
+			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute ) {
 				continue;
 			}
 			$html_details .= '<tr class="table-body">';
@@ -399,6 +449,21 @@ class Message_Page {
 				}
 				if ( null !== $domain_to_block ) {
 					$html_details .= ' <button type="button" class="gdpr-block-btn" data-kind="domain" data-value="' . esc_attr( $domain_to_block ) . '" onclick="blockValue(this)">' . esc_html__( 'Block this domain', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
+				}
+				// Rescue path (b) of the learned credential-field list: a password
+				// sitting readable in the inbox because neither the name heuristic nor
+				// the client marker caught it. One click adds the name AND redacts
+				// this message on the spot (Credential_Learning). Offered only where
+				// it could help: names the plugin already knows are redacted anyway,
+				// and the names its own diagnostics depend on must never be redacted.
+				$segments = explode( '->', (string) $detail->rgd_attribute );
+				$leaf     = Learned_Credential_Fields::normalize_name( $segments[ count( $segments ) - 1 ] );
+				if ( null !== $leaf
+					&& ! Credential_Fields::is_password_path( (string) $detail->rgd_attribute )
+					&& ! Learned_Credential_Fields::is_diagnostic_name( $leaf )
+					&& ! in_array( $leaf, $learned_names, true )
+				) {
+					$html_details .= ' <button type="button" class="gdpr-credential-btn" data-attribute="' . esc_attr( $detail->rgd_attribute ) . '" data-message="' . esc_attr( $message_id ) . '" onclick="treatAsCredential(this)">' . esc_html__( 'Treat as credential field', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
 				}
 			}
 			$html_details .= '</td>
@@ -588,6 +653,71 @@ class Message_Page {
 			array(
 				'message' => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'value'   => $value,
+			)
+		);
+		exit;
+	}
+
+	/**
+	 * One-click "Monitor this route" (REST_ROUTES_PLAN.md AP5): append the REST route
+	 * shown on a message's detail view to POW_REST_ROUTES. Same shape as
+	 * block_value_callback() above — capability-gated (manage_options) + nonce, dedup
+	 * against the existing textarea lines.
+	 *
+	 * MUST run through the SAME self-lockout guard as the settings textarea
+	 * (RestRoute::reject_self_lockout_lines(), verified in AP3's review and wired into
+	 * Settings_Menu::update_settings()) — otherwise this one-click path could add a
+	 * route that covers a WordPress core namespace (e.g. `wp/v2`) and lock the admin
+	 * out of wp-admin/the block editor, even though the textarea itself is protected.
+	 */
+	public function monitor_route_callback() {
+		$message_type   = filter_var( isset( $_POST['messageType'] ) ? wp_unslash( $_POST['messageType'] ) : '', FILTER_VALIDATE_INT );
+		$security_nonce = isset( $_POST['security_nonce'] ) ? filter_var( wp_unslash( $_POST['security_nonce'] ), FILTER_UNSAFE_RAW ) : '';
+
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $security_nonce, 'monitor_route_nonce_' . $message_type ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
+		// Same normalization RestRoute::extract() already produced when the route was
+		// captured (leading slash, decoded, no trailing slash) — stored without the
+		// leading slash to match the convention of the default/admin-entered pattern
+		// lines (matches()/reject_self_lockout_lines() re-segment either way, so this is
+		// purely cosmetic consistency in the textarea, not a matching requirement).
+		$route = isset( $_POST['route'] ) ? ltrim( sanitize_text_field( wp_unslash( $_POST['route'] ) ), '/' ) : '';
+		if ( '' === $route ) {
+			wp_send_json_error( array( 'error_message' => __( 'No route to monitor.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
+		}
+
+		$existing = (string) get_option( Option::POW_REST_ROUTES );
+		$lines    = '' === trim( $existing ) ? array() : preg_split( "/\r\n|\n|\r/", $existing, -1, PREG_SPLIT_NO_EMPTY );
+
+		foreach ( $lines as $existing_line ) {
+			if ( trim( $existing_line ) === $route ) {
+				wp_send_json_error( array( 'error_message' => __( 'This route is already monitored.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+		}
+
+		$lines[]   = $route;
+		$candidate = implode( "\n", $lines );
+
+		list( $result, $rejected ) = RestRoute::reject_self_lockout_lines( $candidate );
+		if ( ! empty( $rejected ) ) {
+			wp_send_json_error(
+				array(
+					'error_message' => __( 'Refusing to monitor this route: it would also cover a WordPress core route and could lock you out of wp-admin.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				)
+			);
+			exit;
+		}
+
+		update_option( Option::POW_REST_ROUTES, $result );
+		wp_send_json_success(
+			array(
+				'message' => __( 'Now monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'route'   => $route,
 			)
 		);
 		exit;

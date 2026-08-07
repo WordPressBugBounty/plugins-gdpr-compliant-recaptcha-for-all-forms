@@ -27,6 +27,16 @@ class Uninstall {
 			}
 		}
 
+		// Options whose Option constant is gone because the feature was removed. The
+		// loop above only sees existing constants, so without this list an old install
+		// would keep a stray row in wp_options for good.
+		// - gdpr_pow_pow_apply_rest: the "Apply on REST-API" switch, removed in 5.3.0
+		//   together with the client-forgeable referer exemption it gated.
+		$legacy_options = array( 'gdpr_pow_pow_apply_rest' );
+		foreach ( $legacy_options as $legacy_option ) {
+			delete_option( $legacy_option );
+		}
+
 		global $wpdb;
 		$table_name_mail    = $wpdb->prefix . 'recaptcha_gdpr_message_rgm';
 		$table_name_details = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';

@@ -629,3 +629,82 @@ function blockValue(button) {
 	);
 }
 
+// One-click "Monitor this route" (REST_ROUTES_PLAN.md AP5). Global, invoked from the
+// inline onclick on the REST-route line above the detail table. The server appends the
+// route to POW_REST_ROUTES, running it through the SAME self-lockout guard as the
+// settings textarea (RestRoute::reject_self_lockout_lines()) — see
+// Message_Page::monitor_route_callback().
+function monitorRoute(button) {
+	var route = button.getAttribute('data-route');
+	showSpinner();
+	var xhr = new XMLHttpRequest();
+	xhr.open('POST', gdprMsg.ajaxUrl, true);
+	xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+	xhr.onload = function () {
+		hideSpinner();
+		var response = {};
+		try {
+			response = JSON.parse(xhr.responseText);
+		} catch (e) {
+			response = {};
+		}
+		if (xhr.status === 200 && response.success) {
+			button.disabled = true;
+			showSuccess((response.data && response.data.message) || gdprMsg.i18n.routeMonitored);
+		} else {
+			showAlert((response.data && response.data.error_message) || gdprMsg.i18n.monitorFailed);
+		}
+	};
+	xhr.send(
+		'action=gdpr_monitor_route' +
+		'&messageType=' + encodeURIComponent(gdprMsg.messageType) +
+		'&route=' + encodeURIComponent(route) +
+		'&security_nonce=' + encodeURIComponent(gdprMsg.nonces.monitorRoute)
+	);
+}
+
+// One-click "Treat as credential field": the rescue path of the learned
+// credential-field list, for a password that is already readable in the inbox.
+// Confirmed first, because it is irreversible for messages already received —
+// the value is replaced in place, here and everywhere else. The server decides
+// the field name again from the attribute path and refuses the names its own
+// diagnostics depend on (see Credential_Learning::ajax_treat_as_credential()).
+function treatAsCredential(button) {
+	if (!window.confirm(gdprMsg.i18n.credentialAsk)) {
+		return;
+	}
+	var attribute = button.getAttribute('data-attribute');
+	var messageId = button.getAttribute('data-message');
+	showSpinner();
+	var xhr = new XMLHttpRequest();
+	xhr.open('POST', gdprMsg.ajaxUrl, true);
+	xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+	xhr.onload = function () {
+		hideSpinner();
+		var response = {};
+		try {
+			response = JSON.parse(xhr.responseText);
+		} catch (e) {
+			response = {};
+		}
+		if (xhr.status === 200 && response.success) {
+			// Replace the cell's text with the stored replacement, so the admin sees
+			// the effect instead of having to reload to believe it.
+			var cell = button.parentNode;
+			if (cell && response.data && response.data.value) {
+				cell.textContent = response.data.value;
+			}
+			showSuccess((response.data && response.data.message) || gdprMsg.i18n.credentialSaved);
+		} else {
+			showAlert((response.data && response.data.error_message) || gdprMsg.i18n.credentialFailed);
+		}
+	};
+	xhr.send(
+		'action=gdpr_credential_field' +
+		'&messageType=' + encodeURIComponent(gdprMsg.messageType) +
+		'&messageID=' + encodeURIComponent(messageId) +
+		'&attribute=' + encodeURIComponent(attribute) +
+		'&security_nonce=' + encodeURIComponent(gdprMsg.nonces.credential)
+	);
+}
+

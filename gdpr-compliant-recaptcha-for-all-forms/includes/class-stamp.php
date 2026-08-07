@@ -54,8 +54,8 @@ class Stamp {
 	 * a recognition pattern built from a saved message that includes e.g.
 	 * `gdpr_pow_token` would only match POSTs that CARRY the token, so a bot simply
 	 * omitting the field would fall out of the spam check entirely. NB: hashPWFields
-	 * doubles as save_message()'s password-field skip list, so the strip must only
-	 * happen after that list has been consumed (see save_message()).
+	 * doubles as save_message()'s credential-field marker, so the strip must only
+	 * happen after that marker has been consumed (see save_message()).
 	 */
 	public const PLUGIN_FIELDS = array( 'gdpr_pow_token', 'hashPWFields' );
 
@@ -81,6 +81,22 @@ class Stamp {
 	 */
 	private $pow_fail_reason;
 
+	/**
+	 * The REST route this request targets, as extracted by check_rest_routes(), or
+	 * null when the request is not a REST request at all. Set whether or not the
+	 * route ends up matching POW_REST_ROUTES — it describes the request, not the
+	 * verdict.
+	 *
+	 * Read via get_rest_route() by save_message() (REST_ROUTES_PLAN.md AP5), which
+	 * persists it as the technical `_gdpr_route` detail row on both type-4 analysis
+	 * rows and normally classified messages. check_rest_routes() is called from the
+	 * constructor BEFORE save_for_analysis(), specifically so this property is already
+	 * set when that first save_message() call happens.
+	 *
+	 * @var string|null
+	 */
+	private $rest_route = null;
+
 	/** JSON that holds the data of the request */
 	private $request_data;
 	private $whole_request_data;
@@ -102,11 +118,7 @@ class Stamp {
 		// update/delete in THIS request drops the cached hash set. Cheap — add_action
 		// only, the actual rebuild is lazy on the next echo record()/matches().
 		Echo_Store::register_cache_hooks();
-		$referrer_without_protocol = null;
-		$posted_site               = null;
-		if ( array_key_exists( 'HTTP_REFERER', $_SERVER ) ) {
-			$referrer_without_protocol = preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['HTTP_REFERER'] );
-		}
+		$posted_site = null;
 		if ( array_key_exists( 'REQUEST_URI', $_SERVER ) && array_key_exists( 'HTTP_HOST', $_SERVER ) ) {
 			$posted_site = $_SERVER['HTTP_HOST'] . preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['REQUEST_URI'] );
 		}
@@ -132,45 +144,46 @@ class Stamp {
 				}
 			}
 		}
-		if ( is_string( $posted_site ) &&
-			( strpos( $posted_site, '/wp-admin/admin-ajax.php?action=elementor_1_elementor_updater' )
-				|| strpos( $posted_site, '/wp-cron.php' )
-				|| strpos( $posted_site, '/?wordfence_syncAttackData=' )
-			)
-		) {
+		$ajax   = defined( 'DOING_AJAX' ) && DOING_AJAX;
+		$action = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
+
+		if ( $this->is_special_case_request( $action ) ) {
 			$site_whitelisted = true;
 		}
 
-		//Check whether a rest route is used and whether it shall be processed
-		$is_restroute = false;
-		if ( ! get_option( Option::POW_APPLY_REST ) ) {
-			if ( isset( $_SERVER['HTTP_HOST'] ) ) {
-				$current_domain          = $_SERVER['HTTP_HOST'] . '/?rest_route=';
-				$domain_without_protocol = preg_replace( '/^(https?:\/\/)/i', '', $current_domain );
-				if ( is_string( $referrer_without_protocol ) && is_string( $domain_without_protocol ) && strpos( $referrer_without_protocol, $domain_without_protocol ) === 0 ) {
-					$is_restroute = true;
-				}
-			}
-		}
-
-		$logged_out    = array_key_exists( 'loggedout', $this->whole_request_data ) ? $this->whole_request_data ['loggedout'] : false;
-		$interim_login = array_key_exists( 'interim-login', $this->whole_request_data ) ? $this->whole_request_data ['interim-login'] : false;
-		$ajax          = defined( 'DOING_AJAX' ) && DOING_AJAX;
-		$action        = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
+		// Computed HERE, BEFORE save_for_analysis() — not down in the non-ajax gate
+		// below, where it used to live. save_for_analysis() persists a type-4 row from
+		// THIS call, and REST_ROUTES_PLAN.md AP5 needs $this->rest_route (read via
+		// get_rest_route() in save_message()) already set for that row. check_rest_routes()
+		// is pure request inspection (only $_SERVER/$_GET/$_POST + the option, see its
+		// docblock) — computing it here changes no other behavior, and the boolean is
+		// reused below instead of calling the method a second time.
+		$route_found = $this->check_rest_routes();
 
 		$this->save_for_analysis();
 
-		//If the client, the site, the rest-route, or the action is whitelisted, stop the further processing
-		if ( ! $ip_whitelisted
-			&& ! $site_whitelisted
-			&& ! $is_restroute
-			&& (
-					( is_string( $referrer_without_protocol ) && false == strpos( $referrer_without_protocol, '/wp-admin/' ) ) // phpcs:ignore Universal.Operators.StrictComparisons.LooseEqual -- loose == is intentional: strpos()===0 (a "/wp-admin/" prefix match) must be treated the same as false here; strict === would change the whitelist classification.
-					|| ! is_string( $referrer_without_protocol )
-					|| $logged_out
-					|| $interim_login
-			)
-		) {
+		// If the client or the site is whitelisted, stop the further processing.
+		//
+		// NO REQUEST HEADER MAY EVER DECIDE THIS AGAIN. Until 5.3.0 this condition also
+		// carried two referer-based exemptions — a `?rest_route=` prefix (gated by the
+		// removed "Apply on REST-API" option) and "the referer contains /wp-admin/".
+		// Both were skipping the ENTIRE spam check, including the login check, on a
+		// single header the sender picks freely; the second one also worked from a
+		// foreign host and as a query-string substring. They are gone. Legitimate
+		// backend traffic does not need them: what is evaluated behind this gate is
+		// only what matches a field pattern or a monitored ajax action, and backend
+		// POSTs (post.php, options.php, the block editor's REST save, admin-ajax,
+		// builder settings screens) match neither — measured with a real logged-in
+		// session in tests/integration/cases/backend-posts.mjs.
+		//
+		// What still comes from the request, and why it is bounded: the two remaining
+		// terms are keyed on the URL (`is_special_case_request()`, anchored + narrowed
+		// by the request's own action/body shape) and on `POW_SITE_WHITELIST`, which is
+		// matched against `HTTP_HOST . REQUEST_URI` — and `Host` IS client-settable, so
+		// an admin-entered whitelist line can be claimed by a forged Host header
+		// (pre-existing, see ISSUES.md). Both are ADMIN-configured or fixed integration
+		// endpoints, not switches a visitor turns on; that is the line this gate holds.
+		if ( ! $ip_whitelisted && ! $site_whitelisted ) {
 			//Ajax-calls get a different treatment
 			if ( $ajax ) {
 				//Post-requests from the plugin
@@ -191,6 +204,7 @@ class Stamp {
 					add_action( 'init', array( $this, 'run' ) );
 					$pattern_found = $this->check_existing_patterns();
 					$action_found  = $this->check_explicit_actions();
+					// $route_found: computed earlier, before save_for_analysis() — see there.
 					//WooCommerce
 					if ( (
 							isset( $this->request_data['update_cart'] ) && isset( $this->request_data['cart'] ) && isset( $this->request_data['woocommerce-cart-nonce'] )
@@ -199,6 +213,7 @@ class Stamp {
 						)
 						|| $pattern_found
 						|| $action_found
+						|| $route_found
 					) {
 						$this->check_submit( null, $this->request_data, 'specific call' );
 						return;
@@ -206,6 +221,83 @@ class Stamp {
 				}
 			}
 		}
+	}
+
+	/**
+	 * The three fixed special cases of the site whitelist: WordPress' own cron
+	 * spawner, Elementor's updater ajax call, and Wordfence's attack-data sync.
+	 *
+	 * ANCHORED comparison against REQUEST_URI — exact path plus, where the entry needs
+	 * it, a query-string PREFIX. Until 5.3.0 this was a truthy `strpos()` over
+	 * `HTTP_HOST . REQUEST_URI`, i.e. the needle was accepted ANYWHERE in the URL: a
+	 * plain `POST /?redirect=/wp-cron.php` — a query parameter any sender picks for
+	 * itself, no header needed — skipped the entire spam check (ISSUES.md, measured
+	 * 2026-08-06). Anchoring also makes the entries correct on a WordPress installed
+	 * in a subdirectory: the paths are built from the install's own site/home path
+	 * instead of assuming the document root.
+	 *
+	 * The URL alone is NOT enough, and getting that wrong is how this method leaked
+	 * twice (both found in review, both measured):
+	 *
+	 *   - Elementor: `$_REQUEST['action']` merges GET and POST, and POST wins. A
+	 *     request to `admin-ajax.php?action=elementor_1_elementor_updater` carrying
+	 *     `action=wpforms_submit` in its BODY matched this entry on the query while the
+	 *     ajax branch below dispatched on the body value — i.e. any monitored ajax
+	 *     action could be switched off with one query parameter. The entry therefore
+	 *     requires the EFFECTIVE action to be Elementor's as well. Note the direction:
+	 *     query AND effective action, never "action from the body alone" — that would
+	 *     be the self-naming exemption this guard exists to prevent.
+	 *   - Wordfence: matching only `?wordfence_syncAttackData=` let any body ride along
+	 *     unevaluated. The entry now demands the same body shape the non-ajax branch
+	 *     below already demands of this integration (that single field and nothing
+	 *     else), so the URL cannot carry a foreign payload past the check.
+	 *
+	 * @param string $action Effective action of this request (`$_REQUEST['action']`).
+	 * @return bool
+	 */
+	private function is_special_case_request( $action = '' ) {
+		if ( ! array_key_exists( 'REQUEST_URI', $_SERVER ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
+			return false;
+		}
+		$request_uri   = wp_unslash( $_SERVER['REQUEST_URI'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared, never output or stored; sanitizing would alter the path being compared.
+		$request_path  = (string) wp_parse_url( $request_uri, PHP_URL_PATH );
+		$request_query = (string) wp_parse_url( $request_uri, PHP_URL_QUERY );
+		$site_path     = untrailingslashit( (string) wp_parse_url( (string) get_option( 'siteurl' ), PHP_URL_PATH ) );
+		$home_path     = untrailingslashit( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_PATH ) );
+
+		// The cron spawner posts an EMPTY body (`spawn_cron()` sends `body => array()`,
+		// and wp-cron.php itself dies on a non-empty $_POST), so "no fields" is not a
+		// restriction here — it is the real shape of the call.
+		$is_wordfence_shape = isset( $this->request_data['wordfence_syncAttackData'] )
+			&& count( $this->request_data ) === 1;
+
+		$special_cases = array(
+			// WordPress' own cron spawner — wp-cron.php sits at the SITE path.
+			array( $site_path . '/wp-cron.php', '', true ),
+			// Elementor's updater: same endpoint as every other ajax call, told apart by
+			// the action — which must match in the URL *and* effectively (see docblock).
+			array(
+				$site_path . '/wp-admin/admin-ajax.php',
+				'action=elementor_1_elementor_updater',
+				'elementor_1_elementor_updater' === $action,
+			),
+			// Wordfence's attack-data sync, posted to the site's front page — only with
+			// the body shape the non-ajax branch already expects of it.
+			array( $home_path . '/', 'wordfence_syncAttackData=', $is_wordfence_shape ),
+		);
+
+		foreach ( $special_cases as $special_case ) {
+			list( $path, $query_prefix, $payload_ok ) = $special_case;
+			if ( ! $payload_ok ) {
+				continue;
+			}
+			if ( $request_path === $path
+				&& ( '' === $query_prefix || strpos( $request_query, $query_prefix ) === 0 )
+			) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private function capture_request_data() {
@@ -299,9 +391,14 @@ class Stamp {
 	 * a signup form posting two custom-named password fields would otherwise
 	 * contribute two "gibberish" tokens and cross the message threshold) plus
 	 * the admin-configured POW_SKIP_FIELDS entries ("site:field" per line, same
-	 * format save_message() consumes). Collects every key and string leaf from
-	 * the nested hashPWFields structure — a safe superset of the exact path
-	 * matching save_message() performs, fine for an exemption list.
+	 * format save_message() consumes) plus the LEARNED credential field names.
+	 * The last one is not optional: without it a no-JS submission carrying a
+	 * learned password field has no marker to exempt it, and its random password
+	 * would tip the very message into the gibberish classification that the
+	 * marker path is exempt from — the same form judged differently depending on
+	 * whether the JS ran. Collects every key and string leaf from the nested
+	 * hashPWFields structure — a safe superset of the exact path matching
+	 * save_message() performs, fine for an exemption list.
 	 *
 	 * @param mixed $fields The submission's field map (pre strip_plugin_fields);
 	 *                      request-/hook-derived, so not guaranteed to be an array.
@@ -336,6 +433,9 @@ class Stamp {
 				$names[] = trim( $args[1] );
 			}
 		}
+		foreach ( Credential_Learning::learned_names() as $learned ) {
+			$names[] = $learned;
+		}
 		return $names;
 	}
 
@@ -366,6 +466,80 @@ class Stamp {
 			$pattern_found = true;
 		}
 		return $pattern_found;
+	}
+
+	/**
+	 * Third signature class alongside patterns/actions (REST_ROUTES_PLAN.md AP3):
+	 * is this POST targeting an admin-configured REST route? Only collects the
+	 * WordPress-specific inputs (REQUEST_URI, the `rest_route` request var — $_POST
+	 * before $_GET, see below —, the home path, and the REST prefix
+	 * `rest_get_url_prefix()`, changeable via the `rest_url_prefix` filter) and gates
+	 * on POST; the actual extraction and wildcard matching is pure and lives in
+	 * RestRoute (class-rest-route.php), unit-tested there in isolation — including
+	 * the three places where WordPress' own routing is case-INsensitive and this
+	 * class has to follow it.
+	 *
+	 * SAME GATE AS EVERY OTHER SIGNATURE CLASS (HANDBUCH.md §5): this runs behind
+	 * the constructor's whitelist gate, which does not distinguish frontend from
+	 * admin traffic — so once a route is configured, a POST to it is evaluated
+	 * whether it came from a visitor or a logged-in admin (e.g. the block editor's
+	 * own save request, `/wp/v2/posts/<id>`). Never seed a bare core namespace
+	 * like `wp/v2` into POW_REST_ROUTES (see Settings_Menu::get_default_rest_routes()
+	 * and its doc-comment) — that would make the plugin block post saves in
+	 * wp-admin. Regression net: tests/integration/cases/backend-posts.mjs.
+	 *
+	 * @return bool
+	 */
+	private function check_rest_routes() {
+		if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || 'POST' !== $_SERVER['REQUEST_METHOD'] ) {
+			return false;
+		}
+		if ( ! isset( $_SERVER['REQUEST_URI'] ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
+			return false;
+		}
+		$request_uri = wp_unslash( $_SERVER['REQUEST_URI'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared/extracted, never output or stored.
+
+		// $_POST BEFORE $_GET — WordPress' own precedence, not a preference. `rest_route`
+		// is a PUBLIC query var (`$wp->add_query_var( 'rest_route' )` in
+		// rest_api_register_rewrites(), wp-includes/rest-api.php), and WP::parse_request()
+		// resolves every public query var in this order (wp-includes/class-wp.php, the
+		// `foreach ( $this->public_query_vars as $wpvar )` loop): extra_query_vars, then
+		// wp_die() if $_GET and $_POST BOTH hold it and DIFFER, then $_POST, then $_GET.
+		// So a plain `POST /` whose BODY carries `rest_route=/…` is dispatched to the REST
+		// server exactly like `GET|POST /?rest_route=/…`. Reading only $_GET here left that
+		// spelling as a complete bypass — the request reached the endpoint, we saw no route.
+		// Regression net: the post-body sub-case in tests/integration/cases/rest-routes.mjs.
+		$rest_route_param = '';
+		// phpcs:disable WordPress.Security.NonceVerification -- read-only inspection of which route is being targeted, not a state change.
+		if ( isset( $_POST['rest_route'] ) && is_string( $_POST['rest_route'] ) ) {
+			$rest_route_param = wp_unslash( $_POST['rest_route'] );
+		} elseif ( isset( $_GET['rest_route'] ) && is_string( $_GET['rest_route'] ) ) {
+			$rest_route_param = wp_unslash( $_GET['rest_route'] );
+		}
+		// phpcs:enable WordPress.Security.NonceVerification
+
+		$home_path = untrailingslashit( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_PATH ) );
+
+		$route = RestRoute::extract( $request_uri, $rest_route_param, $home_path, rest_get_url_prefix() );
+		// Feeds the `_gdpr_route` detail row — see $rest_route's doc-comment.
+		// Recorded on every REST request, matched or not.
+		$this->rest_route = $route;
+		if ( null === $route ) {
+			return false;
+		}
+		return RestRoute::matches( $route, (string) get_option( Option::POW_REST_ROUTES ) );
+	}
+
+	/**
+	 * The REST route of the current request, or null if it is not a REST request —
+	 * see $rest_route. Read by save_message() for the `_gdpr_route` detail row
+	 * (REST_ROUTES_PLAN.md AP5); a plain accessor rather than a public property so
+	 * $rest_route itself stays private.
+	 *
+	 * @return string|null
+	 */
+	public function get_rest_route() {
+		return $this->rest_route;
 	}
 
 	/**
@@ -442,17 +616,31 @@ class Stamp {
 			add_action( 'wp_enqueue_scripts', array( $this, 'add_script_to_header' ) );
 			if ( get_option( Option::POW_BLOCK_LOGIN ) ) {
 				add_action( 'login_enqueue_scripts', array( $this, 'add_script_to_header' ) );
-				add_action( 'wp_signon', array( $this, 'pre_process_login' ), 1, 1 );
 				add_action( 'wp_authenticate_user', array( $this, 'pre_process_login' ), 1, 1 );
-				add_action( 'check_passwords', array( $this, 'pre_process_login' ), 1, 1 );
 				add_action( 'password_reset', array( $this, 'pre_process_login' ), 1, 1 );
 			}
 		}
 	}
 
-	/** Login/password-reset pre-processing (hooked at wp_signon, wp_authenticate_user,
-	 * check_passwords, password_reset): run the spam check on the credentials POST.
+	/** Login/password-reset pre-processing (hooked at wp_authenticate_user and
+	 * password_reset): run the spam check on the credentials POST.
 	 * Logins deliberately skip the pattern-/action-gate — they are always monitored.
+	 *
+	 * It passes $origin = 'login' down to check_submit()/save_message(): that explicit
+	 * marker — not a reconstruction from request fields — is what drives the
+	 * POW_SAVE_LOGIN suppression and the fail2ban auth-log line. Reconstructing the
+	 * login-ness from `wp-submit`/`hashPWFields` (as this used to) silently failed for
+	 * no-JS and minimal POSTs.
+	 *
+	 * Deliberately NO further hooks (scope discipline). Two more login-related actions
+	 * used to be registered in run() and were dropped as provably inert: `wp_signon`
+	 * is not a WordPress core action at all (nothing ever fires it), and
+	 * `check_passwords` only fires inside wp-admin, where the is_admin() guard below
+	 * bails out. Do not re-add either. And a brute-force attempt
+	 * against an unknown user name never reaches `wp_authenticate_user`, so it never
+	 * persists anything either — there is no leak to close there. Hooking `authenticate`
+	 * instead would be a detection feature of its own (cookie auth, filter ordering)
+	 * with its own risk, not part of this path.
 	 *
 	 * Historical note (2026-07-16): the former pre_process_submission() this delegated
 	 * to carried a non-login leg (analysis capture + pattern matching before
@@ -465,7 +653,7 @@ class Stamp {
 		// Empty request_data: WordPress fires loading-time POSTs (e.g. containing only
 		// the time) that must not be treated as a submission.
 		if ( ! is_admin() && $this->request_data ) {
-			return $this->check_submit( $wp, $this->request_data );
+			return $this->check_submit( $wp, $this->request_data, '', null, null, 'login' );
 		}
 		return $wp;
 	}
@@ -478,9 +666,14 @@ class Stamp {
 	 * window.fetch before other page scripts run. Per-request and configuration
 	 * values are handed to the script via wp_localize_script as the global `gdprPow`.
 	 * The script itself lives in scripts/recaptcha-gdpr-pow.js.
+	 *
+	 * PRIVACY INVARIANT (pinned by LocalizePrivacyTest): nothing here is derived from
+	 * the visitor's IP — the embedded token is the anonymous one, and no address is
+	 * localized to the page. Page HTML is cacheable and shared, so a value that
+	 * identifies one visitor must never be rendered into it.
 	 */
 	public function add_script_to_header() {
-		$stamp = $this->get_stamp();
+		$stamp = $this->get_anonymous_stamp();
 
 		wp_enqueue_script(
 			'gdpr-recaptcha-pow',
@@ -495,7 +688,6 @@ class Stamp {
 			'gdprPow',
 			array(
 				'stamp'      => $stamp['stamp'],
-				'clientIp'   => $stamp['client_ip'],
 				'difficulty' => (string) $stamp['difficulty'],
 				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
 				'timeout'    => get_option( Option::POW_TIME_WINDOW ),
@@ -536,8 +728,23 @@ class Stamp {
 
 	/** Check whether a valid stamp and nonce are given
 	 *
+	 * $origin names the path this submission came in on; only pre_process_login()
+	 * passes anything ('login'), every other caller keeps the '' default. It is
+	 * handed straight through to save_message() and is deliberately NOT stored on
+	 * the instance (explicit data flow — the same Stamp object serves several
+	 * submissions per request in the hook paths).
+	 *
+	 * NB: the credential redaction pre-pass lives in save_message() ONLY and must
+	 * never be applied to $gdpr_fields here. Echo lock,
+	 * wildcard patterns and gibberish detection below all read these raw values, and
+	 * feeding them '[redacted]' would change what counts as spam — a silent weakening
+	 * of the filter. They are safe on raw values: the echo store only keeps sha256
+	 * hashes (text hashes only from 40 chars up), wildcard matching stores nothing at
+	 * all, and the gibberish detector needs the raw text and exempts password fields
+	 * itself (is_exempt_field_name(): substring `pass`/`pwd`, plus
+	 * gibberish_exempt_field_names()).
 	 */
-	public function check_submit( $wp = null, $gdpr_fields = null, $form_builder = '', $action = null, $ajax = null ) {
+	public function check_submit( $wp = null, $gdpr_fields = null, $form_builder = '', $action = null, $ajax = null, $origin = '' ) {
 
 		$hook_name                   = current_filter();
 		$this->plugin_spam           = false;
@@ -558,7 +765,7 @@ class Stamp {
 		}
 
 		// Process the spam simulation
-		if ( get_option( Option::POW_SIMULATE_SPAM ) && 'wp_authenticate_user' !== $hook_name && 'wp_signon' !== $hook_name ) {
+		if ( get_option( Option::POW_SIMULATE_SPAM ) && 'wp_authenticate_user' !== $hook_name ) {
 			$this->print_debug_information( 'Spam simulated' );
 			$this->plugin_spam = true;
 			// Unlike every check below, this block has NO ! $this->plugin_spam guard —
@@ -667,9 +874,9 @@ class Stamp {
 			// Feed the same under-attack wave counter as a real PoW/token failure —
 			// but only in the real (non-simulated) mode, matching the existing
 			// increment_spam_counter() call above. (POW_SIMULATE_SPAM can be on while
-			// $this->plugin_spam is still false here for the wp_authenticate_user/
-			// wp_signon hooks the simulation branch above deliberately excludes, so
-			// this check is not redundant with the "still false" guard above.)
+			// $this->plugin_spam is still false here for the wp_authenticate_user hook
+			// the simulation branch above deliberately excludes, so this check is not
+			// redundant with the "still false" guard above.)
 			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
 				$this->increment_spam_counter();
 			}
@@ -739,7 +946,7 @@ class Stamp {
 			( get_option( Option::POW_SAVE_SPAM ) && ! get_option( Option::POW_FLAG_SAVE ) && $this->plugin_spam )
 			|| ( get_option( Option::POW_SAVE_CLEAN ) && ! $this->plugin_spam )
 		) {
-			$this->save_message( $gdpr_fields, $action, $ajax, null, $this->hash_values( $this->get_client_ip() ) );
+			$this->save_message( $gdpr_fields, $action, $ajax, null, $this->hash_values( $this->get_client_ip() ), $origin );
 			$this->print_debug_information( 'Message saved' );
 		}
 
@@ -789,7 +996,7 @@ class Stamp {
 			&& get_option( Option::POW_FLAG_SAVE )
 			&& $this->plugin_spam
 		) {
-			$this->save_message( $gdpr_fields, $action, $ajax, null, $this->hash_values( $this->get_client_ip() ) );
+			$this->save_message( $gdpr_fields, $action, $ajax, null, $this->hash_values( $this->get_client_ip() ), $origin );
 			$this->print_debug_information( 'Message saved' );
 		}
 
@@ -809,8 +1016,10 @@ class Stamp {
 		// during a wave — a lasting, out-of-band lockout, unlike the per-message
 		// quarantine hold (exception #3 in the quarantine block above).
 		if ( $this->plugin_spam && ! $quarantine_only_spam ) {
-			// Hook into failed login attempts in WordPress
-			if ( isset( $this->whole_request_data ['wp-submit'] ) || ( isset( $this->whole_request_data ['log'] ) && isset( $this->whole_request_data ['pwd'] ) ) ) {
+			// Hook into failed login attempts in WordPress. The $origin leg is additive:
+			// it also catches minimal login POSTs that carry neither `wp-submit` nor the
+			// classic log/pwd pair, which the two request-data probes alone would miss.
+			if ( isset( $this->whole_request_data ['wp-submit'] ) || ( isset( $this->whole_request_data ['log'] ) && isset( $this->whole_request_data ['pwd'] ) ) || 'login' === $origin ) {
 				// The submitted login name is unauthenticated attacker input. Without
 				// strict sanitisation a value containing CR/LF would forge extra fail2ban
 				// log lines (e.g. an "<34>… auth: Failed login … from IP 8.8.8.8" line),
@@ -920,33 +1129,28 @@ class Stamp {
 		}
 	}
 
-	/** Transforms an array into a string-representation */
-
-	private function generate_paths( $my_id, $data, $current_path, $pre_forbidden_fields, $referrer_without_protocol, $forbidden_fields, $forbidden_key, $query, $first, $custom_titles, $title ) {
-		$values    = array();
-		$forbidden = false;
+	/** Transforms an array into a string-representation
+	 *
+	 * Returns array( $values, $query, $title, $first ). The marker-driven credential
+	 * handling that used to be threaded through here (three extra parameters and a
+	 * fifth return element) is gone: save_message() redacts credential values up
+	 * front, so nothing has to be dropped while flattening. The POW_SKIP_FIELDS
+	 * logic ($pre_forbidden_fields) is unrelated and unchanged — it is an explicit
+	 * admin choice to not store a field at all.
+	 */
+	private function generate_paths( $my_id, $data, $current_path, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title ) {
+		$values = array();
 
 		foreach ( $data as $key => $value ) {
 			$path = $current_path . ( $current_path ? '->' : '' ) . $key;
 			if ( is_array( $value ) || is_object( $value ) ) {
-				// Check for fields that shall be skipped via option
-				if ( $forbidden_fields ) {
-					if ( array_key_exists( $forbidden_key, $forbidden_fields ) ) {
-						$forbidden_fields = $forbidden_fields[ $forbidden_key ];
-						$forbidden_key    = $key;
-					} else {
-						$forbidden_fields = null;
-						$forbidden_key    = null;
-					}
-				}
 				// Recurse into nested arrays/objects
-				$nested_values = $this->generate_paths( $my_id, $value, $path, $pre_forbidden_fields, $referrer_without_protocol, $forbidden_fields, $forbidden_key, $query, $first, $custom_titles, $title );
+				$nested_values = $this->generate_paths( $my_id, $value, $path, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title );
 				// Merge the nested values with the current values array
-				$values    = array_merge( $values, $nested_values[0] );
-				$query     = $nested_values[1];
-				$title     = $nested_values[2];
-				$first     = $nested_values[3];
-				$forbidden = $nested_values[4];
+				$values = array_merge( $values, $nested_values[0] );
+				$query  = $nested_values[1];
+				$title  = $nested_values[2];
+				$first  = $nested_values[3];
 			} else {
 				$skipped_field = false;
 				if ( count( $pre_forbidden_fields ) ) {
@@ -962,21 +1166,19 @@ class Stamp {
 					if ( isset( $custom_titles[ htmlentities( $path ) ] ) ) {
 						$title .= $value . ' | ';
 					}
-					if ( $forbidden_fields ) {
-						$forbidden = true;
-					} else {
-						$forbidden = false;
-					}
-					// Add the path and the corresponding value to the values array alternately
+					// Add the path and the corresponding value to the values array alternately.
+					// rgm_posted stays false for a redacted value: it would otherwise become a
+					// clickable pattern-/block-candidate on the replacement literal, and such
+					// a pattern would match every future message carrying a redacted field.
 					$values[] = $my_id;
 					$values[] = $path;
 					$values[] = $value;
-					$values[] = true;
+					$values[] = Credential_Fields::REDACTED_VALUE !== $value;
 				}
 			}
 		}
 
-		return array( $values, $query, $title, $first, $forbidden );
+		return array( $values, $query, $title, $first );
 	}
 
 	/** Check whether a fields shall be skipped */
@@ -991,31 +1193,17 @@ class Stamp {
 		return false;
 	}
 
-	/** Recursive search like array_walk_recursive, but with depth-control */
-	private function recursive_search( $data, $parameter, $depth = 0, $max_depth = 3, &$found = false ) {
-		if ( $depth > $max_depth ) {
-			return;
-		}
-
-		foreach ( $data as $key => $value ) {
-			if ( $key === $parameter ) {
-				$found = true;
-				return;
-			}
-
-			if ( is_array( $value ) || is_object( $value ) ) {
-				$this->recursive_search( $value, $parameter, $depth + 1, $max_depth, $found );
-			}
-		}
-	}
-
 	/** Save a message
 	 *
+	 * $origin is the submission path handed down from check_submit(); only
+	 * pre_process_login() sets it ('login'). It replaces the former reconstruction of
+	 * "this was a login" from hashPWFields + wp-submit, which silently failed whenever
+	 * the client JS had not run or the POST was minimal.
 	 */
-	public function save_message( $fields, $action, $ajax, $message_type, $ip ) {
+	public function save_message( $fields, $action, $ajax, $message_type, $ip, $origin = '' ) {
 		if (
 			// Check whether the message stems from a login and shall be saved
-			! ( ! get_option( Option::POW_SAVE_LOGIN ) && isset( $fields['hashPWFields'] ) && isset( $this->whole_request_data ['wp-submit'] ) )
+			! ( ! get_option( Option::POW_SAVE_LOGIN ) && 'login' === $origin )
 			&& ( //Check for WooCommerce shopping carts and whether they shall be saved
 				get_option( Option::POW_SAVE_CART )
 				|| ! (
@@ -1031,30 +1219,41 @@ class Stamp {
 			if ( array_key_exists( 'REQUEST_URI', $_SERVER ) && array_key_exists( 'HTTP_HOST', $_SERVER ) ) {
 				$posted_site = $_SERVER['HTTP_HOST'] . preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['REQUEST_URI'] );
 			}
-			$forbidden_fields = array();
-			// is_string()/is_array() guards: hashPWFields is unauthenticated request
-			// input. Passing an array (hashPWFields[]=x) to base64_decode() is a fatal
-			// TypeError on PHP 8, and iterating a non-array json_decode() result raises
-			// warnings — both are unauthenticated DoS/log-noise vectors here.
-			if ( isset( $fields['hashPWFields'] ) && is_string( $fields['hashPWFields'] ) ) {
-				// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- benign: hashPWFields is the plugin's own base64-encoded password-field skip list (client twin in recaptcha-gdpr-analysis.js), not obfuscated code.
-				$decoded_values = json_decode( base64_decode( $fields['hashPWFields'] ), true );
-				if ( is_array( $decoded_values ) ) {
-					foreach ( $decoded_values as $decoded_value ) {
-						if ( is_array( $decoded_value ) ) {
-							foreach ( $decoded_value as $forbidden_key => $forbidden_field ) {
-								$forbidden_fields[ $forbidden_key ] = $forbidden_field;
-							}
-						}
-					}
-				}
-			}
-			// Only AFTER hashPWFields has been consumed for the password-field skip
-			// list above: drop the plugin's own injected fields so they never become
+			// Decode the client-injected hashPWFields marker into credential field
+			// paths. marker_paths_from_raw() is total and takes the unauthenticated
+			// request value as-is (non-string, broken base64, non-JSON → empty list),
+			// so no guards are needed here any more.
+			$marker_paths = Credential_Fields::marker_paths_from_raw( isset( $fields['hashPWFields'] ) ? $fields['hashPWFields'] : null );
+
+			// The admin-confirmed credential field names — the third line next to the
+			// name heuristic and the marker, and the only one that covers a password
+			// field with an inconspicuous name posted WITHOUT the plugin's JS.
+			$learned_names = Credential_Learning::learned_names();
+
+			// Learn from THIS submission for the later ones: a marker path that no
+			// rule recognises becomes a proposal (the field NAME only, never a
+			// value). Records nothing else and adds nothing by itself — confirming a
+			// proposal is an explicit, capability-gated admin click, because the
+			// marker comes from unauthenticated request data.
+			Credential_Learning::observe( $marker_paths, $learned_names );
+
+			// Credential redaction pre-pass — the ONE place credential values are
+			// removed, and deliberately in the persistence path only (check_submit()
+			// keeps working on raw values, see its docblock). It runs BEFORE
+			// strip_plugin_fields(), before the title build and before both write
+			// loops, so everything downstream — including generate_paths(), which
+			// flattens exactly this structure — only ever sees redacted values.
+			// The name heuristic inside redact() is the primary line and covers
+			// submissions the plugin's JS never touched (no-JS logins, hand-built
+			// bodies); the marker is an additional signal on top.
+			$fields = Credential_Fields::redact( $fields, $marker_paths, $learned_names );
+
+			// Only AFTER hashPWFields has been consumed for the credential paths
+			// above: drop the plugin's own injected fields so they never become
 			// persisted detail rows (and thus never candidates for a recognition
 			// pattern built from a saved message). Must not run before this point —
-			// stripping hashPWFields earlier would disable exactly that skip list
-			// and leak password fields into the inbox.
+			// stripping hashPWFields earlier would throw away the marker signal
+			// before it could be used.
 			$fields               = self::strip_plugin_fields( $fields );
 			$lines                = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_SKIP_FIELDS ), -1, PREG_SPLIT_NO_EMPTY );
 			$pre_forbidden_fields = array();
@@ -1135,32 +1334,36 @@ class Stamp {
 				$technical_fields['_gdpr_reason'] = $this->classification_reason;
 			}
 
+			// WHICH REST route this submission targeted (REST_ROUTES_PLAN.md AP5), or no
+			// row at all on a non-REST request — same convention as _gdpr_reason above:
+			// additive, rgm_posted = false, leading underscore (Echo_Values::is_technical_key()
+			// skips `_`-prefixed keys, so this can never itself seed or match an echo/
+			// wildcard value), no schema change. Recorded for BOTH type-4 analysis rows
+			// AND normally classified messages — analysis mode is precisely how an admin
+			// discovers a REST route worth monitoring (Message_Page::render_message()'s
+			// "Monitor this route" button reads this row).
+			if ( null !== $this->get_rest_route() ) {
+				$technical_fields['_gdpr_route'] = $this->get_rest_route();
+			}
+
 			foreach ( $fields as $key => $value ) {
 				if ( is_array( $value ) || is_object( $value ) ) {
-					$nested_values = $this->generate_paths( $my_id, $value, $key, $pre_forbidden_fields, $referrer_without_protocol, $forbidden_fields, $key, $query, $first, $custom_titles, $title );
-					$forbidden     = $nested_values[4];
-					if ( $forbidden ) {
-						continue;
-					}
-					$values = array_merge( $values, $nested_values[0] );
-					$query  = $nested_values[1];
-					$title  = $nested_values[2];
-					$first  = $nested_values[3];
+					$nested_values = $this->generate_paths( $my_id, $value, $key, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title );
+					$values        = array_merge( $values, $nested_values[0] );
+					$query         = $nested_values[1];
+					$title         = $nested_values[2];
+					$first         = $nested_values[3];
 				} else {
 					$skipped_field = false;
 					if ( count( $pre_forbidden_fields ) ) {
 						$skipped_field = $this->check_skipped_fields( $pre_forbidden_fields, $key, $referrer_without_protocol );
 					}
 					if ( ! $skipped_field ) {
-						$forbidden = false;
-						$this->recursive_search( $forbidden_fields, $key, 1, 1, $forbidden );
-						if ( $forbidden ) {
-							continue;
-						}
+						// rgm_posted false for a redacted value — see generate_paths().
 						$values[] = $my_id;
 						$values[] = $key;
 						$values[] = $value;
-						$values[] = true;
+						$values[] = Credential_Fields::REDACTED_VALUE !== $value;
 						if ( isset( $custom_titles[ $key ] ) ) {
 							$title .= $value . ' | ';
 						}
@@ -1205,7 +1408,9 @@ class Stamp {
 	 */
 	public function get_stamp_call() {
 
-		// stamp = hash of user ip . salt value
+		// A freshly issued, single-use token plus its difficulty and the diagnostic
+		// fingerprint — see get_stamp(). (Until AP3 this was a hash of IP + salt + time
+		// bucket, hence the endpoint name; nothing of that construction is left.)
 		$stamp = $this->get_stamp();
 
 		// Make your array as json
@@ -1279,24 +1484,67 @@ class Stamp {
 	 * this token is POSTed back.
 	 */
 	public function get_stamp() {
-		$ip              = $this->get_client_ip();
-		$base_difficulty = (int) get_option( Option::POW_DIFFICULTY );
-		// Explicit `true` fallback: existing installations never had this option
-		// backfilled (it postdates their POW_INSTALLED-gated defaults writeback in
-		// Settings_Menu::prepare_options()), so an absent option must still default
-		// to "on" here rather than get_option()'s own false-if-missing behaviour.
-		// No ceiling on the issued difficulty on purpose: check_stamp() only accepts a
-		// token whose difficulty is >= the configured base, so a clipped issue difficulty
-		// would make every issued token fail the server's own entrance check.
-		$under_attack_boost = get_option( Option::POW_UNDER_ATTACK_MODE, true ) && self::is_under_attack();
-		$difficulty         = ProofOfWork::effective_difficulty( $base_difficulty, $under_attack_boost, self::UNDER_ATTACK_BONUS );
-		$token              = StampToken::create( $ip, get_option( Option::POW_SALT ), $difficulty, time(), bin2hex( random_bytes( 8 ) ) );
-		$array_result       = array(
+		$salt       = get_option( Option::POW_SALT );
+		$difficulty = $this->issue_difficulty();
+		// The fingerprint — NOT the IP — is what enters the token (StampToken::create_v2
+		// has no IP parameter by design). It is diagnostic only: nothing about this
+		// token's later validity depends on the address it was issued to.
+		$fp    = StampToken::fingerprint( $this->get_client_ip(), $salt );
+		$token = StampToken::create_v2( $fp, $salt, $difficulty, time(), bin2hex( random_bytes( 8 ) ) );
+
+		return array(
 			'stamp'      => $token, // Field name kept as `stamp` for client compatibility; value is now a token.
-			'client_ip'  => $ip, // Damit der Client die korrekte IP speichern kann
+			// The keyed fingerprint replaces the former plaintext `client_ip` field: this
+			// response is cacheable by construction, and a plaintext IP in a cached body
+			// is a privacy defect. It stays in the answer because it is what makes the
+			// "load get_stamp twice" proxy-rotation diagnosis possible (HANDBUCH §12).
+			'fp'         => $fp,
 			'difficulty' => $difficulty,
 		);
-		return $array_result;
+	}
+
+	/** The difficulty to hand out with a freshly issued token.
+	 *
+	 * Explicit `true` fallback: existing installations never had POW_UNDER_ATTACK_MODE
+	 * backfilled (it postdates their POW_INSTALLED-gated defaults writeback in
+	 * Settings_Menu::prepare_options()), so an absent option must still default to "on"
+	 * here rather than get_option()'s own false-if-missing behaviour.
+	 *
+	 * No ceiling on the issued difficulty on purpose: check_stamp() only accepts a token
+	 * whose difficulty is >= the configured base, so a clipped issue difficulty would
+	 * make every issued token fail the server's own entrance check.
+	 *
+	 * @return int
+	 */
+	private function issue_difficulty() {
+		$base_difficulty    = (int) get_option( Option::POW_DIFFICULTY );
+		$under_attack_boost = get_option( Option::POW_UNDER_ATTACK_MODE, true ) && self::is_under_attack();
+		return ProofOfWork::effective_difficulty( $base_difficulty, $under_attack_boost, self::UNDER_ATTACK_BONUS );
+	}
+
+	/** Token for the RENDER path (embedded in the page source via wp_localize_script).
+	 *
+	 * Deliberately ANONYMOUS (FP_ANONYMOUS) and deliberately not routed through
+	 * get_stamp(): this path resolves no client IP at all, so nothing derived from a
+	 * visitor's address — not even a keyed hash — can end up in cached page HTML. The
+	 * token is fully usable; only its diagnostic fingerprint field is empty, so a solve
+	 * of an embedded token counts as "anonymous" and feeds neither fingerprint counter.
+	 *
+	 * @return array{stamp:string,difficulty:int}
+	 */
+	private function get_anonymous_stamp() {
+		$difficulty = $this->issue_difficulty();
+
+		return array(
+			'stamp'      => StampToken::create_v2(
+				StampToken::FP_ANONYMOUS,
+				get_option( Option::POW_SALT ),
+				$difficulty,
+				time(),
+				bin2hex( random_bytes( 8 ) )
+			),
+			'difficulty' => $difficulty,
+		);
 	}
 
 	/** Attempt to determine the client's IP address
@@ -1305,8 +1553,10 @@ class Stamp {
 	private function get_client_ip() {
 		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : (string) getenv( 'REMOTE_ADDR' );
 
+		// Exactly the headers ClientIp honors — read from the class instead of keeping a
+		// second list here, which is how the two drifted apart before.
 		$forwarded_headers = array();
-		foreach ( array( 'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED' ) as $header_name ) {
+		foreach ( ClientIp::HEADER_PRIORITY as $header_name ) {
 			$value = isset( $_SERVER[ $header_name ] ) ? $_SERVER[ $header_name ] : getenv( $header_name );
 			if ( is_string( $value ) && '' !== $value ) {
 				$forwarded_headers[ $header_name ] = $value;
@@ -1414,17 +1664,24 @@ class Stamp {
 	/** Check whether the current form-POST is backed by a solved PoW (AP3
 	 * submission-binding, with an IP-based fallback for the transition period).
 	 *
-	 * - A valid `gdpr_pow_token` (verified against the server-resolved IP) is rate-
-	 *   limited PER TOKEN (poll + consume, TOKEN_MAX_USES); if the poll window runs
-	 *   out without a usable token row, one IP-fallback consumption is attempted
-	 *   (no further polling — the token attempt already spent the wait budget).
+	 * - A valid `gdpr_pow_token` is rate-limited PER TOKEN (poll + consume,
+	 *   TOKEN_MAX_USES); if the poll window runs out without a usable token row, one
+	 *   IP-fallback consumption is attempted (no further polling — the token attempt
+	 *   already spent the wait budget).
 	 * - No (valid) token at all → today's IP-fallback path WITH polling, unchanged
 	 *   from AP2 (covers cached pages, no-JS environments, exotic form builders —
 	 *   deliberately no big-bang cutover, see AP3_TOKEN_DESIGN.md).
+	 *
+	 * TOKEN VALIDITY IS IP-FREE (v2): a token that was issued to one address and
+	 * redeemed from another is fully valid here, which is the entire point — caches,
+	 * proxy pools and IPv4/IPv6 dual stack rotate honest visitors' addresses between
+	 * the two requests. The IP still governs the FALLBACK budget and identity
+	 * (consume_ip_row(), whitelist, fail2ban), never validity.
 	 */
 	public function check_request() {
 		$time_window = (int) get_option( Option::POW_TIME_WINDOW, 10 );
 		$max_uses    = max( 1, (int) get_option( Option::POW_MAX_USES, 10 ) );
+		$salt        = get_option( Option::POW_SALT );
 
 		// is_string guard: a non-scalar gdpr_pow_token[] would raise an array-to-string
 		// warning on the cast — treat it as "no token" (IP fallback) instead.
@@ -1432,15 +1689,23 @@ class Stamp {
 			? preg_replace( '/[^a-zA-Z0-9]/', '', $this->request_data['gdpr_pow_token'] )
 			: '';
 
-		// Chain-token path (112 chars): a submission carrying a VALID re-challenge chain
-		// token gets an adaptive, difficulty-scaled poll window (up to 8s) to bridge an
-		// in-flight re-challenge round. Reachable ONLY after a paid first solve (a chain
-		// token is issued only in response to a verified fast solve), so the protocol-
-		// blind mass never gets this longer hold — no free worker-blocking vector.
-		if ( ChainToken::LENGTH === strlen( $token ) ) {
-			$now_ms = (int) round( microtime( true ) * 1000 );
-			if ( ChainToken::verify( $token, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, $time_window ) ) {
-				$parsed   = ChainToken::parse( $token );
+		$token_length = strlen( $token );
+
+		// Chain-token path (120 = v2, 112 = in-flight legacy): a submission carrying a
+		// VALID re-challenge chain token gets an adaptive, difficulty-scaled poll window
+		// (up to 8s) to bridge an in-flight re-challenge round. Reachable ONLY after a
+		// paid first solve (a chain token is issued only in response to a verified fast
+		// solve), so the protocol-blind mass never gets this longer hold — no free
+		// worker-blocking vector.
+		if ( ChainToken::LENGTH_V2 === $token_length || ChainToken::LENGTH === $token_length ) {
+			$now_ms      = (int) round( microtime( true ) * 1000 );
+			$chain_is_v2 = ChainToken::LENGTH_V2 === $token_length;
+			$chain_valid = $chain_is_v2
+				? ChainToken::verify_integrity( $token, $salt, $now_ms, $time_window )
+				: ChainToken::verify( $token, $this->get_client_ip(), $salt, $now_ms, $time_window );
+
+			if ( $chain_valid ) {
+				$parsed   = $chain_is_v2 ? ChainToken::parse_v2( $token ) : ChainToken::parse( $token );
 				$attempts = ChainToken::poll_attempts_for_difficulty( $parsed ? $parsed['difficulty'] : 0 );
 				$valid    = $this->poll_for_row(
 					function () use ( $token, $time_window ) {
@@ -1452,7 +1717,7 @@ class Stamp {
 					return $valid;
 				}
 				// Chain row never landed within the (extended) window — one IP-fallback
-				// consumption, no further polling, mirroring the 92 token path below.
+				// consumption, no further polling, mirroring the base token path below.
 				// Record WHY this path failed before the fallback attempt: if the
 				// fallback still succeeds, check_request() returns true and
 				// check_submit() never reads the reason (observe only, no cleanup).
@@ -1461,13 +1726,14 @@ class Stamp {
 			}
 		}
 
-		$token_valid = '' !== $token && StampToken::verify(
-			$token,
-			$this->get_client_ip(),
-			get_option( Option::POW_SALT ),
-			time(),
-			$time_window
-		);
+		// Base-token path: 100 = v2 (integrity only, no IP), 92 = in-flight legacy.
+		$token_is_v2 = StampToken::LENGTH_V2 === $token_length;
+		if ( $token_is_v2 ) {
+			$token_valid = StampToken::verify_integrity( $token, $salt, time(), $time_window );
+		} else {
+			$token_valid = StampToken::LENGTH === $token_length
+				&& StampToken::verify( $token, $this->get_client_ip(), $salt, time(), $time_window );
+		}
 
 		if ( $token_valid ) {
 			$valid = $this->poll_for_row(
@@ -1484,13 +1750,23 @@ class Stamp {
 			// hasn't landed yet, or the row is already exhausted) — one IP-fallback
 			// consumption, no further polling. Reason recorded before the fallback for
 			// the same reason as the chain path above.
-			$this->pow_fail_reason = Classification_Reason::NO_POW_TOKEN_NO_ROW;
+			//
+			// PURE LABELLING, NOT A DECISION: a fingerprint mismatch only picks the more
+			// specific reason string (the cache/proxy signature), so the site owner can
+			// tell "the handshake broke" from "this token came from somewhere else".
+			// The fallback attempt below is identical either way.
+			$mismatched = $token_is_v2
+				&& StampToken::STATUS_MISMATCH === StampToken::fp_status( $token, $this->get_client_ip(), $salt );
+
+			$this->pow_fail_reason = $mismatched
+				? Classification_Reason::NO_POW_TOKEN_IP_CHANGED
+				: Classification_Reason::NO_POW_TOKEN_NO_ROW;
 			return $this->consume_ip_row( $time_window, $max_uses );
 		}
 
 		// No usable token at all: either none was posted, or one was posted and failed
-		// verification (forged/expired/wrong IP, wrong length, or a chain token whose
-		// ChainToken::verify() returned false above).
+		// verification (forged, expired, wrong length, or a chain token whose
+		// verification returned false above).
 		$this->pow_fail_reason = '' === $token
 			? Classification_Reason::NO_POW_NO_TOKEN
 			: Classification_Reason::NO_POW_INVALID_TOKEN;
@@ -1511,74 +1787,43 @@ class Stamp {
 		//If either or are crap, we know that the input was manipulated.
 		// is_string guard: an array-valued hashStamp[] would make preg_replace return
 		// an array and fatal on the strlen() below — treat any non-string as empty.
-		$raw_stamp         = $fields['hashStamp'] ?? '';
-		$stamp             = is_string( $raw_stamp ) ? preg_replace( '/[^a-zA-Z0-9]/', '', $raw_stamp ) : '';
-		$nonce             = '';
-		$client_difficulty = '';
-		$client_ip         = '';
+		$raw_stamp = $fields['hashStamp'] ?? '';
+		$stamp     = is_string( $raw_stamp ) ? preg_replace( '/[^a-zA-Z0-9]/', '', $raw_stamp ) : '';
+		$nonce     = '';
 
-		// If the difficulty level is not of type int, it has been manipulated and thus remains empty.
-		// This will cause the input to be classified as spam
-		if ( ctype_digit( $fields['hashDifficulty'] ?? '' ) ) {
-			$client_difficulty = filter_var( $fields['hashDifficulty'], FILTER_SANITIZE_NUMBER_INT );
-		}
-
-		// The same holds for the nonce. is_string() guard: a posted hashNonce[] array
-		// would make ctype_digit() a fatal TypeError on PHP 8 (unauthenticated).
+		// The nonce. is_string() guard: a posted hashNonce[] array would make
+		// ctype_digit() a fatal TypeError on PHP 8 (unauthenticated).
 		if ( is_string( $fields['hashNonce'] ?? '' ) && ctype_digit( $fields['hashNonce'] ?? '' ) ) {
 			$nonce = filter_var( $fields['hashNonce'], FILTER_SANITIZE_NUMBER_INT );
 		}
 
-		// Validation of IP. is_string() guard: a posted clientIP[] array would make
-		// trim() a fatal TypeError on PHP 8 (unauthenticated) — treat it as absent.
-		if ( ! empty( $fields['clientIP'] ) && is_string( $fields['clientIP'] ) ) {
-			$raw_client_ip = trim( $fields['clientIP'] );
-			$ips           = explode( ',', $raw_client_ip );
-			$all_valid     = true;
-			foreach ( $ips as $ip_candidate ) {
-				if ( ! filter_var( trim( $ip_candidate ), FILTER_VALIDATE_IP ) ) {
-					$all_valid = false;
-					break;
-				}
-			}
-			if ( $all_valid && count( $ips ) > 0 ) {
-				// Alle Teilstrings sind gültige IPs – den gesamten, unbearbeiteten String übernehmen
-				$client_ip = $raw_client_ip;
-			} else {
-				// Mindestens ein Teilstring ist ungültig
-				wp_die( 'Invalid IP adress transmitted.' );
-			}
-		} else {
-			// Es wurde gar keine IP übermittelt – das ist ein Fehler
-			wp_die( 'No IP adress transmitted.' );
-		}
+		// The POSTed hashDifficulty and clientIP fields are read NOWHERE anymore: the
+		// difficulty that counts is the HMAC-bound one inside the token, and a client-
+		// supplied address was never trustworthy to begin with. Old cached JS keeps
+		// posting both — they are simply ignored (no wp_die(), which is what makes that
+		// compatible). See POW_IP_BINDING_PLAN.md §3/§5.
 
 		$this->print_debug_information( "stamp: $stamp" );
-		$this->print_debug_information( "difficulty: $client_difficulty" );
 		$this->print_debug_information( "nonce: $nonce" );
-		$this->print_debug_information( "client-IP: $client_ip" );
 
-		// Length decides the format: 92 = AP3 base token, 112 = re-challenge chain
-		// token (solve-time plausibility), 64 = pre-AP3 legacy bucket-stamp. All are
-		// exclusively hex/decimal, so this replaces the old single-length gate.
+		// Length decides the format: 100 = base token (v2), 120 = re-challenge chain
+		// token (v2), 92/112 = the same two formats issued by the previous release and
+		// still in flight (accepted for one release, see BACKLOG). All are exclusively
+		// hex/decimal, so this replaces the old single-length gate.
 		$stamp_length = strlen( $stamp );
 
-		// Whether to answer a successful, PERSISTED solve with the new JSON
-		// {accepted:true} body (92 plausible / 112 accepted) instead of the classic
-		// empty wp_die(). Legacy (64) keeps the empty wp_die() — old cached JS clients
-		// never read the body, so JSON success answers are safe new behaviour and the
-		// legacy path is deliberately left untouched.
-		$send_accepted = false;
-
-		if ( StampToken::LENGTH === $stamp_length ) {
-			// Token path (AP3): verified exclusively against the server-resolved IP —
-			// NEVER the posted clientIP field, which a spoofing client fully controls.
-			// The posted hashDifficulty is ignored here; the difficulty that matters is
-			// the one embedded (and HMAC-bound) in the token itself.
-			$parsed           = StampToken::parse( $stamp );
+		if ( StampToken::LENGTH_V2 === $stamp_length || StampToken::LENGTH === $stamp_length ) {
+			// Base-token path. v2 (100) is verified for INTEGRITY ONLY — no IP enters
+			// StampToken::verify_integrity(), so a token issued behind a cache or to a
+			// rotating address still validates. v1 (92) keeps its IP-bound verify() for
+			// one release (in-flight tokens). The posted hashDifficulty/clientIP fields
+			// are ignored on both: the difficulty that matters is the one embedded (and
+			// HMAC-bound) in the token itself.
+			$token_is_v2      = StampToken::LENGTH_V2 === $stamp_length;
+			$parsed           = $token_is_v2 ? StampToken::parse_v2( $stamp ) : StampToken::parse( $stamp );
 			$token_difficulty = $parsed ? (int) $parsed['difficulty'] : null;
 
-			// The difficulty is HMAC-bound inside the token (StampToken::create()),
+			// The difficulty is HMAC-bound inside the token (StampToken::create_v2()),
 			// so a client cannot forge a lower value than what the server actually
 			// issued — accepting anything >= the CURRENT base option (AP4: the base
 			// or the under-attack boost may have changed between issuing and solving)
@@ -1591,7 +1836,11 @@ class Stamp {
 				wp_die();
 			}
 
-			if ( ! StampToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) ) ) {
+			$token_intact = $token_is_v2
+				? StampToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) )
+				: StampToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) );
+
+			if ( ! $token_intact ) {
 				$this->print_debug_information( 'Token is incorrect or expired' );
 				wp_die();
 			}
@@ -1620,8 +1869,10 @@ class Stamp {
 				$d1       = ChainToken::next_difficulty( $token_difficulty );
 				$now_ms   = (int) round( microtime( true ) * 1000 );
 				$required = $threshold + ProofOfWork::solve_time_threshold_ms( $d1 );
-				$chain    = ChainToken::create(
-					$this->get_client_ip(),
+				// Freshly issued chains are always v2: fingerprint of the CURRENT address
+				// (diagnosis), never the address itself (validity).
+				$chain = ChainToken::create_v2(
+					ChainToken::fingerprint( $this->get_client_ip(), get_option( Option::POW_SALT ) ),
 					get_option( Option::POW_SALT ),
 					$d1,
 					$now_ms,
@@ -1640,27 +1891,33 @@ class Stamp {
 				// wp_send_json() sends the body and calls wp_die() — execution stops here.
 			}
 
-			// Plausible solve → persist the base token below and answer {accepted:true}.
-			$send_accepted = true;
-		} elseif ( ChainToken::LENGTH === $stamp_length ) {
+			// Plausible solve → fall through, persist the base token below and answer
+			// {accepted:true}.
+		} elseif ( ChainToken::LENGTH_V2 === $stamp_length || ChainToken::LENGTH === $stamp_length ) {
 			// Re-challenge chain path (solve-time plausibility). The sanitisation above
 			// already keeps only [a-zA-Z0-9]; a chain token is pure hex, so it survives.
-			$parsed = ChainToken::parse( $stamp );
-			$dd     = $parsed ? (int) $parsed['difficulty'] : null;
+			$chain_is_v2 = ChainToken::LENGTH_V2 === $stamp_length;
+			$parsed      = $chain_is_v2 ? ChainToken::parse_v2( $stamp ) : ChainToken::parse( $stamp );
+			$dd          = $parsed ? (int) $parsed['difficulty'] : null;
 
-			// Difficulty gate mirrors the 92 path: the DD is HMAC-bound inside the chain
-			// token, so a client cannot lower it — accept anything from the current base
-			// upwards (base/boost may have shifted between rounds, and every chain round
-			// deliberately escalates one bit above the round before it).
+			// Difficulty gate mirrors the base-token path: the DD is HMAC-bound inside the
+			// chain token, so a client cannot lower it — accept anything from the current
+			// base upwards (base/boost may have shifted between rounds, and every chain
+			// round deliberately escalates one bit above the round before it).
 			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) ) {
 				$this->print_debug_information( 'Chain token difficulty below base, or unparseable.' );
 				wp_die();
 			}
 
-			// Verify ALWAYS against the server-resolved IP, never the posted clientIP.
-			// Both issuing and measuring use microtime milliseconds here.
-			$now_ms = (int) round( microtime( true ) * 1000 );
-			if ( ! ChainToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) ) ) {
+			// v2 verifies integrity only (no IP — a chain spans several requests by
+			// construction); v1 keeps its IP-bound verify() for in-flight chains. Both
+			// issuing and measuring use microtime milliseconds here.
+			$now_ms      = (int) round( microtime( true ) * 1000 );
+			$chain_valid = $chain_is_v2
+				? ChainToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) )
+				: ChainToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) );
+
+			if ( ! $chain_valid ) {
 				$this->print_debug_information( 'Chain token is incorrect or expired.' );
 				wp_die();
 			}
@@ -1676,17 +1933,20 @@ class Stamp {
 			if ( ChainToken::is_accepted( $parsed['measured_ms'], $measured_ms, $parsed['required_ms'] ) ) {
 				// Cumulative measured time reached the required Erlang budget → accept:
 				// persist the chain token as rgs_stamp below (same duplicate/replay
-				// protection as the 92 path) and answer {accepted:true}.
+				// protection as the base-token path) and answer {accepted:true}.
+				// Pure arithmetic on HMAC-bound numbers — the rounds of a chain may well
+				// arrive from different addresses (rotation), which is irrelevant here.
 				$this->print_debug_information( 'Chain accepted (cumulative time sufficient).' );
-				$send_accepted = true;
 			} else {
 				// Still too fast in aggregate → next re-challenge round, NO insert.
 				$d_next = ChainToken::next_difficulty( $dd );
 				$k_next = ChainToken::next_round( $parsed['round'] );
 				$ss     = ChainToken::accumulate_ms( $parsed['measured_ms'], $measured_ms );
 				$qq     = ChainToken::accumulate_ms( $parsed['required_ms'], ProofOfWork::solve_time_threshold_ms( $d_next ) );
-				$chain  = ChainToken::create(
-					$this->get_client_ip(),
+				// Continued chains are re-issued as v2, even when the incoming round was a
+				// v1 token — the fingerprint is diagnosis, the chain state is the HMAC.
+				$chain = ChainToken::create_v2(
+					ChainToken::fingerprint( $this->get_client_ip(), get_option( Option::POW_SALT ) ),
 					get_option( Option::POW_SALT ),
 					$d_next,
 					$now_ms,
@@ -1712,35 +1972,23 @@ class Stamp {
 				);
 				// wp_send_json() sends the body and calls wp_die() — execution stops here.
 			}
-		} elseif ( 64 === $stamp_length ) {
-			// Legacy path: pre-AP3 IP+salt+time-bucket stamp (AP1). Kept for a staged
-			// rollout — a stale cache of the `action=get_stamp` GET response (CDN/object
-			// cache) can still hand out an old-format stamp after this deploy. Removal
-			// tracked in BACKLOG.md for a later release. Validation logic unchanged.
-			$this->print_debug_information( "difficulty comparison: $client_difficulty vs " . get_option( Option::POW_DIFFICULTY ) );
-			// phpcs:ignore Universal.Operators.StrictComparisons.LooseNotEqual -- loose != is intentional: $client_difficulty is a sanitized numeric string while the option may be stored as int or string; strict !== would spuriously reject a matching difficulty.
-			if ( get_option( Option::POW_DIFFICULTY ) != $client_difficulty ) {
-				wp_die();
-			}
-
-			if ( $this->validate_stamp( $stamp, $client_ip ) ) {
-				$this->print_debug_information( 'Stamp is correct' );
-			} else {
-				$this->print_debug_information( 'Stamp is incorrect' );
-				wp_die();
-			}
-
-			// check the actual PoW
-			if ( $this->check_proof_of_work( get_option( Option::POW_DIFFICULTY ), $stamp, $nonce ) ) {
-				$this->print_debug_information( 'Difficulty target met.' );
-			} else {
-				$this->print_debug_information( 'Difficulty target was not met.' );
-				wp_die();
-			}
 		} else {
-			$this->print_debug_information( "stamp size: $stamp_length expected: " . StampToken::LENGTH . ', ' . ChainToken::LENGTH . ' or 64' );
+			// The pre-AP3 64-char bucket stamp is gone (it was the last path that believed
+			// a POSTed IP, and the only one without a solve-time gate; a stamp in that
+			// format could only come from a >1-year-old cache copy and would be expired
+			// anyway).
+			$this->print_debug_information(
+				"stamp size: $stamp_length expected: " . StampToken::LENGTH_V2 . ', ' . ChainToken::LENGTH_V2
+				. ' (or ' . StampToken::LENGTH . '/' . ChainToken::LENGTH . ' in flight)'
+			);
 			wp_die();
 		}
+
+		// DIAGNOSIS ONLY, and deliberately placed here: at this point the solve is
+		// accepted and about to be persisted, so measuring where it came from can no
+		// longer influence the verdict. No wp_die() may ever appear between this call
+		// and the INSERT below (pinned by StampWiringTest).
+		$this->record_fp_status( $stamp, $stamp_length );
 
 		global $wpdb;
 		$hashed_ip = $this->hash_values( $this->get_client_ip() );
@@ -1762,9 +2010,11 @@ class Stamp {
 		// second solve of the same token must NOT create a second row (it would hand the
 		// token a fresh TOKEN_MAX_USES budget — N concurrent check_stamp POSTs of one
 		// solved token would otherwise multiply the allowance). A SELECT-then-INSERT
-		// guard here would be racy under concurrency; the unique key is not. For the
-		// legacy path, identical stamps (same IP + same time bucket) collapse into one
-		// shared row the same way.
+		// guard here would be racy under concurrency; the unique key is not.
+		//
+		// rgs_ip stays the hashed, server-resolved address: pure bookkeeping for the
+		// IP fallback in check_request() (no-JS clients, cached pages), NOT a condition
+		// on this token's validity.
 		$wpdb->query(
 			$wpdb->prepare(
 				'INSERT IGNORE INTO ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs (
@@ -1779,35 +2029,63 @@ class Stamp {
 			)
 		);
 
-		// Answer a persisted solve. 92-plausible / 112-accepted → {accepted:true}
-		// (new behaviour, safely ignored by old cached JS clients that never read the
-		// body); legacy (64) keeps the classic empty wp_die(). wp_send_json() exits.
-		if ( $send_accepted ) {
-			wp_send_json( array( 'accepted' => true ) );
-		}
-		// Don't forget to stop execution afterwards.
-		wp_die();
+		// Every path that reaches this point is an accepted, persisted solve — the two
+		// re-challenge branches and every rejection already left the function. Answer
+		// {accepted:true}; wp_send_json() sends the body and stops execution. Old cached
+		// JS clients never read the body, so this is safe for them too.
+		//
+		// (Until the legacy 64-char path was removed there was a $send_accepted flag here
+		// because that one path answered with a bare wp_die() instead. With the flag now
+		// constantly true, keeping it would be dead branching, not documentation.)
+		wp_send_json( array( 'accepted' => true ) );
 	}
 
-	/** Check whether the stamp was manipulated
+	/** Count where an accepted solve came from — MEASUREMENT, NEVER A DECISION.
 	 *
+	 * Compares the token's fingerprint field against a fingerprint of the address
+	 * solving it now. A mismatch means the token was issued to a different address
+	 * (page/response cache shared between visitors, proxy pool, IPv4/IPv6 dual stack) —
+	 * the very situation v2 exists to tolerate. Nothing here rejects, re-challenges or
+	 * raises difficulty; the numbers only answer the site owner's structural question
+	 * "is a cache/proxy sitting in front of my site?" (settings status strip, dashboard
+	 * widget) and point at POW_TRUSTED_PROXIES.
+	 *
+	 * ANONYMOUS (render-path token, or a legacy 92/112 token that has no fingerprint at
+	 * all) feeds neither counter — "not measured" must not look like "matched".
+	 *
+	 * Non-atomic get+update on purpose, the same accepted trade-off as the under-attack
+	 * spam counter: a lost increment under concurrency changes a diagnostic ratio by a
+	 * hair and never a security decision. autoload=no — these are read on two admin
+	 * screens, not on every front-end request.
+	 *
+	 * The ratio is COLOURABLE by an attacker: replaying one solved token+nonce from
+	 * rotating addresses bumps the mismatch counter each time (this runs before the
+	 * INSERT IGNORE that collapses the duplicate). Harmless by construction — nothing
+	 * reacts to the number — but a site owner reading an implausible ratio should know
+	 * it is a measurement, not evidence.
+	 *
+	 * @param string $stamp        The accepted stamp/token.
+	 * @param int    $stamp_length Its length (decides the format).
+	 * @return void
 	 */
-	private function validate_stamp( $a_stamp, $client_ip ) {
-		$ip     = $client_ip;
-		$salt   = get_option( Option::POW_SALT );
-		$window = get_option( Option::POW_TIME_WINDOW, 10 );
+	private function record_fp_status( $stamp, $stamp_length ) {
+		$salt = get_option( Option::POW_SALT );
 
-		// Accept both the current and the immediately preceding time bucket, so a
-		// stamp solved right before a bucket rollover is still honored (the client
-		// may take a moment to find a nonce and POST it back).
-		$current_bucket  = ProofOfWork::time_bucket( time(), $window );
-		$previous_bucket = $current_bucket - 1;
+		if ( StampToken::LENGTH_V2 === $stamp_length ) {
+			$status = StampToken::fp_status( $stamp, $this->get_client_ip(), $salt );
+		} elseif ( ChainToken::LENGTH_V2 === $stamp_length ) {
+			$status = ChainToken::fp_status( $stamp, $this->get_client_ip(), $salt );
+		} else {
+			// Legacy in-flight formats carry no fingerprint.
+			return;
+		}
 
-		$validated = hash_equals( ProofOfWork::stamp_value( $ip, $salt, $current_bucket ), (string) $a_stamp )
-			|| hash_equals( ProofOfWork::stamp_value( $ip, $salt, $previous_bucket ), (string) $a_stamp );
-
-		$this->print_debug_information( $validated ? 'Stamp is valid' : 'Stamp invalid or expired' );
-		return $validated;
+		if ( StampToken::STATUS_MATCH === $status ) {
+			update_option( Option::POW_FP_MATCHED_TOTAL, (int) get_option( Option::POW_FP_MATCHED_TOTAL, 0 ) + 1, false );
+		} elseif ( StampToken::STATUS_MISMATCH === $status ) {
+			update_option( Option::POW_FP_MISMATCHED_TOTAL, (int) get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 ) + 1, false );
+			update_option( Option::POW_FP_LAST_MISMATCH_AT, time(), false );
+		}
 	}
 
 	/** check that the hash of the stamp + nonce meets the difficulty target

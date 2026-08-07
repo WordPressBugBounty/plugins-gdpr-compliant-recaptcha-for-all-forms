@@ -14,7 +14,8 @@
  * always the base. Headers are only consulted when REMOTE_ADDR itself is a known/
  * trusted proxy, and then only the right-most IP in the chain that is NOT itself a
  * trusted proxy is used — this stops a client behind a real trusted proxy from
- * prepending forged entries to the chain.
+ * prepending forged entries to the chain. Only X-Forwarded-For is consulted at all;
+ * see HEADER_PRIORITY for why the four other headers were dropped.
  *
  * @package gdpr-compliant-recaptcha-for-all-forms
  */
@@ -29,14 +30,37 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 final class ClientIp {
 
 	/**
-	 * Forwarded-header names in the priority order they are honored (first non-empty
-	 * one wins), matching the historic behaviour of Stamp::get_client_ip().
+	 * The ONLY forwarding header that is honored. Public so Stamp::get_client_ip() can
+	 * collect exactly these from $_SERVER instead of keeping a second, drifting list.
+	 *
+	 * WHY THE OTHER FOUR ARE GONE (they used to be honored, in priority order, ahead of
+	 * X-Forwarded-For): all of them are plain client-settable request headers with no
+	 * validation whatsoever, and the priority loop below runs BEFORE the rightmost-
+	 * untrusted walk — so a single forged header outranked the real proxy chain. That
+	 * includes HTTP_FORWARDED: RFC 7239's `for=…` syntax is a convention, not a
+	 * validation, and a bare `Forwarded: 6.6.6.6` passes FILTER_VALIDATE_IP just fine.
+	 * The spoof hit precisely the CORRECTLY configured sites: a real proxy appends to
+	 * X-Forwarded-For but passes the other headers through untouched, so an attacker
+	 * could displace the proxy-supplied address and impersonate a whitelisted IP.
+	 * Exotic setups whose proxy sets only Client-IP now fall back to REMOTE_ADDR —
+	 * flagged in the changelog; token validity no longer depends on the IP either way.
 	 *
 	 * @var string[]
 	 */
-	private const HEADER_PRIORITY = array(
-		'HTTP_CLIENT_IP',
+	public const HEADER_PRIORITY = array(
 		'HTTP_X_FORWARDED_FOR',
+	);
+
+	/**
+	 * Forwarding headers that merely INDICATE "this request came through a proxy",
+	 * for the settings-page hint that offers configuring POW_TRUSTED_PROXIES. Never
+	 * used for resolution — resolve() honors HEADER_PRIORITY and nothing else.
+	 *
+	 * @var string[]
+	 */
+	public const DIAGNOSTIC_HEADERS = array(
+		'HTTP_X_FORWARDED_FOR',
+		'HTTP_CLIENT_IP',
 		'HTTP_X_FORWARDED',
 		'HTTP_FORWARDED_FOR',
 		'HTTP_FORWARDED',

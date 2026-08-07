@@ -14,6 +14,9 @@
  *   no_pow:invalid_token   A token was posted but failed StampToken/ChainToken verification.
  *   no_pow:token_no_row    Valid token, but no solved-PoW row landed within the poll window.
  *   no_pow:chain_no_row    Valid chain token, but its row never landed (extended window).
+ *   no_pow:token_ip_changed
+ *                          Valid token, no row, and redeemed from a different address
+ *                          than it was issued to (cache/proxy signature — diagnosis).
  *   simulation             POW_SIMULATE_SPAM is on — everything is "spam" by configuration.
  *   echo_lock              A core value matched an auto-recorded recent spam value.
  *   wildcard               A user-content field matched an admin-configured {"*":"…"} pattern.
@@ -52,7 +55,7 @@ final class Classification_Reason {
 	// (CODE_SIMULATION === 'simulation'); the two codes that do carry a detail have
 	// their own constants/builder below (NO_POW_* and gibberish()).
 
-	/** No usable proof of work — see the four NO_POW_* constants for the sub-cases. */
+	/** No usable proof of work — see the five NO_POW_* constants for the sub-cases. */
 	const CODE_NO_POW = 'no_pow';
 
 	/** Spam simulation mode (POW_SIMULATE_SPAM) classified the submission. */
@@ -73,7 +76,7 @@ final class Classification_Reason {
 	/** No proof-of-work token was posted at all (the protocol-blind mass). */
 	const NO_POW_NO_TOKEN = 'no_pow:no_token';
 
-	/** A token was posted but failed verification (forged, expired, wrong IP). */
+	/** A token was posted but failed verification (forged, expired, malformed). */
 	const NO_POW_INVALID_TOKEN = 'no_pow:invalid_token';
 
 	/** Token verified, but no solved-PoW row was found within the poll window. */
@@ -81,6 +84,13 @@ final class Classification_Reason {
 
 	/** Chain token verified, but its row never landed within the extended window. */
 	const NO_POW_CHAIN_NO_ROW = 'no_pow:chain_no_row';
+
+	/**
+	 * Token valid and unexpired, but redeemed from a different address than it was
+	 * issued to AND no usable row was found — the caching/proxy signature. Purely a
+	 * LABEL: the address difference itself never rejects anything (see StampToken).
+	 */
+	const NO_POW_TOKEN_IP_CHANGED = 'no_pow:token_ip_changed';
 
 	/**
 	 * Short English UI label per CODE, keyed by the code part of a reason string.
@@ -100,6 +110,28 @@ final class Classification_Reason {
 
 	/** Fallback label for an unknown, empty or malformed reason string. */
 	const UNKNOWN_LABEL = 'Unknown reason';
+
+	/**
+	 * Human-readable explanation per FULL reason string (code plus detail), for the
+	 * one question CODE_LABELS deliberately does not answer: *why* did this block
+	 * happen? Several different causes share the label "No proof of work", and until
+	 * they were surfaced, a site owner reading the message view could not tell a
+	 * blocked bot from a caching layer breaking the handshake for every real visitor.
+	 *
+	 * WHY THIS IS A SECOND MAP AND NOT A CHANGE TO CODE_LABELS. The code label is a
+	 * CORPUS label: it is stored in message rows and exported as training data, so its
+	 * stability matters more than its detail (see the file header). This map is a pure
+	 * UI affordance — it is never stored, never exported, and may be reworded freely.
+	 *
+	 * @var array<string,string>
+	 */
+	const DETAIL_LABELS = array(
+		self::NO_POW_NO_TOKEN         => 'No token was submitted at all. Either the plugin\'s JavaScript did not run on that page, or its hidden field never made it into the submitted data.',
+		self::NO_POW_INVALID_TOKEN    => 'A token was submitted, but it was not valid. A token is signed by this site and expires after a short time window, so this usually means a cache handed out an expired one (a full-page cache, a hoster or CDN cache in front of the token request, or an optimisation layer) — or it was forged.',
+		self::NO_POW_TOKEN_NO_ROW     => 'The token itself was valid, but the solved puzzle never arrived in time. The browser computes it and posts it back separately, so this points at that request being blocked, failing, or arriving too late.',
+		self::NO_POW_CHAIN_NO_ROW     => 'The follow-up token was valid, but its solved puzzle never arrived within the extended window. Same causes as above, one round later.',
+		self::NO_POW_TOKEN_IP_CHANGED => 'The token was valid, but it was redeemed from a different address than the one it was issued to, and no solved puzzle was found for it. That combination points at a cache or proxy in front of the site: several visitors share one cached token, or the visitor\'s address changes between requests. Check the "Trusted proxies" setting.',
+	);
 
 	/**
 	 * Build the gibberish reason string from the scoring components reported by
@@ -150,6 +182,43 @@ final class Classification_Reason {
 	 * @param mixed $reason Reason string.
 	 * @return string Label.
 	 */
+	/**
+	 * The detail part of a reason string: everything after the first colon, or '' when
+	 * the reason carries no detail. Mirrors code() and is just as defensive.
+	 *
+	 * @param mixed $reason Reason string.
+	 * @return string Detail part, or '' when there is none.
+	 */
+	public static function detail( $reason ) {
+		if ( ! is_string( $reason ) || '' === $reason ) {
+			return '';
+		}
+		$colon = strpos( $reason, ':' );
+		return false === $colon ? '' : (string) substr( $reason, $colon + 1 );
+	}
+
+	/**
+	 * The human-readable cause behind a reason string, or '' when there is nothing to
+	 * add beyond the code label.
+	 *
+	 * FALLS BACK TO THE RAW DETAIL rather than to silence: a reason whose detail this
+	 * version does not know yet (a newer code, a `gibberish:letters=…` scoring string)
+	 * still tells the reader more than nothing, and hiding it would recreate exactly the
+	 * gap this function exists to close. Never throws, for any input.
+	 *
+	 * @param mixed $reason Reason string.
+	 * @return string Explanation, or '' when the reason carries no detail.
+	 */
+	public static function detail_label( $reason ) {
+		if ( ! is_string( $reason ) || '' === $reason ) {
+			return '';
+		}
+		if ( isset( self::DETAIL_LABELS[ $reason ] ) ) {
+			return self::DETAIL_LABELS[ $reason ];
+		}
+		return self::detail( $reason );
+	}
+
 	public static function label( $reason ) {
 		$code = self::code( $reason );
 		return isset( self::CODE_LABELS[ $code ] ) ? self::CODE_LABELS[ $code ] : self::UNKNOWN_LABEL;

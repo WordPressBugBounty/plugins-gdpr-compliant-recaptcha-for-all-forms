@@ -94,5 +94,25 @@ class Dashboard_Widget {
 				)
 			)
 			. '</span></p>';
+
+		// Address-change measurement (see Stamp::record_fp_status()): share of solved
+		// puzzles redeemed from a different IP than they were issued to. Pure diagnosis —
+		// nothing is blocked because of it — so it stays visually neutral (no amber) and
+		// is hidden until something has actually been measured.
+		$fp_share = Option::fp_mismatch_share(
+			get_option( Option::POW_FP_MATCHED_TOTAL, 0 ),
+			get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 )
+		);
+		if ( $fp_share['total'] > 0 ) {
+			echo '<p><span style="display: inline-block; padding: 2px 8px; border-radius: 999px; font-weight: 600; background: #f2f2f2; color: #666;">'
+				. esc_html(
+					sprintf(
+						/* translators: %d: percentage of solved puzzles redeemed from a different IP address than they were issued to */
+						__( '%d%% of solved puzzles came from another IP than issued', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						$fp_share['percent']
+					)
+				)
+				. '</span></p>';
+		}
 	}
 }

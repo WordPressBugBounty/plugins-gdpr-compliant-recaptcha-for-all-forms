@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.2.1
+Stable tag: 5.3.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.3.0 =
+Maintenance release — see the changelog for details.
 = 5.2.1 =
 Maintenance release — see the changelog for details.
 = 5.2.0 =
@@ -167,6 +169,24 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.3.0 =
+* New: SureForms and JetFormBuilder are now recognised out of the box.
+* The analysis mode shows the REST route for entries captured with the live overlay too, not just for logged ones.
+* The analysis mode now records and shows the REST route of a submission, with one click to start monitoring it.
+* Fix: default detection for WS Form, Everest Forms, and Otter Blocks never matched — now corrected.
+* New: REST routes are now a third way to scope the spam check, covering WS Form and Otter Blocks out of the box.
+* Hardening: exemptions from the spam and login checks are now server-side only; the 'Apply on REST-API' option is gone.
+* Note: an over-broad field pattern (like just "email") can now match admin screens too; keep patterns form-specific.
+* New: status bar and dashboard show how many solved puzzles came back from another address than they were issued to.
+* Privacy: nothing derived from the visitor address is in the page source, and the challenge answer carries a fingerprint.
+* Hardening: only X-Forwarded-For is still evaluated, and only behind a trusted proxy; four spoofable headers are ignored.
+* Fix: a cache, proxy pool or IPv4/IPv6 dual stack no longer flags every submission as spam; puzzles are address-free.
+* Blocked messages now name the actual cause, not just the kind of block.
+* Fix: submissions are no longer rejected while the site is under attack and an older cached token is solved
+* Fix: the token request is no longer served from a page or CDN cache, which could make every submission look like spam
+* New: confirm a password field the plugin does not recognise, and its values are redacted, in old messages too.
+* Security: password field values could be stored with a submission in some cases; they are now always redacted.
+* Security: existing stored entries are cleaned up once after the update.
 = 5.2.1 =
 * Fix: a difficulty above 20 made every submission spam — the server issued challenges its own check rejected.
 = 5.2.0 =

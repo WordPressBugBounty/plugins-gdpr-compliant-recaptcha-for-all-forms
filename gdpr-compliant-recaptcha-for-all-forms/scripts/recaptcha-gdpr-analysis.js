@@ -18,11 +18,16 @@ var gdpr_compliant_recaptcha_analysis = {
 	jsonArray : [],
 	patterns : [],
 	actions : [],
+	routes : [],
 	currentName : '',
 	persistDebounceTimers : {},
-	originalXhrOpen : XMLHttpRequest.prototype.open,
-	originalXhrSend : XMLHttpRequest.prototype.send,
-	originalFetch : window.fetch,//.bind(window),
+	// typeof guards keep the object literal evaluable outside a browser too (the
+	// Node-based regression tests, tests/js/, require this file for its pure helpers —
+	// same pattern as recaptcha-gdpr-pow.js's originalXhrOpen/originalFetch) — in the
+	// browser these globals always exist, so behaviour there is unchanged.
+	originalXhrOpen : ( typeof XMLHttpRequest !== 'undefined' ) ? XMLHttpRequest.prototype.open : null,
+	originalXhrSend : ( typeof XMLHttpRequest !== 'undefined' ) ? XMLHttpRequest.prototype.send : null,
+	originalFetch : ( typeof window !== 'undefined' ) ? window.fetch : null,//.bind(window),
 	/** Remove the plugin's OWN injected fields from a captured submission before it is
 	 * analyzed/persisted. Security-relevant, not cosmetic: a recognition pattern saved
 	 * from a capture that includes e.g. `gdpr_pow_token` would only match POSTs that
@@ -58,6 +63,122 @@ var gdpr_compliant_recaptcha_analysis = {
 	isOwnPluginAction : function(jsonData) {
 		return !!jsonData && typeof jsonData === 'object'
 			&& ['get_stamp', 'check_stamp', 'gdpr_analysis_store', 'gdpr_analysis_restore', 'save_pattern_frontend'].includes(jsonData.action);
+	},
+	/**
+	 * Client-side twin of RestRoute::extract() (class-rest-route.php) — REST_ROUTES_PLAN.md
+	 * AP5. Deliberately a SIMPLER mirror, not a security boundary (unlike the server
+	 * class, which decides whether a submission gets spam-checked): this only feeds the
+	 * "covered"/"not covered" hint in the analysis overlay, so it only needs the two
+	 * spellings a REST-calling fetch()/XHR request actually uses — the `rest_route` query
+	 * parameter (plain permalinks) and the REST-prefix path segment (pretty permalinks,
+	 * gdprAnalysis.restPrefix = `rest_get_url_prefix()`, never hardcode 'wp-json'). The
+	 * server-only `rest_route` POST-BODY spelling has no client-JS equivalent to mirror —
+	 * a fetch()/XHR call never disguises its own target URL that way.
+	 *
+	 * @param {string} url Absolute or relative URL, as passed to fetch()/XHR.open().
+	 * @param {string} [prefix] REST prefix override — used by the Node tests; production
+	 *   callers omit it and fall back to the localized gdprAnalysis.restPrefix.
+	 * @returns {string|null} Canonical route ('/namespace/version/…'), or null.
+	 */
+	extractRestRoute : function(url, prefix) {
+		if (typeof url !== 'string' || '' === url) {
+			return null;
+		}
+		var base = (typeof window !== 'undefined' && window.location) ? window.location.href : 'http://gdpr-analysis.invalid/';
+		var absolute;
+		try {
+			absolute = new URL(url, base);
+		} catch (e) {
+			return null;
+		}
+		// Plain permalinks: the route travels as the `rest_route` query parameter.
+		var restRouteParam = absolute.searchParams.get('rest_route');
+		if (restRouteParam) {
+			var paramSegments = restRouteParam.split('/').filter(Boolean);
+			return paramSegments.length ? '/' + paramSegments.join('/') : null;
+		}
+		// Pretty permalinks: the route is baked into the path, prefixed by the REST prefix.
+		var restPrefix = (typeof prefix === 'string' && prefix)
+			? prefix
+			: ((typeof gdprAnalysis !== 'undefined' && gdprAnalysis && gdprAnalysis.restPrefix) || '');
+		if (!restPrefix) {
+			return null;
+		}
+		var pathSegments = absolute.pathname.split('/').filter(Boolean);
+		var prefixSegments = restPrefix.split('/').filter(Boolean);
+		if (!prefixSegments.length) {
+			return null;
+		}
+		for (var i = 0; i + prefixSegments.length <= pathSegments.length; i++) {
+			var matches = true;
+			for (var j = 0; j < prefixSegments.length; j++) {
+				if (pathSegments[i + j] !== prefixSegments[j]) {
+					matches = false;
+					break;
+				}
+			}
+			if (matches) {
+				var routeSegments = pathSegments.slice(i + prefixSegments.length);
+				return routeSegments.length ? '/' + routeSegments.join('/') : null;
+			}
+		}
+		return null;
+	},
+	/**
+	 * Client-side twin of RestRoute::segments_match() — same two wildcard forms: `*` as
+	 * any segment except the last matches exactly one segment, `*` as the LAST segment
+	 * matches the fixed prefix before it plus any number of further segments.
+	 *
+	 * @param {string[]} routeSegments
+	 * @param {string[]} patternSegments
+	 * @returns {boolean}
+	 */
+	routeSegmentsMatch : function(routeSegments, patternSegments) {
+		if (!patternSegments.length) {
+			return false;
+		}
+		var lastIndex = patternSegments.length - 1;
+		var isSuffix = patternSegments[lastIndex] === '*';
+		var fixed = isSuffix ? patternSegments.slice(0, lastIndex) : patternSegments;
+		if (isSuffix) {
+			if (routeSegments.length < fixed.length) {
+				return false;
+			}
+		} else if (routeSegments.length !== fixed.length) {
+			return false;
+		}
+		for (var i = 0; i < fixed.length; i++) {
+			if (fixed[i] === '*') {
+				continue;
+			}
+			if (fixed[i].toLowerCase() !== String(routeSegments[i]).toLowerCase()) {
+				return false;
+			}
+		}
+		return true;
+	},
+	/**
+	 * Whether `route` is covered by any line of `routes` (POW_REST_ROUTES, one per line —
+	 * same list get_patterns() returns for patterns/actions). Used by checkPatterns() so a
+	 * captured entry whose request targeted an already-monitored route shows "Covered"
+	 * instead of a false "Not covered".
+	 *
+	 * @param {string|null|undefined} route
+	 * @param {string[]|null|undefined} routes
+	 * @returns {boolean}
+	 */
+	routeCovered : function(route, routes) {
+		if (!route || !Array.isArray(routes) || !routes.length) {
+			return false;
+		}
+		var routeSegments = String(route).split('/').filter(Boolean);
+		if (!routeSegments.length) {
+			return false;
+		}
+		return routes.some(function(line) {
+			var patternSegments = String(line).split('/').filter(Boolean);
+			return gdpr_compliant_recaptcha_analysis.routeSegmentsMatch(routeSegments, patternSegments);
+		});
 	},
 	/** Name heuristic for password-carrying fields (fallback when no type info exists). */
 	isPasswordKey : function(key) {
@@ -151,7 +272,10 @@ var gdpr_compliant_recaptcha_analysis = {
 		});
 		formDataJSON = gdpr_compliant_recaptcha_analysis.stripPasswordFields(formDataJSON, form);
 		formDataJSON = gdpr_compliant_recaptcha_analysis.stripPluginFields(formDataJSON);
-		const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(formDataJSON, true);
+		// A form CAN target a REST route directly (its action attribute), even though
+		// most captured submissions here are classic non-REST POSTs.
+		const route = gdpr_compliant_recaptcha_analysis.extractRestRoute(form.getAttribute('action') || '');
+		const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(formDataJSON, true, false, false, route);
 		// The page is about to navigate away — persist via sendBeacon so the request
 		// survives unload (fetch keepalive fallback inside persistEntry()).
 		gdpr_compliant_recaptcha_analysis.persistEntry(entry, true);
@@ -211,7 +335,11 @@ var gdpr_compliant_recaptcha_analysis = {
 			return Object.keys(jsonObject)[0];
 	},
 	//Updating the array of JSON objects
-	updateJSONObject : function (newJsonObject, submission = false, ajax = false, assign = false) {
+	// route (REST_ROUTES_PLAN.md AP5): the REST route this capture's request targeted,
+	// as derived by extractRestRoute() from the intercepted URL, or null for a request
+	// that is not (recognisably) a REST call. Stored on the entry like ajax/wp_ajax, and
+	// consulted by checkPatterns() for coverage against POW_REST_ROUTES.
+	updateJSONObject : function (newJsonObject, submission = false, ajax = false, assign = false, route = null) {
 		let name = gdpr_compliant_recaptcha_analysis.seekName(newJsonObject);
 		let found = false;
 		let wp_ajax = ajax && newJsonObject.hasOwnProperty('action') ? true : false;
@@ -232,6 +360,12 @@ var gdpr_compliant_recaptcha_analysis = {
 				found = true;
 				if(gdpr_compliant_recaptcha_analysis.jsonArray[key]['name'] !== name && ajax){
 					gdpr_compliant_recaptcha_analysis.jsonArray[key]['name'] = name;
+				}
+				// Only overwrite when THIS call actually saw a route — a later capture of
+				// the same submission via a path that carries no URL (e.g. a plain form
+				// re-submit) must not erase a route learned earlier.
+				if(route){
+					gdpr_compliant_recaptcha_analysis.jsonArray[key]['route'] = route;
 				}
 				//Check whether either the existing field, or the new field is a post and update it respectively
 				if(!ajax && gdpr_compliant_recaptcha_analysis.jsonArray[key]['ajax']){
@@ -284,6 +418,7 @@ var gdpr_compliant_recaptcha_analysis = {
 						ajax : ajax,
 						wp_ajax: wp_ajax,
 						name: name,
+						route: route,
 				});
 				var keys = Object.keys(gdpr_compliant_recaptcha_analysis.jsonArray);
 				var lastKey = keys[keys.length - 1];
@@ -436,6 +571,19 @@ var gdpr_compliant_recaptcha_analysis = {
 					&& gdpr_compliant_recaptcha_analysis.actions.length
 					&& gdpr_compliant_recaptcha_analysis.actions.includes(gdpr_compliant_recaptcha_analysis.jsonArray[key]['json']['action'])
 				){
+					gdpr_compliant_recaptcha_analysis.jsonArray[key]['found'] = true;
+				}
+				// Third signature class (REST_ROUTES_PLAN.md AP5): the entry's captured
+				// REST route (if any) against POW_REST_ROUTES — so a form builder that
+				// submits over REST and is already monitored by route shows "Covered"
+				// instead of the field-pattern/action checks above (which never see a
+				// route) reporting a false "Not covered".
+				if (
+					gdpr_compliant_recaptcha_analysis.routeCovered(
+						gdpr_compliant_recaptcha_analysis.jsonArray[key]['route'],
+						gdpr_compliant_recaptcha_analysis.routes
+					)
+				) {
 					gdpr_compliant_recaptcha_analysis.jsonArray[key]['found'] = true;
 				}
 			}
@@ -598,6 +746,7 @@ var gdpr_compliant_recaptcha_analysis = {
 				gdpr_compliant_recaptcha_analysis.patterns[key] = JSON.parse(gdpr_compliant_recaptcha_analysis.patterns[key]);
 			}
 			gdpr_compliant_recaptcha_analysis.actions = response.actions;
+			gdpr_compliant_recaptcha_analysis.routes = response.routes;
 			gdpr_compliant_recaptcha_analysis.checkPatterns();
 			callback();
 		});
@@ -702,7 +851,10 @@ var gdpr_compliant_recaptcha_analysis = {
 			if (data && data instanceof FormData) {
 				submission = true;
 			}
-			const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(jsonData, submission, ajax);
+			// this._url: set by recaptcha-gdpr-pow.js's XMLHttpRequest.prototype.open
+			// override, which calls this function via originalXhrSends.forEach(fn.apply(this, ...)).
+			var route = gdpr_compliant_recaptcha_analysis.extractRestRoute(this._url);
+			const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(jsonData, submission, ajax, false, route);
 			gdpr_compliant_recaptcha_analysis.persistEntry(entry, false);
 			gdpr_compliant_recaptcha_analysis.refreshCoverageAndGuide(entry);
 		}
@@ -728,7 +880,12 @@ var gdpr_compliant_recaptcha_analysis = {
 			if (init.body && init.body instanceof FormData) {
 				submission = true;
 			}
-			const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(jsonData, submission, ajax);
+			// input is normally a plain URL string here (see handleFetchResponse()'s
+			// `var url = input`), but fetch() also allows a Request object — read its
+			// .url in that case rather than stringifying the object itself.
+			var requestUrl = (input && typeof input === 'object' && 'url' in input) ? input.url : input;
+			var route = gdpr_compliant_recaptcha_analysis.extractRestRoute(requestUrl);
+			const entry = gdpr_compliant_recaptcha_analysis.updateJSONObject(jsonData, submission, ajax, false, route);
 			gdpr_compliant_recaptcha_analysis.persistEntry(entry, false);
 			gdpr_compliant_recaptcha_analysis.refreshCoverageAndGuide(entry);
 		}
@@ -1041,6 +1198,7 @@ var gdpr_compliant_recaptcha_analysis = {
 		var wp_ajax = gdpr_compliant_recaptcha_analysis.jsonArray[id]['wp_ajax'];
 		var name = gdpr_compliant_recaptcha_analysis.jsonArray[id]['name'];
 		var ajax = gdpr_compliant_recaptcha_analysis.jsonArray[id]['ajax'];
+		var route = gdpr_compliant_recaptcha_analysis.jsonArray[id]['route'];
 		var diff = null;
 		if(gdpr_compliant_recaptcha_analysis.jsonArray[id]['diff'])
 			diff = gdpr_compliant_recaptcha_analysis.jsonArray[id]['diff'];
@@ -1116,6 +1274,19 @@ var gdpr_compliant_recaptcha_analysis = {
 			submissionBadge.classList.add("gdpr-badge", "gdpr-badge-neutral");
 			submissionBadge.textContent = gdprAnalysis.i18n.submission;
 			badgesEl.appendChild(submissionBadge);
+		}
+		// REST route this capture's request targeted (REST_ROUTES_PLAN.md AP5), when the
+		// interceptor recognised one (extractRestRoute()). Shown, not clickable — unlike
+		// Message_Page::render_message()'s "Monitor this route" button, this overlay has
+		// no server round-trip for a one-click add; the admin adds it via Save pattern/
+		// action like any other captured entry, or through the message detail view once
+		// the request is also persisted as a message (POW_ANALYSIS_MODE).
+		if(route){
+			const routeBadge = document.createElement("span");
+			routeBadge.classList.add("gdpr-badge", "gdpr-badge-neutral");
+			routeBadge.textContent = (gdprAnalysis.i18n.restRouteLabel || '') + ' ' + route;
+			routeBadge.title = route;
+			badgesEl.appendChild(routeBadge);
 		}
 		akkordeonRow.appendChild(badgesEl);
 
@@ -1436,4 +1607,18 @@ var gdpr_compliant_recaptcha_analysis = {
 	},
 }
 
-window.addEventListener( 'load', gdpr_compliant_recaptcha_analysis.initiateAnalysis);
+if ( typeof window !== 'undefined' ) {
+	window.addEventListener( 'load', gdpr_compliant_recaptcha_analysis.initiateAnalysis);
+}
+
+// Expose the pure, DOM-independent helpers for the Node-based regression tests
+// (tests/js/, run via `node --test`) — same pattern as recaptcha-gdpr-pow.js's export
+// block. No effect in the browser: `module` is undefined there, so this is skipped and
+// the file stays a plain enqueued script.
+if ( typeof module !== 'undefined' && module.exports ) {
+	module.exports = {
+		extractRestRoute : gdpr_compliant_recaptcha_analysis.extractRestRoute,
+		routeSegmentsMatch : gdpr_compliant_recaptcha_analysis.routeSegmentsMatch,
+		routeCovered : gdpr_compliant_recaptcha_analysis.routeCovered,
+	};
+}

@@ -71,16 +71,26 @@ class Analysis {
 		$existing_lines_pattern = null;
 		$existing_action        = get_option( Option::POW_EXPLICIT_ACTION );
 		$existing_lines_action  = null;
+		// Third signature class (REST_ROUTES_PLAN.md AP3/AP5): so checkPatterns() in
+		// recaptcha-gdpr-analysis.js can mark a captured entry "covered" when its
+		// request targeted an already-monitored REST route — mirrors patterns/actions
+		// above, same textarea-line format.
+		$existing_route       = get_option( Option::POW_REST_ROUTES );
+		$existing_lines_route = null;
 		if ( $existing_pattern ) {
 			$existing_lines_pattern = preg_split( "/\r\n|\n|\r/", $existing_pattern, -1, PREG_SPLIT_NO_EMPTY );
 		}
 		if ( $existing_action ) {
 			$existing_lines_action = preg_split( '/\r\n|\n|\r/', $existing_action, -1, PREG_SPLIT_NO_EMPTY );
 		}
+		if ( $existing_route ) {
+			$existing_lines_route = preg_split( '/\r\n|\n|\r/', $existing_route, -1, PREG_SPLIT_NO_EMPTY );
+		}
 
 		$array_result = array(
 			'patterns' => $existing_lines_pattern,
 			'actions'  => $existing_lines_action,
+			'routes'   => $existing_lines_route,
 		);
 
 		// Make your array as json
@@ -167,6 +177,11 @@ class Analysis {
 			array(
 				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
 				'storeNonce' => wp_create_nonce( self::STORE_NONCE_ACTION ),
+				// REST prefix ('wp-json' by default, changeable via the `rest_url_prefix`
+				// filter — never hardcode it) so the client-side route extraction in
+				// recaptcha-gdpr-analysis.js (extractRestRoute()) can recognise a pretty-
+				// permalinks REST call the same way RestRoute::extract() does server-side.
+				'restPrefix' => rest_get_url_prefix(),
 				'i18n'       => array(
 					'chooseAttributes'      => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'loading'               => __( 'Loading...', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -199,6 +214,7 @@ class Analysis {
 					'guideSavedSubtitle'    => __( 'This submission type is now covered.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'guideHintPattern'      => __( 'Select the attributes that identify this form, then click Save pattern.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'guideHintAction'       => __( 'Click Save action to add this submission type to the spam check.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'restRouteLabel'        => __( 'Route:', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				),
 			)
 		);
@@ -282,6 +298,12 @@ class Analysis {
 		);
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
+		// The REST route the overlay detected in the browser (recaptcha-gdpr-analysis.js
+		// `extractRestRoute()`, the client-side twin of RestRoute::extract()). Null for a
+		// classic form POST, and null for anything that does not survive validation —
+		// this value is client-supplied, see RestRoute::sanitize_route().
+		$route = isset( $decoded['route'] ) ? RestRoute::sanitize_route( $decoded['route'] ) : null;
+
 		if ( $existing_rgm_id ) {
 			$wpdb->update(
 				$rgd_table,
@@ -293,6 +315,12 @@ class Analysis {
 				array( '%s' ),
 				array( '%d', '%s' )
 			);
+			// The dedup branch REPLACES the payload, so the route row has to follow it —
+			// otherwise a second capture of the same form would keep the first run's route
+			// (or none at all, if the first capture was a classic POST and this one is
+			// REST). Upsert rather than update: on an entry stored before this feature
+			// existed, or one whose first capture had no route, there is no row to update.
+			self::upsert_route_row( (int) $existing_rgm_id, $route );
 			return array(
 				'success' => true,
 				'id'      => (int) $existing_rgm_id,
@@ -353,10 +381,71 @@ class Analysis {
 			),
 			array( '%d', '%s', '%s', '%d' )
 		);
+		self::upsert_route_row( (int) $rgm_id, $route );
 
 		return array(
 			'success' => true,
 			'id'      => (int) $rgm_id,
+		);
+	}
+
+	/**
+	 * Write/refresh/remove the technical `_gdpr_route` detail row of a direct-analysis
+	 * entry (ISSUES.md, resolved 2026-08-07).
+	 *
+	 * Why this exists at all: this path never runs through `Stamp::save_message()`, which
+	 * is where `_gdpr_route` is written for every other message — the row here is created
+	 * during the ADMIN's `gdpr_analysis_store` ajax call, so `$_SERVER` describes the
+	 * admin's own request and `Stamp::get_rest_route()` would be empty or simply wrong.
+	 * The route therefore has to come out of the captured payload instead. Same convention
+	 * as everywhere else (§6): `rgm_posted = 0`, leading underscore, no schema change — so
+	 * `Message_Page::render_message()` picks it up with its existing logic, badge and
+	 * one-click "Monitor this route" included.
+	 *
+	 * A null route DELETES an existing row rather than leaving it: on the dedup path the
+	 * same entry can be re-captured as a classic POST, and a stale route would then be
+	 * offered for monitoring on a submission that never used it.
+	 *
+	 * @param int         $rgm_id Message row the detail belongs to.
+	 * @param string|null $route  Canonical route, or null to remove the row.
+	 * @return void
+	 */
+	private static function upsert_route_row( $rgm_id, $route ) {
+		global $wpdb;
+		$rgd_table = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';
+		$where     = array(
+			'rgm_id'        => $rgm_id,
+			'rgd_attribute' => '_gdpr_route',
+		);
+
+		if ( null === $route ) {
+			$wpdb->delete( $rgd_table, $where, array( '%d', '%s' ) );
+			return;
+		}
+
+		// Existence is asked EXPLICITLY, not inferred from $wpdb->update()'s return value:
+		// MySQL reports 0 affected rows when the row exists but the value is unchanged
+		// (the common case — re-capturing the same form on the same route), and treating
+		// that 0 as "no row yet" would insert a duplicate on every repeat capture.
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->prefix, values via prepare()
+		$exists = $wpdb->get_var(
+			$wpdb->prepare( "SELECT rgd_id FROM $rgd_table WHERE rgm_id = %d AND rgd_attribute = '_gdpr_route' LIMIT 1", $rgm_id )
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		if ( $exists ) {
+			$wpdb->update( $rgd_table, array( 'rgd_value' => $route ), $where, array( '%s' ), array( '%d', '%s' ) );
+			return;
+		}
+		$wpdb->insert(
+			$rgd_table,
+			array(
+				'rgm_id'        => $rgm_id,
+				'rgd_attribute' => '_gdpr_route',
+				'rgd_value'     => $route,
+				'rgm_posted'    => 0,
+			),
+			array( '%d', '%s', '%s', '%d' )
 		);
 	}
 

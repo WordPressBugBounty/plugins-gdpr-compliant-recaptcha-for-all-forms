@@ -25,6 +25,9 @@ class Settings_Menu {
 	/** Action value for the "reset repeat-sender echo lock" status-strip button. */
 	const RESET_ECHO = 'reset_echo';
 
+	/** Action value for the "reset address-change counters" status-strip button. */
+	const RESET_FP = 'reset_fp';
+
 	/** Constructor of the class
 	 */
 	public function __construct() {
@@ -90,23 +93,25 @@ class Settings_Menu {
 			self::display_admin_notice( __( 'Jetpack Forms detected – added action: jetpack_contact_form_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
-		// *** Everest Forms (uses WordPress AJAX) ***
+		// *** Everest Forms (uses WordPress AJAX). The real registered action is the
+		// dynamically built `wp_ajax_nopriv_everest_forms_ajax_form_submission` hook,
+		// see includes/class-evf-ajax.php's $ajax_events['ajax_form_submission'] and
+		// assets/js/frontend/ajax-submission.js — the `action` value the client sends
+		// is the hook name minus the `wp_ajax(_nopriv)_` prefix. Verified against the
+		// wp.org zip, Everest Forms 3.5.3. ISSUES.md "Drei Defekte…": the previous
+		// `everest_forms_submit` value was never registered, so this never fired. ***
 		if ( array_key_exists( 'everest-forms/everest-forms.php', $installed_plugins ) ) {
-			$actions[] = 'everest_forms_submit';
-			self::display_admin_notice( __( 'Everest Forms detected – added action: everest_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			$actions[] = 'everest_forms_ajax_form_submission';
+			self::display_admin_notice( __( 'Everest Forms detected – added action: everest_forms_ajax_form_submission', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
-		// *** WS Forms (uses WordPress AJAX) ***
-		if ( array_key_exists( 'ws-forms/ws-forms.php', $installed_plugins ) ) {
-			$actions[] = 'ws_forms_submit';
-			self::display_admin_notice( __( 'WS Forms detected – added action: ws_forms_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-		}
-
-		// *** Otter Blocks (uses WordPress AJAX) ***
-		if ( array_key_exists( 'otter-blocks/otter-blocks.php', $installed_plugins ) ) {
-			$actions[] = 'otter_blocks_submit';
-			self::display_admin_notice( __( 'Otter Blocks detected – added action: otter_blocks_submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-		}
+		// WS Form and Otter Blocks do NOT submit via admin-ajax (verified against the
+		// current wp.org zips, ws-form 1.12.0 and otter-blocks 3.2.1: neither registers
+		// a `wp_ajax(_nopriv)_*` hook for form submission) — both are REST-only
+		// builders. Detection moved to get_default_rest_routes() below
+		// (ISSUES.md "Drei Defekte…"); the previous `ws_forms_submit`/
+		// `otter_blocks_submit` action entries here were never registered by either
+		// plugin and are removed rather than fixed.
 
 		// *** Elementor Pro Forms (correct action) ***
 		if ( array_key_exists( 'elementor-pro/elementor-pro.php', $installed_plugins ) ) {
@@ -217,7 +222,131 @@ class Settings_Menu {
 			self::display_admin_notice( __( 'Zoho Forms detected – added recognition pattern: {"zoho_forms_submit":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
+		// *** JetFormBuilder (TESTSUITE_PLAN.md AP4). Neither admin-ajax nor REST:
+		// Jet_Form_Builder\Request\Form_Request_Router::listen() (includes/request/
+		// request-router.php) intercepts a plain POST to the CURRENT page URL
+		// (Http_Tools::get_form_action_url(), includes/classes/http/http-tools.php —
+		// home_url( $wp->request ) with a QUERY STRING appended, never to
+		// admin-ajax.php) and, for its OWN "ajax" submit mode, defines DOING_AJAX
+		// itself right there inside listen() (request-router.php:48) — reached via
+		// Plugin::init_components() -> Form_Handler::call_form() on the
+		// 'after_setup_theme' hook, priority 0 (functions.php:11-15) — long AFTER
+		// Stamp::__construct() has already run (RCM_Main::get_instance() is called
+		// at plugin-file-include time). Only the SEPARATE do_action( 'wp_ajax(_nopriv)_...' )
+		// dispatch (setup_ajax_request()) is deferred to 'parse_request'; DOING_AJAX
+		// itself is already set well before that. Either way the timing conclusion
+		// holds: every JetFormBuilder submission, both its "reload" (default) and
+		// "ajax" submit-type settings, reaches this plugin's non-ajax Pattern branch,
+		// never the admin-ajax Action branch.
+		// The query-string marker's key AND value are RANDOMIZED per installation
+		// (Admin\Tabs_Handlers\Options_Handler::set_jfb_request_args() /
+		// jfb_generate_str(), includes/admin/tabs-handlers/options-handler.php —
+		// live-measured example: `?qR6M61=M1ny66OS80H9&method=reload`, not the
+		// literal `jet_form_builder_submit=submit` default the property declaration
+		// suggests), which is what makes it useless as a signature — it WOULD be
+		// visible to check_existing_patterns() if it were fixed: that method matches
+		// against Stamp::$whole_request_data, which is $_REQUEST (GET+POST+COOKIE),
+		// not just $_POST (class-stamp.php:307, used at :456). The actual signature
+		// is the hidden `_jet_engine_booking_form_id` field
+		// (Jet_Form_Builder\Blocks\Render\Form_Hidden_Fields::render(), includes/
+		// blocks/render/form-hidden-fields.php:28, `jet_fb_handler()->form_key`) —
+		// chosen specifically because, unlike hook_key/hook_val above, form_key is
+		// never reassigned anywhere after its declaration (includes/form-handler.php:51)
+		// and is therefore identical on every installation. Every JetFormBuilder form
+		// renders it as a real <input type="hidden"> unconditionally — verified
+		// against the pinned 3.6.5 zip and a live tokenless submission
+		// (tests/integration/cases/jetformbuilder.mjs).
+		if ( array_key_exists( 'jetformbuilder/jet-form-builder.php', $installed_plugins ) ) {
+			$patterns[] = '{"_jet_engine_booking_form_id":null}';
+			self::display_admin_notice( __( 'JetFormBuilder detected – added recognition pattern: {"_jet_engine_booking_form_id":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
 		return implode( "\n", $patterns );
+	}
+
+	/**
+	 * Default REST routes (REST_ROUTES_PLAN.md AP3/AP4) — the third signature class,
+	 * for builders that submit over the WordPress REST API and carry neither an
+	 * ajax `action` nor one of the field patterns above. Plugin-detection-conditioned
+	 * like the two getters above (AP4), so `Scope_Sync` (third ledger
+	 * `POW_SEEDED_ROUTES`) only offers a route once the matching builder is actually
+	 * active — never a route for a builder that isn't installed.
+	 *
+	 * Routes verified against the current wp.org zips (not guessed, ISSUES.md
+	 * "Drei Defekte…"):
+	 * - WS Form 1.12.0: namespace `ws-form/v1` (ws-form.php:71,
+	 *   `WS_FORM_RESTFUL_NAMESPACE`), anonymous POST submit endpoint `/submit/`
+	 *   (api/class-ws-form-api.php:332, `permission_callback => true`) — matched via
+	 *   the namespace-suffix wildcard, not the exact endpoint, so future WS Form REST
+	 *   endpoints stay covered too. Main plugin file is `ws-form/ws-form.php` (the
+	 *   previous ajax-action entry used the wrong slug `ws-forms/ws-forms.php` and
+	 *   never fired).
+	 * - Otter Blocks 3.2.1: namespace built from `$namespace . $version` = `otter/v1`
+	 *   (inc/server/class-form-server.php:49,57), route `/form/frontend`
+	 *   (class-form-server.php:174-177, `WP_REST_Server::CREATABLE`). The previous
+	 *   ajax-action entry `otter_blocks_submit` was never registered anywhere.
+	 * - Contact Form 7 also submits via REST but is already covered by its `_wpcf7`
+	 *   pattern above; the route is added here too, belt-and-suspenders (no separate
+	 *   detection notice — the pattern getter already announces CF7).
+	 *
+	 * NEVER add a bare namespace like `wp/v2` here: this option is read behind the
+	 * same triage gate as every other signature class (HANDBUCH.md §5), which also
+	 * sees the block editor's own REST save (`/wp/v2/posts/<id>`) — seeding that
+	 * namespace would make the plugin block post saves in wp-admin.
+	 *
+	 * @return string
+	 */
+	public static function get_default_rest_routes() {
+		include_once ABSPATH . 'wp-admin/includes/plugin.php';
+		$routes            = array();
+		$installed_plugins = get_plugins();
+
+		// *** Contact Form 7 (belt-and-suspenders on top of the `_wpcf7` pattern) ***
+		if ( array_key_exists( 'contact-form-7/wp-contact-form-7.php', $installed_plugins ) ) {
+			$routes[] = 'contact-form-7/v1/contact-forms/*/feedback';
+		}
+
+		// *** WS Form (submits over its own REST namespace, no admin-ajax path) ***
+		if ( array_key_exists( 'ws-form/ws-form.php', $installed_plugins ) ) {
+			$routes[] = 'ws-form/v1/*';
+			self::display_admin_notice( __( 'WS Form detected – added REST route: ws-form/v1/*', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** Otter Blocks (Gutenberg form block submits over REST, no admin-ajax path) ***
+		if ( array_key_exists( 'otter-blocks/otter-blocks.php', $installed_plugins ) ) {
+			$routes[] = 'otter/v1/form/frontend';
+			self::display_admin_notice( __( 'Otter Blocks detected – added REST route: otter/v1/form/frontend', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** SureForms (TESTSUITE_PLAN.md AP4). Submits over its own REST namespace,
+		// no admin-ajax SUBMIT path (verified against the pinned 2.12.3 zip's
+		// inc/form-submit.php: SRFM\Inc\Form_Submit registers
+		// `register_rest_route( 'sureforms/v1', '/submit-form', … )` on
+		// `rest_api_init`; the front-end submit script calls
+		// `wp.apiFetch( { path: 'sureforms/v1/submit-form', method: 'POST', … } )`,
+		// assets/js/minified/form-submit.min.js). SureForms DOES register other
+		// `wp_ajax(_nopriv)_*` hooks — `validation_ajax_action` in the SAME
+		// Form_Submit::__construct() (inc/form-submit.php:57-58) and
+		// `srfm_create_payment_intent`/`srfm_create_subscription_intent` in
+		// Front_End::__construct() (inc/payments/front-end.php:44-47) — but none of
+		// them is the actual form SUBMISSION, which always goes through the REST
+		// route above; the payment-intent endpoints are known, deliberately
+		// uncovered frontend write paths (no signature seeded for them here).
+		// Seeded as the EXACT endpoint, not a
+		// `sureforms/v1/*` namespace wildcard: that namespace also carries several
+		// `manage_options`-gated ADMIN endpoints a logged-in admin's own browser calls
+		// while editing a form (inc/create-new-form.php, inc/generate-form-markup.php,
+		// inc/payments/stripe/*, inc/global-settings/*) — a wildcard would put those
+		// behind this plugin's spam gate too and could block the SureForms admin UI
+		// itself (the class of self-lockout `RestRoute::reject_self_lockout_lines()`
+		// guards against for WordPress' OWN core namespaces, but that guard does not
+		// and cannot know about a third-party plugin's admin routes).
+		if ( array_key_exists( 'sureforms/sureforms.php', $installed_plugins ) ) {
+			$routes[] = 'sureforms/v1/submit-form';
+			self::display_admin_notice( __( 'SureForms detected – added REST route: sureforms/v1/submit-form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		return implode( "\n", $routes );
 	}
 
 	public function prepare_options() {
@@ -380,6 +509,25 @@ class Settings_Menu {
 				'🔍✔️',
 				__( 'Defines field/value patterns that identify a submission type so the spam check applies to it.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
+			Option::POW_REST_ROUTES             => new Option(
+				__( 'Apply on REST routes', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::TEXT,
+				self::get_default_rest_routes(),
+				__(
+					'<strong>Why you might need this:</strong> Some form builders submit over the WordPress REST API instead of a classic POST or AJAX call, and carry neither an <b>Apply on actions</b> ⚙️✔️ value nor an <b>Apply on pattern</b> 🔍✔️ match — this list is what covers them.
+                    <br>
+                    <br><strong>How it works:</strong> Add one REST route per line. A leading slash is optional. Two wildcard forms are supported:
+                    <br><ul>
+                        <li><code>*</code> as one segment matches exactly that segment, e.g. a form ID: <code>contact-form-7/v1/contact-forms/*/feedback</code></li>
+                        <li><code>*</code> as the LAST segment matches the whole namespace below it, e.g. <code>ws-form/v1/*</code></li>
+                    </ul>
+                    <br><strong>Never add a bare core namespace like <code>wp/v2</code></strong> — that would also match the block editor\'s own save requests and block your own post saves.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Most relevant', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🧭✔️',
+				__( 'Names the REST API routes that the spam check should apply to, for builders that submit over REST.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
 			Option::POW_BLOCK_LOGIN             => new Option(
 				__( 'Apply for WordPress-Login', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
@@ -530,10 +678,10 @@ class Settings_Menu {
 				__( 'Save Logins', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
-				__( "Disable this option if you don't want successful WordPress logins to be recorded.", 'gdpr-compliant-recaptcha-for-all-forms' ),
+				__( "Disable this option if you don't want submissions from the WordPress login and password-reset forms to be recorded. Analysis Mode is the one exception — while it is on, it keeps capturing them for inspection.<br><br>Password values are never stored either way; they are replaced with [redacted].", 'gdpr-compliant-recaptcha-for-all-forms' ),
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🔒💾',
-				__( 'Records successful WordPress logins in the message inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( 'Records login and password-reset submissions in the message inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_FLAG_SAVE               => new Option(
 				__( 'Save spam messages with flag', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -588,6 +736,28 @@ class Settings_Menu {
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🚫▭',
 				__( 'Excludes specific fields, such as passwords, from being saved with messages.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_CREDENTIAL_FIELDS       => new Option(
+				__( 'Credential fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::TEXT,
+				'',
+				__(
+					"<strong>What this is:</strong> the list of field names this plugin treats as passwords. Their values are never stored — the field still appears in a saved message, but its value reads <code>[redacted]</code>.
+                    <br>
+                    <br><strong>You normally do not edit this here.</strong> Common password field names are recognised automatically. When a form on your site posts a password field with an unusual name, the plugin offers to add it — as a notice at the top of your admin pages, or as a <em>Treat as credential field</em> button next to the value in a saved message. This box is the place to review, correct and remove those entries.
+                    <br>
+                    <br><strong>Format:</strong> one field name per line, exactly as it appears in a saved message (the part after the last <code>-&gt;</code> for nested fields). Matching is case-insensitive and applies to whole names only — an entry <code>pass</code> never matches <code>passenger</code>. Entries are NOT tied to a site: a password field name counts everywhere.
+                    <br>
+                    <br><strong>Adding a name here also cleans up:</strong> messages you already received are redacted retroactively, in small steps, over the following page loads.
+                    <br>
+                    <br><strong>Careful with:</strong> <code>email</code>, <code>name</code>, <code>subject</code> and <code>message</code>. Redacting those hides the very values you need to judge and block spam, so the plugin never suggests them.
+                    <br>
+                    <br><strong>Not the same as 'Skip fields from saving':</strong> that one drops a field completely and is tied to a site. This one keeps the field visible and only removes its value.",
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🔑🚫',
+				__( 'Field names whose values are stored as "[redacted]" — normally filled by confirming the plugin\'s own suggestions.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_MESSAGE_HEADS           => new Option(
 				__( 'Subject fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -653,15 +823,6 @@ class Settings_Menu {
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🗑️📨',
 				__( 'Automatically deletes messages from the trash after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
-			),
-			Option::POW_APPLY_REST              => new Option(
-				__( 'Apply on REST-API', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				Option::BOOL,
-				false,
-				__( 'This option improves site security a lot.<br><br><strong>Test first:</strong> enable <em>Simulate spam messages</em> before switching this on for a live site — it lets you verify nothing legitimate gets blocked.<br><br><strong>But beware</strong>: several plugins use the REST API for handshake procedures or vendor-side maintenance. In this case, control access for the specific plugin via the whitelisting options one by one.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				__( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				'🖥️',
-				__( 'Applies the proof-of-work check to WordPress REST API requests as well as forms.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_IP_WHITELIST            => new Option(
 				__( 'IP-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -883,6 +1044,7 @@ class Settings_Menu {
 
 		$this->update_settings();
 		$this->maybe_reset_echo_store();
+		$this->maybe_reset_fp_counters();
 
 		foreach ( $this->options as $id => $option ) {
 
@@ -1002,7 +1164,6 @@ class Settings_Menu {
 		);
 		return array(
 			Option::POW_BLOCK       => $warn,
-			Option::POW_APPLY_REST  => $warn,
 			Option::POW_BLOCK_LOGIN => $warn,
 			// Static recommendation: there is no difficulty ceiling any more, so there
 			// is nothing left to warn about here (the boost is never clipped).
@@ -1151,6 +1312,26 @@ class Settings_Menu {
 			),
 		);
 
+		// Address-change measurement (fingerprint diagnosis, see Stamp::record_fp_status()):
+		// what share of solved puzzles came back from a different address than the token
+		// was issued to. Shown only once something has been measured. This is DIAGNOSIS —
+		// no protection behaviour depends on it; a high share means "a cache or proxy sits
+		// in front of this site", not "attack".
+		$fp_share = Option::fp_mismatch_share(
+			get_option( Option::POW_FP_MATCHED_TOTAL, 0 ),
+			get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 )
+		);
+		if ( $fp_share['total'] > 0 ) {
+			$items[] = array(
+				'class' => '',
+				'text'  => sprintf(
+					/* translators: %d: percentage of solved puzzles redeemed from a different IP address than they were issued to */
+					__( '%d%% of solved puzzles came from another IP than issued', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					$fp_share['percent']
+				),
+			);
+		}
+
 		// Repeat-sender echo lock: how many values it currently holds, plus a one-click
 		// reset (offered only when non-empty). The count reflects the store even when
 		// the feature is toggled off, so a stale value can still be released.
@@ -1169,6 +1350,17 @@ class Settings_Menu {
 				<span class="gdpr-status-item <?php echo esc_attr( $item['class'] ); ?>"><?php echo esc_html( $item['text'] ); ?></span>
 			<?php endforeach; ?>
 		</div>
+		<?php if ( $fp_share['total'] > 0 ) : ?>
+			<form method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>" class="gdpr-echo-reset">
+				<?php wp_nonce_field( 'gdpr_reset_fp_nonce', 'gdpr_reset_fp_nonce_field' ); ?>
+				<input type="hidden" name="<?php echo esc_attr( self::RCM_ACTION ); ?>" value="<?php echo esc_attr( self::RESET_FP ); ?>">
+				<button type="submit" class="button button-secondary"><?php esc_html_e( 'Reset address measurement', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></button>
+				<span class="gdpr-echo-reset-hint">
+					<?php esc_html_e( 'Each puzzle is handed out to one visitor and solved a moment later. This measures how often the solution comes back from a different IP address than the puzzle went to. Submissions are accepted either way — a high share simply means a cache or proxy sits in front of your site (or the visitor\'s address changes between requests). If it is high, check the "Trusted proxies" setting. Resetting starts a fresh measurement, e.g. after changing that setting.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+				</span>
+			</form>
+		<?php endif; ?>
+		<?php $this->render_proxy_hint(); ?>
 		<?php if ( $echo_count > 0 ) : ?>
 			<form method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>" class="gdpr-echo-reset">
 				<?php wp_nonce_field( 'gdpr_reset_echo_nonce', 'gdpr_reset_echo_nonce_field' ); ?>
@@ -1179,6 +1371,49 @@ class Settings_Menu {
 				</span>
 			</form>
 		<?php endif; ?>
+		<?php
+	}
+
+	/** Hint when THIS admin request arrived carrying forwarding headers while the
+	 * trusted-proxy list is empty — i.e. the site very likely sits behind a proxy the
+	 * plugin has not been told about, so every visitor is seen under the proxy's
+	 * address (whitelist, fail2ban and per-IP limits then work on the wrong address).
+	 *
+	 * Read-only observation of the CURRENT request: only the presence of a header is
+	 * evaluated, never its (client-settable) value, and nothing is stored. Only
+	 * X-Forwarded-For is ever honored for resolution — the other names are listed
+	 * because their presence is still evidence of a proxy hop.
+	 *
+	 * @return void
+	 */
+	private function render_proxy_hint() {
+		if ( '' !== trim( (string) get_option( Option::POW_TRUSTED_PROXIES ) ) ) {
+			return;
+		}
+
+		$present = array();
+		foreach ( ClientIp::DIAGNOSTIC_HEADERS as $header_name ) {
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- presence check only; the value is never read, stored or printed.
+			if ( ! empty( $_SERVER[ $header_name ] ) ) {
+				$present[] = str_replace( '_', '-', substr( $header_name, 5 ) );
+			}
+		}
+
+		if ( empty( $present ) ) {
+			return;
+		}
+		?>
+		<p class="gdpr-echo-reset-hint">
+			<?php
+			echo esc_html(
+				sprintf(
+					/* translators: %s: comma-separated list of forwarding header names seen on the current request */
+					__( 'This request reached WordPress through a proxy (%s), but no trusted proxies are configured. Visitors are therefore all seen under the proxy\'s address, which affects the IP whitelist, fail2ban logging and per-IP limits. Enter the proxy address under "Trusted proxies" below. Only X-Forwarded-For is evaluated, and only from an address listed there.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					implode( ', ', $present )
+				)
+			);
+			?>
+		</p>
 		<?php
 	}
 
@@ -1297,6 +1532,31 @@ class Settings_Menu {
 					continue;
 				}
 
+				// A REST-route line that covers one of WordPress' OWN namespaces is a
+				// one-way door, not a typo the admin can walk back: POW_BLOCK is on by
+				// default, so the block editor's own save (`/wp/v2/posts/<id>`) would be
+				// discarded as spam — and wp-admin never receives the PoW script, so there
+				// is no challenge to solve either. Only the database or FTP would get them
+				// out. Such lines are dropped BEFORE storing and then NAMED to the admin
+				// (never swallowed silently); everything else in the textarea is saved
+				// normally. The decision itself is pure and unit-tested:
+				// RestRoute::reject_self_lockout_lines() / tests/unit/RestRouteTest.php.
+				if ( Option::POW_REST_ROUTES === $key && is_string( $post_value ) ) {
+					list( $post_value, $rejected_routes ) = RestRoute::reject_self_lockout_lines( $post_value );
+					if ( ! empty( $rejected_routes ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-rest-routes-rejected',
+							sprintf(
+								/* translators: %s: the rejected route lines, comma separated */
+								__( 'These REST route lines were not saved: %s. They would also cover WordPress\' own core routes, which would block your post saves and lock you out of wp-admin. All other lines were saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								implode( ', ', $rejected_routes )
+							),
+							'error'
+						);
+					}
+				}
+
 				if ( Option::BOOL === $type && ( null === $post_value || false === $post_value ) ) {
 					// Checkbox unchecked: persist an explicit '0' instead of
 					// delete_option(). Bestand: delete_option() + the options-matrix
@@ -1350,6 +1610,35 @@ class Settings_Menu {
 			Option::PREFIX . 'options',
 			'gdpr-echo-reset',
 			__( 'The repeat-sender lock has been reset — all currently held values were released.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'updated'
+		);
+	}
+
+	/** Handle the "reset address-change counters" status-strip button.
+	 *
+	 * Same native admin-post-style flow (own action value, own nonce, manage_options)
+	 * as maybe_reset_echo_store(). The counters are pure diagnosis, so resetting them
+	 * changes no protection behaviour at all — it just starts a fresh measurement after
+	 * a proxy/cache configuration change.
+	 *
+	 * @return void
+	 */
+	public function maybe_reset_fp_counters() {
+		$post_action = strval( filter_input( INPUT_POST, self::RCM_ACTION, FILTER_SANITIZE_SPECIAL_CHARS ) );
+		if ( self::RESET_FP !== $post_action || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$nonce = isset( $_POST['gdpr_reset_fp_nonce_field'] ) ? sanitize_text_field( wp_unslash( $_POST['gdpr_reset_fp_nonce_field'] ) ) : '';
+		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'gdpr_reset_fp_nonce' ) ) {
+			wp_die( esc_html__( 'Security check failed. This request was blocked by an active CSRF protection mechanism. It may have been triggered by another webpage you recently visited or an unrelated browser tab. To resolve this issue, close untrusted sites, check browser extensions, and refresh your WordPress session by logging in again.', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+		delete_option( Option::POW_FP_MATCHED_TOTAL );
+		delete_option( Option::POW_FP_MISMATCHED_TOTAL );
+		delete_option( Option::POW_FP_LAST_MISMATCH_AT );
+		add_settings_error(
+			Option::PREFIX . 'options',
+			'gdpr-fp-reset',
+			__( 'The address-change measurement has been reset — counting starts from zero.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'updated'
 		);
 	}

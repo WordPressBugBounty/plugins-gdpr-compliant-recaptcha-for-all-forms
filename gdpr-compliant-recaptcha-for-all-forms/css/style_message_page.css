@@ -147,6 +147,27 @@
 	cursor: default;
 }
 
+/* "Treat as credential field" — same pill, deliberately quieter than the red
+ * block buttons: it is offered on every posted row, so it must not shout. */
+.gdpr-credential-btn {
+	display: inline-block;
+	margin-left: 8px;
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 1.6;
+	color: #646970;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 12px;
+	cursor: pointer;
+	vertical-align: middle;
+}
+
+.gdpr-credential-btn:hover:not(:disabled) {
+	color: #1d2327;
+	border-color: #8c8f94;
+}
+
 /* Classification-reason badge above the detail table (Message_Page::render_message()).
  * Mirrors .gdpr-badge / .gdpr-status-amber from style_admin.css — that stylesheet is
  * only enqueued on the settings page, so the pill is redefined here. Amber, because
@@ -166,4 +187,60 @@
 	white-space: nowrap;
 	background: #fdf3e1;
 	color: #8a5a00;
+}
+
+/* The cause behind the badge (Classification_Reason::detail_label). Deliberately quiet —
+ * it is a full sentence and must not compete with the badge for attention — but it is the
+ * line a site owner actually needs when the same badge can mean four different things.
+ * max-width in ch so a long sentence stays readable next to a wide message table. */
+.gdpr-reason-detail {
+	margin: -4px 0 10px 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #666;
+	max-width: 90ch;
+}
+
+/* REST route line above the detail table (technical row `_gdpr_route`,
+ * Message_Page::render_message(), REST_ROUTES_PLAN.md AP5). Neutral, not amber like the
+ * reason badge — a route is a fact about the submission, not a verdict: it is shown on
+ * clean messages and analysis-mode captures too, not only blocked ones. */
+.gdpr-route-line {
+	margin: 0 0 8px 0;
+	font-size: 12px;
+	color: #555;
+}
+
+.gdpr-route-line code {
+	font-size: 11px;
+	background: #f0f0f1;
+	padding: 1px 6px;
+	border-radius: 4px;
+}
+
+/* Same pill shape as .gdpr-block-btn, neutral color like .gdpr-credential-btn — this
+ * button adds an admin-configured monitoring rule, not a block. */
+.gdpr-monitor-route-btn {
+	display: inline-block;
+	margin-left: 8px;
+	padding: 2px 10px;
+	font-size: 12px;
+	line-height: 1.6;
+	color: #646970;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 12px;
+	cursor: pointer;
+	vertical-align: middle;
+}
+
+.gdpr-monitor-route-btn:hover:not(:disabled) {
+	color: #1d2327;
+	border-color: #8c8f94;
+}
+
+.gdpr-monitor-route-btn:disabled {
+	color: #8a8a8a;
+	border-color: #cfcfcf;
+	cursor: default;
 }

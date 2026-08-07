@@ -105,9 +105,10 @@ final class ProofOfWork {
 	}
 
 	/**
-	 * Map a Unix timestamp to a coarse time bucket, so that stamps issued within
-	 * the same window hash to the same value (and therefore expire in step with
-	 * the DB-side cleanup window instead of being valid forever for a given IP).
+	 * Map a Unix timestamp to a coarse time bucket. Sole remaining use since the
+	 * legacy bucket-stamp was removed: the DSGVO-neutral under-attack spam counter
+	 * (Stamp::increment_spam_counter()/is_under_attack()), which keys one transient
+	 * per 5-minute bucket and therefore carries no client identity at all.
 	 *
 	 * @param int $timestamp      Unix timestamp.
 	 * @param int $window_minutes Bucket width in minutes; clamped to a minimum of 1
@@ -118,18 +119,6 @@ final class ProofOfWork {
 	public static function time_bucket( $timestamp, $window_minutes ) {
 		$window_minutes = max( 1, (int) $window_minutes );
 		return (int) floor( ( (int) $timestamp ) / ( $window_minutes * 60 ) );
-	}
-
-	/**
-	 * Compute the stamp value for a given IP, salt, and time bucket.
-	 *
-	 * @param string $ip     Client IP address.
-	 * @param string $salt   Server-side salt option.
-	 * @param int    $bucket Time bucket, see time_bucket().
-	 * @return string Lower-case hex SHA-256 digest (64 chars).
-	 */
-	public static function stamp_value( $ip, $salt, $bucket ) {
-		return self::hash_value( (string) $ip . (string) $salt . (string) $bucket );
 	}
 
 	/**

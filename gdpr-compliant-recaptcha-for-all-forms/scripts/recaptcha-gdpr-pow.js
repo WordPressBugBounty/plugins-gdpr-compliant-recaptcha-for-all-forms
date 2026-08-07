@@ -3,7 +3,8 @@
  *
  * Enqueued (in the page <head>, not the footer) by Stamp::add_script_to_header().
  * Per-request/config values arrive via wp_localize_script as the global `gdprPow`
- * ( { stamp, clientIp, difficulty, ajaxUrl, timeout } ).
+ * ( { stamp, difficulty, ajaxUrl, timeout } ) — deliberately nothing derived from the
+ * visitor's IP address: page HTML is cacheable and shared between visitors.
  *
  * The proof-of-work algorithm here MUST stay in lockstep with the server side
  * (includes/class-proof-of-work.php) and the PHPUnit ProofOfWorkTest — otherwise
@@ -31,7 +32,6 @@
 // values it simply no-ops instead of crashing.
 var gdprPow = (typeof window !== 'undefined' && window.gdprPow) ? window.gdprPow : (typeof gdprPow !== 'undefined' ? gdprPow : {});
 var gdpr_compliant_recaptcha_stamp = gdprPow.stamp;
-var gdpr_compliant_recaptcha_ip = gdprPow.clientIp;
 var gdpr_compliant_recaptcha_nonce = null;
 var gdpr_compliant_recaptcha_difficulty = gdprPow.difficulty;
 var gdpr_compliant_recaptcha_token = null;
@@ -128,6 +128,19 @@ var gdpr_compliant_recaptcha = {
 		return minutes * 60000;
 	},
 
+	// Unique-per-call value appended to the get_stamp GET as `_=`. That response is a
+	// FRESH, IP-BOUND token with a short lifetime and must never be shared between
+	// visitors: a hoster/CDN/proxy cache that ignores WordPress' nocache headers would
+	// otherwise hand one visitor's token to everybody, whose check_stamp then fails —
+	// no stamp row is written and every submission is classified as spam. `cache:
+	// 'no-store'` covers the browser's own cache, this covers intermediary caches, which
+	// key on the full URL. Time alone is not enough (two visitors can hit the same
+	// millisecond), so a random suffix is mixed in. Base-36, so the value stays short
+	// and URL-safe.
+	cacheBuster : function () {
+		return Date.now().toString( 36 ) + Math.random().toString( 36 ).slice( 2, 10 );
+	},
+
 	// Whether an outgoing request is the plugin's own get_stamp/check_stamp Ajax call
 	// (action given either in the URL query string or in the body). These must never
 	// be touched (no token injection) and never count as an auto-renew trigger.
@@ -205,7 +218,7 @@ var gdpr_compliant_recaptcha = {
 	// Whether a form submits via GET (method="get" or absent — HTML's default).
 	// form.method normalises to "get"/"post"; we treat anything not explicitly "post"
 	// as GET. Hidden fields on a GET form become VISIBLE query parameters, so injecting
-	// the token there would append "&gdpr_pow_token=<92 chars>" to e.g. a theme search
+	// the token there would append "&gdpr_pow_token=<100 chars>" to e.g. a theme search
 	// URL ("?s=coffee&gdpr_pow_token=...") — ugly and harmful when the URL is shared.
 	// The plugin only ever inspects POST submissions ($_POST), so a GET form never
 	// needs the token anyway; skipping it costs no protection.
@@ -539,7 +552,6 @@ var gdpr_compliant_recaptcha = {
 	// Iterate through as many nonces as it takes to find one that gives us a solution hash at the target difficulty.
 	findHash : async function() {
 		var hashStamp = gdpr_compliant_recaptcha_stamp;
-		var clientIP = gdpr_compliant_recaptcha_ip;
 		// Difficulty travels with the freshly-fetched token (AP4 prep); fall back to
 		// the page-load value from gdprPow for safety if a response ever omits it.
 		var hashDifficulty = gdpr_compliant_recaptcha_difficulty || gdprPow.difficulty;
@@ -561,10 +573,11 @@ var gdpr_compliant_recaptcha = {
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded'
 			},
+			// No client-supplied IP is posted anymore: the server never trusted it, and
+			// token validity does not depend on an address at all (see class-stamp-token.php).
 			body: 'action=check_stamp' +
 					'&hashStamp=' + encodeURIComponent(hashStamp) +
 					'&hashDifficulty=' + encodeURIComponent(hashDifficulty) +
-					'&clientIP=' + encodeURIComponent(clientIP) +
 					'&hashNonce=' + encodeURIComponent(nonce)
 		})
 		.then(function (response) {
@@ -634,8 +647,15 @@ var gdpr_compliant_recaptcha = {
 
 	initCaptcha : function ( attempt ) {
 		attempt = attempt || 0;
-		fetch(gdprPow.ajaxUrl + '?action=get_stamp', {
+		// Cache-busted and no-store: the answer is a SINGLE-USE token, so a cached copy
+		// served to a second visitor makes both share one token — and one token pays for
+		// at most TOKEN_MAX_USES submissions (see cacheBuster()). A cached token still
+		// verifies (validity no longer depends on the address), it just runs out. The
+		// `_=` parameter keeps `action=get_stamp` followed by `&`, so isPluginCall()
+		// still recognises this as a plugin call.
+		fetch(gdprPow.ajaxUrl + '?action=get_stamp&_=' + gdpr_compliant_recaptcha.cacheBuster(), {
 			method: 'GET',
+			cache: 'no-store',
 			headers: {
 				'Content-Type': 'application/x-www-form-urlencoded'
 			},
@@ -651,7 +671,6 @@ var gdpr_compliant_recaptcha = {
 			var data = gdpr_compliant_recaptcha.parseJsonLoose(text);
 			if (data && typeof data.stamp === 'string' && data.stamp) {
 				gdpr_compliant_recaptcha_stamp = data.stamp;
-				gdpr_compliant_recaptcha_ip = data.client_ip;
 				gdpr_compliant_recaptcha_difficulty = data.difficulty || gdprPow.difficulty;
 				gdpr_compliant_recaptcha.findHash();
 				return;
@@ -860,6 +879,8 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		parseJsonLoose : gdpr_compliant_recaptcha.parseJsonLoose,
 		fieldNameToNestedObject : gdpr_compliant_recaptcha.fieldNameToNestedObject,
 		renewIntervalMs : gdpr_compliant_recaptcha.renewIntervalMs,
-		isGetForm : gdpr_compliant_recaptcha.isGetForm
+		isGetForm : gdpr_compliant_recaptcha.isGetForm,
+		cacheBuster : gdpr_compliant_recaptcha.cacheBuster,
+		isPluginCall : gdpr_compliant_recaptcha.isPluginCall
 	};
 }

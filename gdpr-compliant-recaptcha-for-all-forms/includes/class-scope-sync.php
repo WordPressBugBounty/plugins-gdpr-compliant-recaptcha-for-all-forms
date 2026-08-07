@@ -1,15 +1,16 @@
 <?php
 /**
- * Keeps the monitored-submission scope (POW_EXPLICIT_ACTION / POW_PARAMETER_PATTERN)
- * in sync with the form builders that are actually active.
+ * Keeps the monitored-submission scope (POW_EXPLICIT_ACTION / POW_PARAMETER_PATTERN /
+ * POW_REST_ROUTES) in sync with the form builders that are actually active.
  *
- * Why this exists: those two options are seeded ONCE at install (gated by
+ * Why this exists: those three options are seeded ONCE at install (gated by
  * POW_INSTALLED, see Settings_Menu::prepare_options()) with the defaults for the
  * builders present THEN. A builder installed/activated LATER therefore never entered
  * the scope and its submissions went unchecked — a silent spam gap.
  *
- * Design (reviewed): a LEDGER (POW_SEEDED_ACTIONS/POW_SEEDED_PATTERNS) records which
- * default entries have already been OFFERED. On each admin request the reconcile step
+ * Design (reviewed): a LEDGER (POW_SEEDED_ACTIONS/POW_SEEDED_PATTERNS/POW_SEEDED_ROUTES)
+ * records which default entries have already been OFFERED. On each admin request the
+ * reconcile step
  * adds any default NOT yet in the ledger to the scope (once) and remembers it, but
  * NEVER re-adds an entry the admin removed and NEVER touches the admin's own entries.
  *
@@ -40,7 +41,7 @@ final class Scope_Sync {
 	const ADDED_TRANSIENT = 'gdpr_pow_scope_added';
 
 	/**
-	 * The two synced domains: [ scope-option, ledger-option, defaults-callable ].
+	 * The three synced domains: [ scope-option, ledger-option, defaults-callable ].
 	 *
 	 * @return array<int, array{0:string,1:string,2:callable}>
 	 */
@@ -48,6 +49,7 @@ final class Scope_Sync {
 		return array(
 			array( Option::POW_EXPLICIT_ACTION, Option::POW_SEEDED_ACTIONS, array( Settings_Menu::class, 'get_default_ajax_actions' ) ),
 			array( Option::POW_PARAMETER_PATTERN, Option::POW_SEEDED_PATTERNS, array( Settings_Menu::class, 'get_default_recognition_patterns' ) ),
+			array( Option::POW_REST_ROUTES, Option::POW_SEEDED_ROUTES, array( Settings_Menu::class, 'get_default_rest_routes' ) ),
 		);
 	}
 
