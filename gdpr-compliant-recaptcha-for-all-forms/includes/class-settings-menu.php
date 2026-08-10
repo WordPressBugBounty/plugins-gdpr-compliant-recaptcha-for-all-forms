@@ -113,6 +113,20 @@ class Settings_Menu {
 		// `otter_blocks_submit` action entries here were never registered by either
 		// plugin and are removed rather than fixed.
 
+		// *** Spectra / Ultimate Addons for Gutenberg (uses WordPress AJAX) ***
+		// Verified against the wp.org zip, Spectra 2.20.1: blocks-config/forms/
+		// class-uagb-forms.php registers BOTH `wp_ajax_uagb_process_forms` and
+		// `wp_ajax_nopriv_uagb_process_forms`, so the action a visitor's browser sends
+		// is `uagb_process_forms` (checked, not assumed — see ISSUES.md "Drei Defekte…"
+		// for what a guessed action costs). Spectra posts it via
+		// `fetch( ajaxUrl, { body: new URLSearchParams( … ) } )`, which is also why the
+		// client-side token injection has to understand that body shape — see
+		// scripts/recaptcha-gdpr-pow.js#injectTokenIntoBody() and HANDBUCH §12 cause 5.
+		if ( array_key_exists( 'ultimate-addons-for-gutenberg/ultimate-addons-for-gutenberg.php', $installed_plugins ) ) {
+			$actions[] = 'uagb_process_forms';
+			self::display_admin_notice( __( 'Spectra detected – added action: uagb_process_forms', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
 		// *** Elementor Pro Forms (correct action) ***
 		if ( array_key_exists( 'elementor-pro/elementor-pro.php', $installed_plugins ) ) {
 			$actions[] = 'elementor_pro_forms_send_form';

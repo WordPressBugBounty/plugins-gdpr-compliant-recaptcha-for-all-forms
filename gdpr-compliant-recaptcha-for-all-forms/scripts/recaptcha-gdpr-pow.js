@@ -141,6 +141,18 @@ var gdpr_compliant_recaptcha = {
 		return Date.now().toString( 36 ) + Math.random().toString( 36 ).slice( 2, 10 );
 	},
 
+	// Brand of a request body ("FormData", "URLSearchParams", "Blob", …) via its
+	// Symbol.toStringTag, i.e. what Object.prototype.toString reports. Used INSTEAD of
+	// `instanceof`, which is realm-bound: a body constructed inside an iframe (or by a
+	// bundled polyfill) is not an instance of THIS window's constructor, and the token
+	// injection would silently skip it. Non-objects yield ''.
+	bodyBrand : function (body) {
+		if (!body || typeof body !== 'object') {
+			return '';
+		}
+		return Object.prototype.toString.call(body).slice(8, -1);
+	},
+
 	// Whether an outgoing request is the plugin's own get_stamp/check_stamp Ajax call
 	// (action given either in the URL query string or in the body). These must never
 	// be touched (no token injection) and never count as an auto-renew trigger.
@@ -157,8 +169,9 @@ var gdpr_compliant_recaptcha = {
 		if (!body) {
 			return false;
 		}
-		if (typeof FormData !== 'undefined' && body instanceof FormData) {
-			var action = body.get ? body.get('action') : null;
+		var brand = gdpr_compliant_recaptcha.bodyBrand(body);
+		if ('FormData' === brand || 'URLSearchParams' === brand) {
+			var action = ('function' === typeof body.get) ? body.get('action') : null;
 			return action === 'get_stamp' || action === 'check_stamp';
 		}
 		if (typeof body === 'string') {
@@ -180,17 +193,33 @@ var gdpr_compliant_recaptcha = {
 	},
 
 	// Best-effort injection of the current submission-binding token into an outgoing
-	// POST body. Only recognized shapes are touched (FormData / urlencoded string /
-	// JSON string); anything else is left untouched — the server-side IP fallback
-	// covers what this can't reach.
-	injectTokenIntoBody : function (body) {
-		var token = gdpr_compliant_recaptcha_token;
+	// POST body. Only recognized shapes are touched (FormData / URLSearchParams /
+	// urlencoded string / JSON string); anything else is left untouched — the
+	// server-side IP fallback covers what this can't reach.
+	//
+	// URLSearchParams is NOT optional garnish: `fetch(url, { body: new URLSearchParams(
+	// {...} ) })` is the idiomatic modern way to post an urlencoded form, and Spectra
+	// (`action=uagb_process_forms`) submits exactly that way. Such a body is neither a
+	// FormData nor a string, so before this branch existed it fell through untouched —
+	// no `gdpr_pow_token` in the POST at all, and every submission from those builders
+	// was classified "No proof of work / no token submitted" (5.x regression report).
+	// Their own serialisation cannot save it either: Spectra builds its `form_data`
+	// JSON from getElementById() lookups, so the hidden token field in the <form> never
+	// reaches the payload — the Ajax body is the ONLY route in.
+	//
+	// The optional `token` argument exists for the Node regression tests (the module-
+	// level global is not reachable from outside the file); production callers omit it.
+	injectTokenIntoBody : function (body, token) {
+		token = token || gdpr_compliant_recaptcha_token;
 		if (!token) {
 			return body;
 		}
-		if (typeof FormData !== 'undefined' && body instanceof FormData) {
-			if (!body.has || !body.has('gdpr_pow_token')) {
-				body.append('gdpr_pow_token', token);
+		var brand = gdpr_compliant_recaptcha.bodyBrand(body);
+		if ('FormData' === brand || 'URLSearchParams' === brand) {
+			if ('function' === typeof body.append) {
+				if ('function' !== typeof body.has || !body.has('gdpr_pow_token')) {
+					body.append('gdpr_pow_token', token);
+				}
 			}
 			return body;
 		}
@@ -881,6 +910,8 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		renewIntervalMs : gdpr_compliant_recaptcha.renewIntervalMs,
 		isGetForm : gdpr_compliant_recaptcha.isGetForm,
 		cacheBuster : gdpr_compliant_recaptcha.cacheBuster,
-		isPluginCall : gdpr_compliant_recaptcha.isPluginCall
+		isPluginCall : gdpr_compliant_recaptcha.isPluginCall,
+		bodyBrand : gdpr_compliant_recaptcha.bodyBrand,
+		injectTokenIntoBody : gdpr_compliant_recaptcha.injectTokenIntoBody
 	};
 }

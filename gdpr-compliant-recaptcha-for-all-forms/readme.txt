@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.3.0
+Stable tag: 5.3.1
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.3.1 =
+Maintenance release — see the changelog for details.
 = 5.3.0 =
 Maintenance release — see the changelog for details.
 = 5.2.1 =
@@ -169,6 +171,10 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.3.1 =
+* Added: Spectra forms are now protected automatically, with no manual setup required.
+* Fixed: form builders that submit via URLSearchParams no longer drop the proof-of-work token.
+* Fixed: token injection now detects request bodies created inside iframes.
 = 5.3.0 =
 * New: SureForms and JetFormBuilder are now recognised out of the box.
 * The analysis mode shows the REST route for entries captured with the live overlay too, not just for logged ones.
