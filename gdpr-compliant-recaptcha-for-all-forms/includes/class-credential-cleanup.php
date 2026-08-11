@@ -63,6 +63,11 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Resumable, budgeted redaction of pre-existing credential rows.
  */

@@ -17,41 +17,30 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/pow.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Stateless hashcash helpers.
  */
 final class ProofOfWork {
 
-	/**
-	 * Generous upper bound on a legitimate BROWSER hash rate (hashes/second), used
-	 * to derive the solve-time plausibility threshold below. Real crypto.subtle
-	 * throughput on a top desktop is ~0.2–0.5 MH/s (async overhead per digest call);
-	 * 2 MH/s is deliberately well above that, so the derived threshold is a HARD
-	 * lower bound on the real elapsed time — a legitimate solve can never physically
-	 * beat it, and network latency (which only ADDS) never produces a false positive.
-	 * Native/GPU solvers (SHA-NI, ~ms) fall far below it. See BACKLOG (now HANDBUCH §4).
+	/*
+	 * NO SOLVE-TIME ARITHMETIC LIVES HERE ANY MORE. `H_MAX`, `solve_time_threshold_ms()`
+	 * and `is_implausibly_fast()` are gone together with the solve-time gate they served
+	 * (0a0c403, shipped in 5.3.0, removed on the owner's decision after a Fable review).
+	 *
+	 * Do not reintroduce a timing check without reading BACKLOG.md's "Zeit-Gating gegen
+	 * die GPU-Fraktion — BEWERTET, als harter Gate VERWORFEN" (2026-07-16) and
+	 * handbuch/pow.md first. The two load-bearing reasons: the server can only ever
+	 * measure ISSUE-TO-ARRIVAL, which a native solver inflates for free by sleeping; and
+	 * solve time is exponentially distributed, so any threshold derived from the MEAN
+	 * work misjudges a fixed share (~10-22 %) of perfectly honest clients no matter how
+	 * precise the clock is. What this plugin charges an attacker is the hash work itself
+	 * — difficulty, token binding, use caps — never the clock.
 	 */
-	const H_MAX = 2000000;
-
-	/**
-	 * Minimum plausible server-measured solve time, in milliseconds, for a puzzle of
-	 * the given difficulty: floor( 1000 * 2^d / H_MAX ). A solve reported faster than
-	 * this cannot have done the work at any browser hash rate and triggers a
-	 * difficulty-scaled re-challenge (never a hard block — a single fast solve is
-	 * legitimate luck, solve time being exponentially distributed; only the cumulative
-	 * Erlang time over several rounds is decisive, see ChainToken / HANDBUCH §4).
-	 *
-	 * Below d ~= 16 the threshold drops under real network latency, so the gate can
-	 * never fire there (fail-safe by construction — documented in the settings hint).
-	 *
-	 * Pure arithmetic, no WordPress dependency → unit-tested in ProofOfWorkTest.
-	 *
-	 * @param int $difficulty Number of leading zero bits the PoW targets.
-	 * @return int Threshold in milliseconds (>= 0).
-	 */
-	public static function solve_time_threshold_ms( $difficulty ) {
-		return (int) floor( 1000 * pow( 2, (int) $difficulty ) / self::H_MAX );
-	}
 
 	/**
 	 * The hash function underlying stamps and proof-of-work.

@@ -4,6 +4,11 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Pure, WordPress-independent gibberish detection (BACKLOG "Gibberish-Erkennung:
  * Binnen-Case-Wechsel-Regel").
@@ -46,7 +51,8 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  *   vowel-less junk segments.
  * - A message is flagged at >= MESSAGE_GIBBERISH_THRESHOLD gibberish tokens across
  *   all evaluated fields (a single token can be a legitimate product code) — OR,
- *   independently of that threshold, via the solo-token rule (field datum #3
+ *   independently of that threshold, via the STRONG-token rule (see below) — OR
+ *   via the solo-token rule (field datum #3
  *   2026-07-17: a probe bot posted `MTAIPeUEidcjWAtXT` as the sole content of an
  *   otherwise empty form): a single gibberish token suffices when (a) it is the
  *   ENTIRE value of its field and (b) it is the only SCOREABLE token (>=
@@ -59,11 +65,45 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  *   scoreable word) suppresses the rule — protecting e.g. a support-form field
  *   that legitimately asks for a lone code-like identifier, as long as the rest
  *   of the form is actually filled in (user decision 2026-07-17).
- * - Exemptions: field names that look password-/code-like (is_exempt_field_name())
- *   are skipped entirely — real passwords and API keys ARE random strings, and
- *   this plugin also runs on login forms. URLs and email addresses are stripped
- *   from a field's value before tokenizing, so a domain segment such as
- *   "xKcDqWzP.com" never contributes a bare "xKcDqWzP" token.
+ * - STRONG-token rule (support case fs26, 2026-08-10; Fable review of the BACKLOG
+ *   entry "Stark-Gibberish-Ausnahme von der Solo-Unterdrückung"): a token whose
+ *   inner case-change count reaches STRONG_CASE_CHANGE_THRESHOLD and which is the
+ *   ENTIRE value of its field flags the message even NEXT TO real content, i.e.
+ *   without the solo rule's "form otherwise empty" guard. Rationale: that guard is
+ *   attacker-steerable — a bot appending one extra field with an ordinary word
+ *   suppresses it — so a sufficiently strong single signal must be able to convict
+ *   context-independently. Deliberately restricted to the PURE-LETTER path:
+ *   alphanumeric tokens are base64/session-token shaped, and a foreign hidden
+ *   token posted as a whole field value would otherwise block real submissions.
+ *   The threshold is NOT tunable downwards: measured, "getSQLQueryFromDB" and
+ *   "convertXMLToJSONAndSQL" carry 3 humps each — exactly as many as the
+ *   15-character probe "HQkrYBejaeeGtEG" from the support case. Any threshold that
+ *   catches that probe also convicts legitimate code identifiers, so 5 is where the
+ *   two populations separate, not a calibration accident: the rule catches perfect
+ *   alternation ("hHhHhHhHhH", 5 humps) and long random-case runs (9 humps), and
+ *   deliberately misses the 15-character probe unless a second gibberish token
+ *   joins it.
+ *   Honest about the residual, because a comment that overclaims on a security rule
+ *   is worse than none (Fable review 2026-08-10): 5 is not a boundary NO identifier
+ *   crosses. Acronym-heavy ones do — "convertHTMLToPDFAndSendViaSMTP" measures 5
+ *   humps and IS convicted when it is a whole field value. Identifiers up to 4 humps
+ *   are safe; beyond that the protection is the "entire value of its field"
+ *   condition, not the hump count. Accepted: pasting a single 5-hump acronym
+ *   identifier as a complete field value, with nothing else in that field, is a rare
+ *   shape, and the message is saved and rescuable.
+ * - Exemptions: field names that look password-/code-/captcha-like
+ *   (is_exempt_field_name()) are skipped entirely — real passwords, API keys and
+ *   captcha tokens ARE random strings, and this plugin also runs on login forms.
+ *   URLs are stripped from a field's value before tokenizing, so a domain segment
+ *   such as "xKcDqWzP.com" never contributes a bare "xKcDqWzP" token.
+ * - Email addresses are stripped the same way, but their LOCAL PART is scored
+ *   separately (support case fs26: a bot parking its random strings in email and
+ *   website fields was completely invisible). Local-part tokens contribute to the
+ *   MESSAGE-LEVEL count ONLY — never to the solo rule, never to the strong rule,
+ *   and never to the scoreable count (counting them as "substantial content" would
+ *   suppress the solo rule and thus weaken detection). URL segments stay neutral on
+ *   purpose: video/asset ids ("dQw4w9WgXcQ") are structurally gibberish, so scoring
+ *   them would flag every shared link.
  *
  * Known, deliberately accepted gap: strings with NO case signal at all slip
  * through — pure-lowercase ("xkcdqwzptv") and all-lowercase-plus-digits
@@ -71,6 +111,16 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * lowercase->uppercase humps. See BACKLOG.md history. Conservative on purpose; a
  * consonant-run heuristic was considered and rejected (German compounds/
  * transliterations make it unreliable).
+ *
+ * Construction limit (not a defect, do not "fix"): this is a DETERMINISTIC rule set
+ * in publicly readable source, so an ADAPTING attacker can always evade it — a dot
+ * inside the junk ("HQkrYBej.aeeGtEG") triggers the domain strip, a hyphen splits
+ * the value into sub-MIN_TOKEN_LENGTH fragments, and an extra field carrying an
+ * ordinary word suppresses the solo rule (the STRONG-token rule above closes that
+ * last one for strong signals only). Its value lies with blind mass spam, not with
+ * targeted adversaries — those are what the proof of work is for, which raises the
+ * COST of a submission rather than relying on a secret. See handbuch/detection.md "Grenzen
+ * der Gibberish-Erkennung".
  *
  * No WordPress dependencies (no options, no $wpdb, no hooks) → deterministically
  * unit-testable, see tests/unit/GibberishDetectorTest.php. Stamp::check_submit()
@@ -111,15 +161,33 @@ final class Gibberish_Detector {
 	const MESSAGE_GIBBERISH_THRESHOLD = 2;
 
 	/**
+	 * Inner case-change count at/above which a PURE-LETTER token that is the entire
+	 * value of its field convicts the message on its own — even next to real content,
+	 * i.e. without the solo rule's "form otherwise empty" guard. See the STRONG-token
+	 * rule in the class docblock for why this is 5 and must not be lowered: legitimate
+	 * camelCase identifiers ("getSQLQueryFromDB", "convertXMLToJSONAndSQL") carry 3
+	 * humps, so 4 would already reach into real code pasted in support forms.
+	 */
+	const STRONG_CASE_CHANGE_THRESHOLD = 5;
+
+	/**
 	 * Case-insensitive substrings of a field name that exempt it from scoring
-	 * entirely. Real passwords/API keys/tokens/coupon codes ARE random strings —
-	 * scoring them would produce guaranteed false positives, and this plugin also
-	 * protects login forms. Deliberately the exact list from the BACKLOG entry;
-	 * kept short and specific rather than guessed-broad.
+	 * entirely. Real passwords/API keys/tokens/coupon codes/captcha responses ARE
+	 * random strings — scoring them would produce guaranteed false positives, and
+	 * this plugin also protects login forms. Kept short and specific rather than
+	 * guessed-broad: every entry needs a real support vector before it is added
+	 * (a broader list weakens detection everywhere).
+	 *
+	 * `captcha` was added 2026-08-10 for exactly such a vector (wp.org support case
+	 * fs26): a third-party captcha field posts a long mixed-case token as its whole
+	 * value and was convicted as gibberish. `captcha_code` was already exempt via
+	 * `code`, the bare name `captcha` was not — an arbitrary distinction. The cost is
+	 * ~zero: a field named "captcha" carries a technical value by definition, and a
+	 * bot writing junk into a foreign captcha field fails that captcha anyway.
 	 *
 	 * @var string[]
 	 */
-	const EXEMPT_FIELD_NAME_SUBSTRINGS = array( 'pass', 'pwd', 'token', 'code', 'coupon' );
+	const EXEMPT_FIELD_NAME_SUBSTRINGS = array( 'pass', 'pwd', 'token', 'code', 'coupon', 'captcha' );
 
 	/**
 	 * Count "inner" case changes in a token: the number of positions (starting
@@ -278,6 +346,39 @@ final class Gibberish_Detector {
 	}
 
 	/**
+	 * Candidate tokens taken from the LOCAL PARTS of email addresses in a field value
+	 * (everything before the '@'), tokenized the same way as ordinary content.
+	 *
+	 * Exists because extract_candidate_tokens() strips whole email addresses before
+	 * tokenizing — correct for the domain half (a bare "xKcDqWzP" must not fall out of
+	 * "xKcDqWzP.com"), but it also made the local part invisible. Measured in support
+	 * case fs26: a submission whose email and website fields carried the random
+	 * strings and whose message read like a normal enquiry scored zero tokens.
+	 *
+	 * Callers MUST feed the result into the message-level count only — see the
+	 * class docblock. Deliberately NOT applied to URLs: asset/video ids are
+	 * structurally indistinguishable from junk.
+	 *
+	 * @param string $value Raw field value (caller has established valid UTF-8).
+	 * @return string[] Candidate tokens from local parts (possibly empty).
+	 */
+	private static function extract_email_local_part_tokens( $value ) {
+		$matches = array();
+		preg_match_all( '/([^\s@]+)@[^\s@]+\.[^\s@]+/u', (string) $value, $matches );
+		if ( empty( $matches[1] ) ) {
+			return array();
+		}
+		$tokens = array();
+		foreach ( $matches[1] as $local ) {
+			$parts = preg_split( '/[^\p{L}\p{N}]+/u', $local, -1, PREG_SPLIT_NO_EMPTY );
+			if ( false !== $parts ) {
+				$tokens = array_merge( $tokens, $parts );
+			}
+		}
+		return $tokens;
+	}
+
+	/**
 	 * Split a field value into candidate letters/digits tokens, having first
 	 * stripped URLs and email addresses so a domain segment (e.g. "xKcDqWzP.com")
 	 * never leaves behind a bare gibberish-looking token. Multibyte-safe: bails
@@ -353,29 +454,37 @@ final class Gibberish_Detector {
 	 * informational (it names WHY a message was flagged, see
 	 * Classification_Reason::gibberish()) and does not enter any decision.
 	 *
-	 * @param array $fields     Field name => value (value may itself be an array).
-	 * @param array $exempt_map Lowercased extra exempt field name => true.
-	 * @return array{0: int, 1: int, 2: bool, 3: int} Pure-letter gibberish count,
-	 *                                        alphanumeric gibberish count,
+	 * @param array $fields      Field name => value (value may itself be an array).
+	 * @param array $exempt_map  Lowercased extra exempt field name => true.
+	 * @param array $seen_local  Lowercased gibberish email local-part tokens already
+	 *                           counted, by reference — see the dedup note at the
+	 *                           local-part block below. Message-wide, hence threaded
+	 *                           through the recursion instead of being rebuilt per call.
+	 * @return array{0: int, 1: int, 2: bool, 3: int, 4: bool} Pure-letter gibberish
+	 *                                        count, alphanumeric gibberish count,
 	 *                                        lone-in-its-field gibberish hit,
-	 *                                        scoreable-token count.
+	 *                                        scoreable-token count,
+	 *                                        strong-token hit (see the STRONG-token
+	 *                                        rule in the class docblock).
 	 */
-	private static function scan_gibberish_tokens( $fields, $exempt_map ) {
+	private static function scan_gibberish_tokens( $fields, $exempt_map, &$seen_local ) {
 		$letters   = 0;
 		$alnum     = 0;
 		$lone      = false;
 		$scoreable = 0;
+		$strong    = false;
 		foreach ( $fields as $name => $value ) {
 			$name = (string) $name;
 			if ( self::is_exempt_field_name( $name ) || isset( $exempt_map[ strtolower( $name ) ] ) ) {
 				continue;
 			}
 			if ( is_array( $value ) ) {
-				list( $child_letters, $child_alnum, $child_lone, $child_scoreable ) = self::scan_gibberish_tokens( $value, $exempt_map );
+				list( $child_letters, $child_alnum, $child_lone, $child_scoreable, $child_strong ) = self::scan_gibberish_tokens( $value, $exempt_map, $seen_local );
 				$letters   += $child_letters;
 				$alnum     += $child_alnum;
 				$lone       = $lone || $child_lone;
 				$scoreable += $child_scoreable;
+				$strong     = $strong || $child_strong;
 				continue;
 			}
 			if ( ! is_scalar( $value ) ) {
@@ -399,6 +508,39 @@ final class Gibberish_Detector {
 					}
 				}
 			}
+			// Email LOCAL PARTS, scored separately because extract_candidate_tokens()
+			// strips whole addresses (see extract_email_local_part_tokens()). They feed
+			// the message-level count ONLY: never $field_gibberish (so they can trigger
+			// neither the solo nor the strong rule below) and never $scoreable (a random
+			// local part must not count as "substantial content" and suppress the solo
+			// rule — that would weaken detection instead of strengthening it).
+			//
+			// DEDUPLICATED MESSAGE-WIDE by value (Fable review 2026-08-10). Without this
+			// the same address counted twice and crossed the threshold on its own: an
+			// `email` + `email_confirm` pair is a completely ordinary form layout, and
+			// people quote their own address in the message text. That matters because
+			// the line between "junk" and "legitimate local part" is thinner than
+			// elsewhere — measured, `xXDarkLordXx`, `McDonaldsFanXY`, `TheRealMcCoyABC`
+			// and `DrJShahMDPhD` are all gibberish TOKENS (3 humps, a vowel-less
+			// segment). One such address is tolerable evidence; the same address seen
+			// twice is not twice the evidence, it is the same evidence. Two DIFFERENT
+			// junk addresses still reach the threshold, which is the shape the bot
+			// actually posts.
+			foreach ( self::extract_email_local_part_tokens( (string) $value ) as $local_token ) {
+				if ( ! self::is_gibberish_token( $local_token ) ) {
+					continue;
+				}
+				$key = strtolower( (string) $local_token );
+				if ( isset( $seen_local[ $key ] ) ) {
+					continue;
+				}
+				$seen_local[ $key ] = true;
+				if ( 1 === preg_match( '/^[A-Za-z]+$/', (string) $local_token ) ) {
+					++$letters;
+				} else {
+					++$alnum;
+				}
+			}
 			// Solo-token rule triggers ONLY on a pure-letter gibberish token. A lone
 			// ALPHANUMERIC value as a form's sole content is far more often legitimate
 			// (an order/reference number, a licence key in a field not named *code*),
@@ -409,9 +551,17 @@ final class Gibberish_Detector {
 			if ( 1 === count( $tokens ) && 1 === $field_gibberish
 				&& 1 === preg_match( '/^[A-Za-z]+$/', (string) $tokens[0] ) ) {
 				$lone = true;
+				// STRONG-token rule: the same "entire value of its field" shape, but with
+				// a case-change signal far above what any legitimate camelCase identifier
+				// carries. Unlike $lone this needs no "form otherwise empty" guard, so it
+				// survives the trivial evasion of appending one ordinary word elsewhere.
+				// Pure-letter only — guaranteed by the preg_match above.
+				if ( self::count_inner_case_changes( (string) $tokens[0] ) >= self::STRONG_CASE_CHANGE_THRESHOLD ) {
+					$strong = true;
+				}
 			}
 		}
-		return array( $letters, $alnum, $lone, $scoreable );
+		return array( $letters, $alnum, $lone, $scoreable, $strong );
 	}
 
 	/**
@@ -437,10 +587,15 @@ final class Gibberish_Detector {
 	 *                                     e.g. the request's hashPWFields password
 	 *                                     skip list and POW_SKIP_FIELDS entries, whose
 	 *                                     values are legitimately random strings.
-	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool} Verdict plus
-	 *                                     its components: gibberish-token counts per
-	 *                                     path (their sum is what the message threshold
-	 *                                     sees) and whether the solo-token rule fired.
+	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool, strong: bool,
+	 *               scoreable: int} Verdict plus its components: gibberish-token counts
+	 *                                     per path (their sum is what the message
+	 *                                     threshold sees), whether the solo-token rule
+	 *                                     fired, whether the strong-token rule fired,
+	 *                                     and how many scoreable tokens the form
+	 *                                     carried (the latter two are what make a
+	 *                                     NON-verdict explainable, see
+	 *                                     Classification_Reason::scoring()).
 	 */
 	public static function analyze_message( $fields, $extra_exempt_names = array() ) {
 		if ( ! is_array( $fields ) ) {
@@ -449,6 +604,8 @@ final class Gibberish_Detector {
 				'letters'   => 0,
 				'alnum'     => 0,
 				'solo'      => false,
+				'strong'    => false,
+				'scoreable' => 0,
 			);
 		}
 		$exempt_map = array();
@@ -457,17 +614,21 @@ final class Gibberish_Detector {
 				$exempt_map[ strtolower( $name ) ] = true;
 			}
 		}
-		list( $letters, $alnum, $lone, $scoreable ) = self::scan_gibberish_tokens( $fields, $exempt_map );
+		// Message-wide dedup set for email local parts, see scan_gibberish_tokens().
+		$seen_local = array();
+		list( $letters, $alnum, $lone, $scoreable, $strong ) = self::scan_gibberish_tokens( $fields, $exempt_map, $seen_local );
 		// Solo-token rule: the lone gibberish token is necessarily scoreable
 		// itself, so "scoreable === 1" means NO other scoreable token exists
 		// anywhere in the form — the "form otherwise empty" guard.
 		$solo = $lone && 1 === $scoreable;
 
 		return array(
-			'gibberish' => $solo || ( $letters + $alnum ) >= self::MESSAGE_GIBBERISH_THRESHOLD,
+			'gibberish' => $solo || $strong || ( $letters + $alnum ) >= self::MESSAGE_GIBBERISH_THRESHOLD,
 			'letters'   => $letters,
 			'alnum'     => $alnum,
 			'solo'      => $solo,
+			'strong'    => $strong,
+			'scoreable' => $scoreable,
 		);
 	}
 

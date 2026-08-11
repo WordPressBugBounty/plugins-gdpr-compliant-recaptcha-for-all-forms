@@ -1,17 +1,29 @@
 <?php
 /**
- * Pure, WordPress-independent RE-CHALLENGE chain token (solve-time plausibility,
- * see BACKLOG "Solve-Zeit-Plausibilität" — now HANDBUCH §4).
+ * TRANSITIONAL CLASS — SCHEDULED FOR REMOVAL. Do not build on it.
  *
- * A chain token is issued ONLY as the answer to a verified-but-implausibly-fast
- * base-token solve (StampToken, 92 chars). Possession of a valid chain token
- * therefore proves a PAID first solve. It carries the running state of the
- * re-challenge chain entirely inside an HMAC (no per-client server storage): the
- * cumulative MEASURED solve time so far vs. the cumulative REQUIRED time. The chain
- * is accepted once cumulative measured >= cumulative required (Erlang: the relative
- * variance of the summed exponential solve times shrinks as 1/k, so after 2–3 rounds
- * the verdict is sharp — a single lucky-fast solve proves nothing, native/GPU solvers
- * that keep beating the threshold hang in the escalation loop).
+ * This carried the re-challenge chain of the solve-time gate. That gate was removed on
+ * 2026-08-11 (owner decision after a Fable review): the server can only measure
+ * issue-to-arrival, which a native solver inflates for free by sleeping, and the
+ * threshold misjudged a fixed ~10–22 % share of perfectly honest clients because solve
+ * time is exponentially distributed. It also cost real users their submissions
+ * (HANDBUCH.md §12 cause 6). Reasons in full: handbuch/pow.md, "Kein Solve-Zeit-Gate —
+ * und warum keins zurückkommt", and BACKLOG.md's "Zeit-Gating gegen die GPU-Fraktion",
+ * which said the same thing on 2026-07-16, before the gate was built.
+ *
+ * NOTHING ISSUES A CHAIN TOKEN ANY MORE. The class survives for ONE release so a client
+ * that was mid-chain across the update can still redeem its already-paid solve
+ * (Stamp::check_stamp()'s accept-only branch, Stamp::check_request()'s chain branch).
+ * Removal inventory: BACKLOG.md, "ChainToken-Klasse entfernen".
+ *
+ * The decision arithmetic below (is_accepted / next_difficulty / next_round /
+ * accumulate_ms / should_feed_counter / poll_attempts_for_difficulty) is REFERENCE-FREE
+ * in production code. It is kept only so the class stays internally coherent until it
+ * goes — it is not a toolbox, and a new caller for it would be a regression.
+ *
+ * What it does, for reading the remaining verify path: the token carried the running
+ * chain state entirely inside an HMAC (no per-client server storage) — cumulative
+ * MEASURED solve time vs. cumulative REQUIRED time, accepted once measured >= required.
  *
  * Fixed-width, purely hex (so check_stamp()'s [^a-zA-Z0-9] sanitisation never mangles
  * it — decimal digits are a subset of hex). CURRENT FORMAT — v2, 120 chars:
@@ -50,6 +62,11 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/pow.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Stateless re-challenge chain token helpers.
  */
@@ -76,10 +93,9 @@ final class ChainToken {
 	const MAX_DIFFICULTY = 99;
 
 	/**
-	 * Realistic crypto.subtle browser hash rate (H/s) used to size the adaptive poll
-	 * window — DISTINCT from ProofOfWork::H_MAX (the generous gate bound). Here we want
-	 * the EXPECTED solve time to hold a submission's poll open long enough, so a
-	 * realistic (not worst-case-fast) rate is correct.
+	 * Sized the adaptive poll window of the removed re-challenge chain. REFERENCE-FREE —
+	 * check_request() uses the standard poll budget now, and ProofOfWork::H_MAX (which
+	 * this used to be contrasted with) no longer exists either. Goes with the class.
 	 */
 	const POLL_HASHRATE = 500000;
 

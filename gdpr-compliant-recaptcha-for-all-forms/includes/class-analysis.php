@@ -4,6 +4,11 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Class Analysis: Direct-analysis mode — injects a live front-end overlay (for admins,
  * when POW_DIRECT_ANALYSIS_MODE is on) to capture unrecognized forms and add

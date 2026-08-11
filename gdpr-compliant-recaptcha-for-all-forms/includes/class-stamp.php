@@ -4,6 +4,14 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene) — als einzige Klasse ueber drei Bereiche verteilt:
+//   handbuch/pow.md        Token-Ausgabe, check_stamp, check_request, get_client_ip
+//   handbuch/gate.md       Konstruktor-Gate, run(), Login-Pfad, Signatur-Matcher
+//   handbuch/detection.md  check_submit(), save_message(), Fail2Ban
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Class Stamp: Each instance of that class is intended to hold the Stamp and all checks around it
  *
@@ -71,6 +79,21 @@ class Stamp {
 	 * flips $plugin_spam sets it, nothing downstream overwrites it.
 	 */
 	private $classification_reason;
+
+	/**
+	 * The gibberish SCORING string for a submission that came out clean — a
+	 * Classification_Reason::scoring() value, or null. The exact counterpart of
+	 * $classification_reason and mutually exclusive with it: one of the two is set,
+	 * never both. It exists because the reason taxonomy structurally cannot express a
+	 * non-block (absence of a reason means clean), which left "why was this NOT
+	 * flagged?" unanswerable — the question every near-miss support case turns on.
+	 *
+	 * Just as observational as the reason: nothing reads it to decide anything. It is
+	 * persisted as the technical field `_gdpr_scoring` in save_message(), and a clean
+	 * message is only saved at all under the "Save clean messages"/analysis opt-ins —
+	 * so this adds no storage whatsoever in normal operation.
+	 */
+	private $clean_scoring;
 
 	/**
 	 * Which PoW/token path failed in check_request() — one of the
@@ -436,7 +459,65 @@ class Stamp {
 		foreach ( Credential_Learning::learned_names() as $learned ) {
 			$names[] = $learned;
 		}
-		return $names;
+
+		/**
+		 * Filters the field names exempted from gibberish/content scoring.
+		 *
+		 * The plugin's FIRST public filter, added 2026-08-10 for the wp.org support case
+		 * that asked for exactly this (fs26): the admin-facing list (POW_SKIP_FIELDS) is
+		 * site-scoped free text — the right tool for a site owner, the wrong one for a
+		 * developer who needs the decision to follow form logic. This hook is that second
+		 * half, and it is deliberately SERVER-SIDE, unlike the `hashPWFields` marker
+		 * above, which arrives with the request and is therefore attacker-supplied
+		 * (see ISSUES.md).
+		 *
+		 * Being the first filter makes this an API commitment, so it carries the
+		 * plugin's established `gdpr_pow_` prefix (Option::PREFIX) rather than a new
+		 * one. The return value is normalised by normalize_exempt_names(): a filter
+		 * returning garbage degrades to the unfiltered list instead of throwing or —
+		 * far worse for a security plugin — silently exempting everything.
+		 *
+		 * @since 5.4.0
+		 *
+		 * @param string[] $names  Field names exempted from gibberish scoring. Matched
+		 *                         case-insensitively at any nesting level.
+		 * @param mixed    $fields The submission's field map (pre strip_plugin_fields);
+		 *                         request-derived, so not guaranteed to be an array.
+		 */
+		$filtered = apply_filters( 'gdpr_pow_gibberish_exempt_fields', $names, $fields );
+
+		return self::normalize_exempt_names( $filtered, $names );
+	}
+
+	/**
+	 * Normalise whatever a filter returned into a usable exempt-name list.
+	 *
+	 * Pure and separate from the hook site on purpose. A filter is third-party code
+	 * that may return anything at all, and in a security plugin the failure direction
+	 * matters: a malformed return must never widen the exemption list, because a wider
+	 * list means LESS scoring. Hence non-array input falls back to the unfiltered
+	 * names, and non-string entries are dropped rather than coerced — a stringified
+	 * array or object would become a nonsense field name that silently matches nothing
+	 * (harmless) or something (not harmless).
+	 *
+	 * Being a separate pure function also keeps it directly unit-testable without a
+	 * WordPress runtime (tests/unit/StampExemptNamesTest.php).
+	 *
+	 * @param mixed    $filtered The filter's return value — untrusted, any type.
+	 * @param string[] $fallback The unfiltered list, used when $filtered is unusable.
+	 * @return string[] Non-empty string field names.
+	 */
+	public static function normalize_exempt_names( $filtered, $fallback ) {
+		if ( ! is_array( $filtered ) ) {
+			return $fallback;
+		}
+		$clean = array();
+		foreach ( $filtered as $name ) {
+			if ( is_string( $name ) && '' !== $name ) {
+				$clean[] = $name;
+			}
+		}
+		return $clean;
 	}
 
 	private function check_existing_patterns() {
@@ -479,7 +560,7 @@ class Stamp {
 	 * the three places where WordPress' own routing is case-INsensitive and this
 	 * class has to follow it.
 	 *
-	 * SAME GATE AS EVERY OTHER SIGNATURE CLASS (HANDBUCH.md §5): this runs behind
+	 * SAME GATE AS EVERY OTHER SIGNATURE CLASS (handbuch/gate.md): this runs behind
 	 * the constructor's whitelist gate, which does not distinguish frontend from
 	 * admin traffic — so once a route is configured, a POST to it is evaluated
 	 * whether it came from a visitor or a logged-in admin (e.g. the block editor's
@@ -749,6 +830,7 @@ class Stamp {
 		$hook_name                   = current_filter();
 		$this->plugin_spam           = false;
 		$this->classification_reason = null;
+		$this->clean_scoring         = null;
 
 		// Process the spam check
 		if ( ! ( $this->check_request() ) ) {
@@ -856,6 +938,8 @@ class Stamp {
 			'letters'   => 0,
 			'alnum'     => 0,
 			'solo'      => false,
+			'strong'    => false,
+			'scoreable' => 0,
 		);
 		if ( $gdpr_fields && ! $this->plugin_spam ) {
 			$analysis = Gibberish_Detector::analyze_message(
@@ -869,7 +953,8 @@ class Stamp {
 			$this->classification_reason = Classification_Reason::gibberish(
 				$analysis['letters'],
 				$analysis['alnum'],
-				$analysis['solo']
+				$analysis['solo'],
+				$analysis['strong']
 			);
 			// Feed the same under-attack wave counter as a real PoW/token failure —
 			// but only in the real (non-simulated) mode, matching the existing
@@ -926,6 +1011,28 @@ class Stamp {
 			$this->plugin_spam           = true;
 			$quarantine_only_spam        = true;
 			$this->classification_reason = Classification_Reason::CODE_QUARANTINE;
+		}
+
+		// WHY this submission was NOT flagged — the counterpart of the reason above, and
+		// the one question the reason taxonomy cannot answer (absence of a reason means
+		// clean, so a near-miss looks exactly like a message nothing ever looked at).
+		// Recorded ONLY for a submission that survived every check, hence after the
+		// quarantine block: anything that flipped $plugin_spam already carries a reason,
+		// and the two are mutually exclusive by construction.
+		//
+		// Costs no storage in normal operation: save_message() only ever persists a
+		// clean submission under POW_SAVE_CLEAN or as a type-4 analysis row, both
+		// explicit admin opt-ins. The value is derived purely from the plugin's own
+		// scoring counts — it contains no submitted content and no visitor data, so it
+		// carries nothing the GDPR positioning would object to.
+		if ( $gdpr_fields && ! $this->plugin_spam ) {
+			$this->clean_scoring = Classification_Reason::scoring(
+				$analysis['letters'],
+				$analysis['alnum'],
+				$analysis['solo'],
+				$analysis['strong'],
+				$analysis['scoreable']
+			);
 		}
 
 		// Auto-echo record (BACKLOG "Auto-Echo-Sperre mit TTL"): once a submission is
@@ -1334,6 +1441,16 @@ class Stamp {
 				$technical_fields['_gdpr_reason'] = $this->classification_reason;
 			}
 
+			// WHY this submission was NOT classified as spam (null = it was → no row at
+			// all; the two are mutually exclusive, see $clean_scoring). Same conventions
+			// as _gdpr_reason above in every respect: additive, rgm_posted = false, and
+			// the leading underscore that makes Echo_Values::is_technical_key() treat it
+			// as technical, so the scoring string can never itself seed or match an
+			// echo/wildcard value.
+			if ( null !== $this->clean_scoring ) {
+				$technical_fields['_gdpr_scoring'] = $this->clean_scoring;
+			}
+
 			// WHICH REST route this submission targeted (REST_ROUTES_PLAN.md AP5), or no
 			// row at all on a non-REST request — same convention as _gdpr_reason above:
 			// additive, rgm_posted = false, leading underscore (Echo_Values::is_technical_key()
@@ -1635,9 +1752,9 @@ class Stamp {
 	 * the PHP worker for 5s under a spam flood.
 	 *
 	 * @param callable $consume      Zero-arg callable returning affected-rows (int).
-	 * @param int      $max_attempts Attempt budget (default 20 ≈ 2s). A valid chain
-	 *                               token widens this (ChainToken::poll_attempts_for_difficulty)
-	 *                               to bridge an in-flight re-challenge round.
+	 * @param int      $max_attempts Attempt budget (default 20 ≈ 2s). Every caller uses
+	 *                               that default since the adaptive, difficulty-scaled
+	 *                               window went with the re-challenge chain.
 	 * @return int Affected rows from the winning attempt (0 if the budget ran out).
 	 */
 	private function poll_for_row( callable $consume, $max_attempts = 20 ) {
@@ -1691,12 +1808,13 @@ class Stamp {
 
 		$token_length = strlen( $token );
 
-		// Chain-token path (120 = v2, 112 = in-flight legacy): a submission carrying a
-		// VALID re-challenge chain token gets an adaptive, difficulty-scaled poll window
-		// (up to 8s) to bridge an in-flight re-challenge round. Reachable ONLY after a
-		// paid first solve (a chain token is issued only in response to a verified fast
-		// solve), so the protocol-blind mass never gets this longer hold — no free
-		// worker-blocking vector.
+		// TRANSITIONAL chain-token path (120 = v2, 112 = in-flight legacy), one release
+		// long: rows keyed on a chain token still exist until their window expires, and a
+		// client that was mid-chain across the update still posts one. Re-challenges are
+		// no longer issued anywhere (see check_stamp()), so there is no in-flight round
+		// left to bridge — this uses the SAME standard poll window as the base-token path
+		// below. That also retires the adaptive, difficulty-scaled window (up to 8s per
+		// worker), whose amortisability across addresses was a BACKLOG concern of its own.
 		if ( ChainToken::LENGTH_V2 === $token_length || ChainToken::LENGTH === $token_length ) {
 			$now_ms      = (int) round( microtime( true ) * 1000 );
 			$chain_is_v2 = ChainToken::LENGTH_V2 === $token_length;
@@ -1705,18 +1823,15 @@ class Stamp {
 				: ChainToken::verify( $token, $this->get_client_ip(), $salt, $now_ms, $time_window );
 
 			if ( $chain_valid ) {
-				$parsed   = $chain_is_v2 ? ChainToken::parse_v2( $token ) : ChainToken::parse( $token );
-				$attempts = ChainToken::poll_attempts_for_difficulty( $parsed ? $parsed['difficulty'] : 0 );
-				$valid    = $this->poll_for_row(
+				$valid = $this->poll_for_row(
 					function () use ( $token, $time_window ) {
 						return $this->consume_token_row( $token, $time_window );
-					},
-					$attempts
+					}
 				);
 				if ( $valid ) {
 					return $valid;
 				}
-				// Chain row never landed within the (extended) window — one IP-fallback
+				// Chain row never landed within the window — one IP-fallback
 				// consumption, no further polling, mirroring the base token path below.
 				// Record WHY this path failed before the fallback attempt: if the
 				// fallback still succeeds, check_request() returns true and
@@ -1852,66 +1967,55 @@ class Stamp {
 				wp_die();
 			}
 
-			// Solve-time plausibility gate (BACKLOG "Solve-Zeit-Plausibilität", now
-			// HANDBUCH §4). issued_at is HMAC-bound (StampToken), so the elapsed span is
-			// unforgeable and — since network latency only ADDS — a hard LOWER bound on
-			// the real solve time. The base token has 1-second granularity (deliberately
-			// coarse); at high difficulties this quantises ~1/5 of legit solves to 0ms,
-			// costing them one invisible re-challenge round (accepted per spec).
-			$measured_ms = max( 0, time() - $parsed['issued_at'] ) * 1000;
-			$threshold   = ProofOfWork::solve_time_threshold_ms( $token_difficulty );
-			if ( $measured_ms < $threshold ) {
-				// Too fast — do NOT insert. A single fast solve is legitimate luck
-				// (memoryless exponential distribution), so never block: issue a
-				// difficulty-scaled re-challenge chain token instead. KK=1 → this first
-				// re-challenge does NOT feed the under-attack counter (see should_feed_counter).
-				$this->print_debug_information( 'Solve too fast — issuing re-challenge.' );
-				$d1       = ChainToken::next_difficulty( $token_difficulty );
-				$now_ms   = (int) round( microtime( true ) * 1000 );
-				$required = $threshold + ProofOfWork::solve_time_threshold_ms( $d1 );
-				// Freshly issued chains are always v2: fingerprint of the CURRENT address
-				// (diagnosis), never the address itself (validity).
-				$chain = ChainToken::create_v2(
-					ChainToken::fingerprint( $this->get_client_ip(), get_option( Option::POW_SALT ) ),
-					get_option( Option::POW_SALT ),
-					$d1,
-					$now_ms,
-					1,
-					$measured_ms,
-					$required,
-					bin2hex( random_bytes( 8 ) )
-				);
-				wp_send_json(
-					array(
-						'rechallenge' => true,
-						'stamp'       => $chain,
-						'difficulty'  => $d1,
-					)
-				);
-				// wp_send_json() sends the body and calls wp_die() — execution stops here.
-			}
-
-			// Plausible solve → fall through, persist the base token below and answer
-			// {accepted:true}.
+			// NO SOLVE-TIME GATE HERE ANY MORE — and none may come back. A verified solve
+			// is persisted, full stop.
+			//
+			// The gate that used to sit here (0a0c403, shipped in 5.3.0) measured
+			// `time() - issued_at` and answered "too fast" with a harder re-challenge
+			// chain. It was removed on the owner's decision after a Fable review; the
+			// reasoning, in short:
+			//   - The server measures ISSUE-TO-ARRIVAL, not compute time. A native solver
+			//     that cracks the puzzle in microseconds simply SLEEPS before answering.
+			//     Waiting is free and parallelisable, so the gate only ever caught clients
+			//     that were fast AND protocol-naive — and those already die in
+			//     check_request(), never having parsed the re-challenge at all.
+			//   - Solve time is exponentially distributed, so an HONEST client beats the
+			//     mean-work threshold with probability 1 - exp(-H_real/H_MAX) ~ 10-22 %,
+			//     independent of difficulty. The gate therefore had a built-in false
+			//     positive rate that only network latency hid at low difficulties.
+			//   - It cost real users delivery: the client adopts the not-yet-solved chain
+			//     token as its submission token, so a submission sent during that round
+			//     found no stamp row and was failed closed (HANDBUCH.md §12 cause 6, the
+			//     5.3.1 Spectra follow-up report).
+			// BACKLOG.md said all of this on 2026-07-16 ("Zeit-Gating … als harter Gate
+			// VERWORFEN", breaking point (b) "Pre-Solve-and-Age") before the gate was built
+			// the same afternoon. Read that entry before proposing timing again.
+			// Pinned by StampWiringTest and tests/integration/cases/no-solve-time-gate.mjs.
 		} elseif ( ChainToken::LENGTH_V2 === $stamp_length || ChainToken::LENGTH === $stamp_length ) {
-			// Re-challenge chain path (solve-time plausibility). The sanitisation above
-			// already keeps only [a-zA-Z0-9]; a chain token is pure hex, so it survives.
+			// TRANSITIONAL chain path — accept-only, one release long (same pattern as the
+			// 92/112 legacy token formats). Chains are no longer issued anywhere, but a
+			// client that was mid-chain when the site updated still holds a valid chain
+			// token and must be able to redeem it instead of silently losing its paid
+			// solve. Verify, check the PoW target, insert — never re-challenge, never
+			// feed a counter. Removal together with the ChainToken class, see BACKLOG.
+			//
+			// The sanitisation above already keeps only [a-zA-Z0-9]; a chain token is pure
+			// hex, so it survives.
 			$chain_is_v2 = ChainToken::LENGTH_V2 === $stamp_length;
 			$parsed      = $chain_is_v2 ? ChainToken::parse_v2( $stamp ) : ChainToken::parse( $stamp );
 			$dd          = $parsed ? (int) $parsed['difficulty'] : null;
 
 			// Difficulty gate mirrors the base-token path: the DD is HMAC-bound inside the
 			// chain token, so a client cannot lower it — accept anything from the current
-			// base upwards (base/boost may have shifted between rounds, and every chain
-			// round deliberately escalates one bit above the round before it).
+			// base upwards (an in-flight chain escalated a bit above the base it started
+			// from, and the base/boost may have shifted since).
 			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) ) {
 				$this->print_debug_information( 'Chain token difficulty below base, or unparseable.' );
 				wp_die();
 			}
 
 			// v2 verifies integrity only (no IP — a chain spans several requests by
-			// construction); v1 keeps its IP-bound verify() for in-flight chains. Both
-			// issuing and measuring use microtime milliseconds here.
+			// construction); v1 keeps its IP-bound verify() for in-flight chains.
 			$now_ms      = (int) round( microtime( true ) * 1000 );
 			$chain_valid = $chain_is_v2
 				? ChainToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) )
@@ -1928,53 +2032,11 @@ class Stamp {
 				wp_die();
 			}
 
-			$measured_ms = max( 0, $now_ms - $parsed['issued_at_ms'] );
-
-			if ( ChainToken::is_accepted( $parsed['measured_ms'], $measured_ms, $parsed['required_ms'] ) ) {
-				// Cumulative measured time reached the required Erlang budget → accept:
-				// persist the chain token as rgs_stamp below (same duplicate/replay
-				// protection as the base-token path) and answer {accepted:true}.
-				// Pure arithmetic on HMAC-bound numbers — the rounds of a chain may well
-				// arrive from different addresses (rotation), which is irrelevant here.
-				$this->print_debug_information( 'Chain accepted (cumulative time sufficient).' );
-			} else {
-				// Still too fast in aggregate → next re-challenge round, NO insert.
-				$d_next = ChainToken::next_difficulty( $dd );
-				$k_next = ChainToken::next_round( $parsed['round'] );
-				$ss     = ChainToken::accumulate_ms( $parsed['measured_ms'], $measured_ms );
-				$qq     = ChainToken::accumulate_ms( $parsed['required_ms'], ProofOfWork::solve_time_threshold_ms( $d_next ) );
-				// Continued chains are re-issued as v2, even when the incoming round was a
-				// v1 token — the fingerprint is diagnosis, the chain state is the HMAC.
-				$chain = ChainToken::create_v2(
-					ChainToken::fingerprint( $this->get_client_ip(), get_option( Option::POW_SALT ) ),
-					get_option( Option::POW_SALT ),
-					$d_next,
-					$now_ms,
-					$k_next,
-					$ss,
-					$qq,
-					bin2hex( random_bytes( 8 ) )
-				);
-				// Feed the site-wide under-attack counter ONLY from round 2 on (KK>=2 in
-				// the freshly issued token) — a sharp verdict after >=2 rounds, never on
-				// the legitimate first lucky solve. check_stamp has no simulation
-				// semantics (that is a check_submit concern), so the KK>=2 gate suffices.
-				if ( ChainToken::should_feed_counter( $k_next ) ) {
-					$this->increment_spam_counter();
-				}
-				$this->print_debug_information( 'Chain continues — issuing next re-challenge.' );
-				wp_send_json(
-					array(
-						'rechallenge' => true,
-						'stamp'       => $chain,
-						'difficulty'  => $d_next,
-					)
-				);
-				// wp_send_json() sends the body and calls wp_die() — execution stops here.
-			}
+			$this->print_debug_information( 'In-flight chain token redeemed (accept-only).' );
 		} else {
 			// The pre-AP3 64-char bucket stamp is gone (it was the last path that believed
-			// a POSTed IP, and the only one without a solve-time gate; a stamp in that
+			// a POSTed IP, and back then the only one without a solve-time gate — a gate
+			// that no longer exists anywhere; a stamp in that
 			// format could only come from a >1-year-old cache copy and would be expired
 			// anyway).
 			$this->print_debug_information(

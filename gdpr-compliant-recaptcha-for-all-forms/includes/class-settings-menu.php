@@ -3,6 +3,11 @@
 namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
+
+// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
 /**
  * Class Settings_Menu: Renders and saves the plugin's settings page (status strip,
  * pill tabs, option cards with help popovers — see options_page()).
@@ -304,7 +309,7 @@ class Settings_Menu {
 	 *   detection notice — the pattern getter already announces CF7).
 	 *
 	 * NEVER add a bare namespace like `wp/v2` here: this option is read behind the
-	 * same triage gate as every other signature class (HANDBUCH.md §5), which also
+	 * same triage gate as every other signature class (handbuch/gate.md), which also
 	 * sees the block editor's own REST save (`/wp/v2/posts/<id>`) — seeding that
 	 * namespace would make the plugin block post saves in wp-admin.
 	 *
@@ -716,7 +721,7 @@ class Settings_Menu {
 				__( "Stores the submitter's IP address with saved spam messages (not GDPR-compliant).", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_SKIP_FIELDS             => new Option(
-				__( 'Skip fields from saving', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				__( 'Skip fields from saving and spam analysis', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
 				sprintf(
@@ -741,6 +746,11 @@ class Settings_Menu {
                     <br><u>Given field name:</u> <code>pwd</code>
                     <br>
                     <br><u>Line to add:</u> <code>/specific_site/:pwd</code>
+                    <br>
+                    <br><strong>Also exempts from spam analysis:</strong> fields on this list are additionally excluded from content analysis, in particular gibberish detection. This is the right place for fields with technical values (captcha tokens, license/serial numbers, API keys) that get misclassified as 'Gibberish content'.
+                    <br><strong>Important difference:</strong> for saving, an entry only applies to the given site (<code>site:field-name</code>). For spam analysis, the site part is ignored — the field name is exempted <strong>across all sites</strong>.
+                    <br>Fields whose name contains <code>pass</code>, <code>pwd</code>, <code>token</code>, <code>code</code>, <code>coupon</code>, or <code>captcha</code> are already exempted automatically and don't need to be listed here.
+                    <br>Developers can grant the same exemption in PHP via the <code>gdpr_pow_gibberish_exempt_fields</code> filter (signature: <code>apply_filters( 'gdpr_pow_gibberish_exempt_fields', array \$names, array|mixed \$fields )</code>, must return an array of field-name strings).
                     ",
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
@@ -749,7 +759,7 @@ class Settings_Menu {
 				),
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🚫▭',
-				__( 'Excludes specific fields, such as passwords, from being saved with messages.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( 'Excludes specific fields, such as passwords, from being saved with messages and from spam/gibberish analysis.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_CREDENTIAL_FIELDS       => new Option(
 				__( 'Credential fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -980,7 +990,7 @@ class Settings_Menu {
                         <br>
                         <br><strong>Recommended base: 15–16.</strong> Under-attack mode temporarily adds %d bits on top of your base difficulty, so the value you set here is what every visitor pays in normal operation — the table above shows what each step costs them.
                         <br>
-                        <br>The built-in solve-time plausibility gate (which re-challenges implausibly fast, likely non-browser solves) is effectively inactive below base ~16, where its threshold falls under normal network latency — another reason to keep the base at 15–16; from 16 upward it starts yielding a useful signal.",
+                        <br>Every visitor solves exactly one puzzle at the difficulty you set here. Earlier versions could hand out a second, harder puzzle when a solve looked implausibly fast; that was removed, because how long a solve takes says nothing reliable about who solved it.",
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
 					Stamp::UNDER_ATTACK_BONUS

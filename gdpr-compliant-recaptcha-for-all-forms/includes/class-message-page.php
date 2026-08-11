@@ -4,6 +4,11 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
+// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
+
 /**
  * Class Message_Page: Reflects the module for the administration of messages
  */
@@ -347,6 +352,19 @@ class Message_Page {
 			}
 		}
 
+		// Gibberish scoring components (technical row `_gdpr_scoring`, written by
+		// Stamp::save_message() for non-spam messages only — it never coexists with
+		// `_gdpr_reason`). Same carve-out as the reason/route lines above: rendered
+		// once as a labelled line, the raw row is skipped in the loop below. Purpose:
+		// today there is no way to see WHY a message was NOT flagged.
+		$scoring_value = null;
+		foreach ( $details as $detail ) {
+			if ( '_gdpr_scoring' === $detail->rgd_attribute ) {
+				$scoring_value = (string) $detail->rgd_value;
+				break;
+			}
+		}
+
 		$html_details = '';
 		if ( null !== $reason_value ) {
 			$html_details .= '<p class="gdpr-reason-line">'
@@ -377,6 +395,12 @@ class Message_Page {
 				. esc_html__( 'Monitor this route', 'gdpr-compliant-recaptcha-for-all-forms' )
 				. '</button></p>';
 		}
+		if ( null !== $scoring_value ) {
+			$html_details .= '<p class="gdpr-scoring-line">'
+				. esc_html__( 'Not classified as spam. Content scoring:', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. ' <code>' . esc_html( $scoring_value ) . '</code>'
+				. '</p>';
+		}
 		$html_details .= '
             <table class="widefat striped message">
                 <thead>
@@ -406,8 +430,8 @@ class Message_Page {
 		$learned_names = Credential_Learning::learned_names();
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
-			// Already shown as the badge/route line above — do not repeat as a raw row.
-			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute ) {
+			// Already shown as the badge/route/scoring line above — do not repeat as a raw row.
+			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute || '_gdpr_scoring' === $detail->rgd_attribute ) {
 				continue;
 			}
 			$html_details .= '<tr class="table-body">';

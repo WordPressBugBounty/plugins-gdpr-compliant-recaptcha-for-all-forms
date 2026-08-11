@@ -21,14 +21,25 @@
  *   echo_lock              A core value matched an auto-recorded recent spam value.
  *   wildcard               A user-content field matched an admin-configured {"*":"…"} pattern.
  *   quarantine             Under-attack quarantine held an otherwise-clean submission.
- *   gibberish:letters=<n>,alnum=<n>,solo=<0|1>
+ *   gibberish:letters=<n>,alnum=<n>,solo=<0|1>[,strong=1]
  *                          Gibberish detection fired; the detail carries the scoring
  *                          components from Gibberish_Detector::analyze_message().
+ *                          `strong=1` is appended only when the strong-token rule
+ *                          fired, so labels written before 2026-08-10 stay
+ *                          byte-identical to what the builder produces today.
  *
  * There is deliberately NO reason for a clean message: absence of a reason means
  * clean. Callers must therefore store null/nothing rather than inventing an "ok"
  * code — a code for cleanliness would be indistinguishable from an unlabelled
  * legacy row in the corpus.
+ *
+ * The one thing that invariant costs is the ability to explain a NON-block, so that
+ * lives in a separate datum with its own grammar and its own storage field:
+ *
+ *   scoring:letters=<n>,alnum=<n>,solo=<0|1>,strong=<0|1>,scoreable=<n>
+ *                          Written to `_gdpr_scoring` (never `_gdpr_reason`) for a
+ *                          message that passed every check, and only when such a
+ *                          message is saved at all. See scoring().
  *
  * These strings are CORPUS LABELS: they end up in stored message rows and in
  * exported training data, so their stability matters more than their elegance.
@@ -45,6 +56,11 @@
 namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
+
+// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
+// Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
+// nicht in den Index.
 
 /**
  * Stateless classification-reason strings and their UI labels.
@@ -73,6 +89,15 @@ final class Classification_Reason {
 	/** Gibberish detection fired — detail carries the scoring components. */
 	const CODE_GIBBERISH = 'gibberish';
 
+	/**
+	 * NOT a reason. The code of the separate `_gdpr_scoring` datum written for messages
+	 * that were NOT classified as spam — see scoring(). Kept in this class because it
+	 * shares the `code:detail` grammar and the same pure-string discipline, but it must
+	 * never appear in `_gdpr_reason`: absence of a reason means clean, and that
+	 * invariant is what the whole taxonomy rests on.
+	 */
+	const CODE_SCORING = 'scoring';
+
 	/** No proof-of-work token was posted at all (the protocol-blind mass). */
 	const NO_POW_NO_TOKEN = 'no_pow:no_token';
 
@@ -82,7 +107,7 @@ final class Classification_Reason {
 	/** Token verified, but no solved-PoW row was found within the poll window. */
 	const NO_POW_TOKEN_NO_ROW = 'no_pow:token_no_row';
 
-	/** Chain token verified, but its row never landed within the extended window. */
+	/** Chain token verified, but no solved-PoW row was found for it. Transitional, see handbuch/pow.md. */
 	const NO_POW_CHAIN_NO_ROW = 'no_pow:chain_no_row';
 
 	/**
@@ -129,7 +154,7 @@ final class Classification_Reason {
 		self::NO_POW_NO_TOKEN         => 'No token was submitted at all. Either the plugin\'s JavaScript did not run on that page, or its hidden field never made it into the submitted data.',
 		self::NO_POW_INVALID_TOKEN    => 'A token was submitted, but it was not valid. A token is signed by this site and expires after a short time window, so this usually means a cache handed out an expired one (a full-page cache, a hoster or CDN cache in front of the token request, or an optimisation layer) — or it was forged.',
 		self::NO_POW_TOKEN_NO_ROW     => 'The token itself was valid, but the solved puzzle never arrived in time. The browser computes it and posts it back separately, so this points at that request being blocked, failing, or arriving too late.',
-		self::NO_POW_CHAIN_NO_ROW     => 'The follow-up token was valid, but its solved puzzle never arrived within the extended window. Same causes as above, one round later.',
+		self::NO_POW_CHAIN_NO_ROW     => 'A follow-up token from an older version of this plugin was valid, but no solved puzzle was found for it. Follow-up tokens are no longer issued; a visitor still holding one from before the update can hit this once. Same causes as above.',
 		self::NO_POW_TOKEN_IP_CHANGED => 'The token was valid, but it was redeemed from a different address than the one it was issued to, and no solved puzzle was found for it. That combination points at a cache or proxy in front of the site: several visitors share one cached token, or the visitor\'s address changes between requests. Check the "Trusted proxies" setting.',
 	);
 
@@ -137,21 +162,68 @@ final class Classification_Reason {
 	 * Build the gibberish reason string from the scoring components reported by
 	 * Gibberish_Detector::analyze_message().
 	 *
-	 * Detail format (stable): `letters=<n>,alnum=<n>,solo=<0|1>` — the number of
-	 * gibberish tokens found on the pure-letter path, the number found on the
-	 * alphanumeric path, and whether the solo-token rule fired (a single gibberish
-	 * token as a form's entire content). Counts are clamped at 0 so a malformed
-	 * caller value can never produce a negative label.
+	 * Detail format (stable): `letters=<n>,alnum=<n>,solo=<0|1>[,strong=1]` — the number
+	 * of gibberish tokens found on the pure-letter path, the number found on the
+	 * alphanumeric path, whether the solo-token rule fired (a single gibberish token as
+	 * a form's entire content), and — appended only when it fired — whether the
+	 * STRONG-token rule did (a single token whose case-change signal is far above any
+	 * legitimate camelCase identifier, which convicts even next to real content).
+	 * Counts are clamped at 0 so a malformed caller value can never produce a negative
+	 * label.
+	 *
+	 * `strong` is APPENDED rather than always present, on purpose: these strings are
+	 * corpus labels living in stored rows and exported training data, and every
+	 * `gibberish:` label written before 2026-08-10 lacks the component. Appending only
+	 * on a hit keeps every previously written label byte-identical to what this builder
+	 * produces today, so old and new rows stay directly comparable.
 	 *
 	 * @param int  $letters Gibberish tokens found on the pure-letter path.
 	 * @param int  $alnum   Gibberish tokens found on the alphanumeric path.
 	 * @param bool $solo    Whether the solo-token rule fired.
+	 * @param bool $strong  Whether the strong-token rule fired.
 	 * @return string Reason string, e.g. "gibberish:letters=2,alnum=0,solo=0".
 	 */
-	public static function gibberish( $letters, $alnum, $solo ) {
+	public static function gibberish( $letters, $alnum, $solo, $strong = false ) {
 		return self::CODE_GIBBERISH . ':letters=' . max( 0, (int) $letters )
 			. ',alnum=' . max( 0, (int) $alnum )
-			. ',solo=' . ( $solo ? '1' : '0' );
+			. ',solo=' . ( $solo ? '1' : '0' )
+			. ( $strong ? ',strong=1' : '' );
+	}
+
+	/**
+	 * Build the SCORING string for a message that was NOT classified as spam.
+	 *
+	 * Deliberately not a reason: the file header's invariant is that absence of a
+	 * reason means clean, and a code for cleanliness would be indistinguishable from an
+	 * unlabelled legacy row. This is a separate datum, stored in its own technical field
+	 * `_gdpr_scoring` and only when a clean message is saved at all — i.e. only under
+	 * the "Save clean messages" / analysis opt-ins, never in normal operation. It
+	 * answers the one question the reason taxonomy structurally cannot: why a message
+	 * was NOT flagged.
+	 *
+	 * It carries the same components as gibberish() plus `scoreable`, the number of
+	 * scoreable tokens across the form. That is the value which decides whether the
+	 * solo-token rule was suppressed, and therefore the single datum that explains a
+	 * near-miss ("one gibberish token found, but other scoreable tokens suppressed the
+	 * single-token rule") instead of leaving the admin to guess.
+	 *
+	 * Format (stable): `scoring:letters=<n>,alnum=<n>,solo=<0|1>,strong=<0|1>,scoreable=<n>`.
+	 * All components are always present — unlike gibberish() there is no legacy corpus
+	 * to stay byte-compatible with.
+	 *
+	 * @param int  $letters   Gibberish tokens found on the pure-letter path.
+	 * @param int  $alnum     Gibberish tokens found on the alphanumeric path.
+	 * @param bool $solo      Whether the solo-token rule fired.
+	 * @param bool $strong    Whether the strong-token rule fired.
+	 * @param int  $scoreable Scoreable tokens counted across the whole form.
+	 * @return string Scoring string, e.g. "scoring:letters=1,alnum=0,solo=0,strong=0,scoreable=3".
+	 */
+	public static function scoring( $letters, $alnum, $solo, $strong, $scoreable ) {
+		return self::CODE_SCORING . ':letters=' . max( 0, (int) $letters )
+			. ',alnum=' . max( 0, (int) $alnum )
+			. ',solo=' . ( $solo ? '1' : '0' )
+			. ',strong=' . ( $strong ? '1' : '0' )
+			. ',scoreable=' . max( 0, (int) $scoreable );
 	}
 
 	/**

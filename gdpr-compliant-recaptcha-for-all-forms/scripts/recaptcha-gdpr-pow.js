@@ -8,14 +8,14 @@
  *
  * The proof-of-work algorithm here MUST stay in lockstep with the server side
  * (includes/class-proof-of-work.php) and the PHPUnit ProofOfWorkTest — otherwise
- * valid clients get rejected as spam. See HANDBUCH.md §3/§4.
+ * valid clients get rejected as spam. See handbuch/pow.md.
  *
  * AP3 submission-binding: `gdprPow.stamp` is now a single-use TOKEN (opaque to this
  * script — it is only ever used as the hashcash input string, same as the old
  * bucket-stamp). Once a solved token has been POSTed to check_stamp, it is kept in
  * `gdpr_compliant_recaptcha_token` and injected as a hidden `gdpr_pow_token` field
  * into every `<form>` (and best-effort into outgoing Ajax POST bodies), so the next
- * real submission can be bound to it server-side. See HANDBUCH.md §3.
+ * real submission can be bound to it server-side. See handbuch/pow.md.
  *
  * AP4 adaptive difficulty: `gdprPow.difficulty`/the per-token difficulty returned
  * by `get_stamp` can now vary (server-side base option + a site-wide "under
@@ -609,49 +609,30 @@ var gdpr_compliant_recaptcha = {
 					'&hashDifficulty=' + encodeURIComponent(hashDifficulty) +
 					'&hashNonce=' + encodeURIComponent(nonce)
 		})
-		.then(function (response) {
-			// Read the check_stamp response body to detect a solve-time re-challenge.
-			// window.fetch is wrapped by handleFetchResponse, which consumes the ORIGINAL
-			// body via response.text() and hands us back a CLONE — so calling .json() on
-			// THIS (returned/cloned) response is safe. Defensive: an empty / non-JSON body
-			// (older server builds still answer with an empty wp_die()) falls through to
-			// the legacy behaviour below (just remember the solved token). The server has
-			// no distinct HTTP failure status for a rejected solve, so a genuinely rejected
-			// solve simply yields no token row server-side and check_request() falls back
-			// to the IP path — identical to no token at all.
-			var rememberSolved = function () {
-				gdpr_compliant_recaptcha_token = hashStamp;
-				gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
-			};
-			var handleParsed = function (data) {
-				if (data && data.rechallenge === true && typeof data.stamp === 'string') {
-					// Chain continues: adopt the chain token as the CURRENT submission
-					// token immediately (a mid-chain submit then posts the chain token →
-					// server uses the adaptive poll window) and keep computing without any
-					// user interaction. findHash() is async, so this "recursion" runs in a
-					// microtask — no synchronous stack growth however long the chain runs.
-					gdpr_compliant_recaptcha_stamp = data.stamp;
-					gdpr_compliant_recaptcha_token = data.stamp;
-					if (data.difficulty) {
-						gdpr_compliant_recaptcha_difficulty = data.difficulty;
-					}
-					gdpr_compliant_recaptcha.updateFormTokenFields(data.stamp);
-					gdpr_compliant_recaptcha.findHash();
-					return;
-				}
-				// {accepted:true} or anything else: remember the solved base token.
-				rememberSolved();
-			};
-			try {
-				if (response && typeof response.text === 'function') {
-					return response.text().then(function (bodyText) {
-						handleParsed(gdpr_compliant_recaptcha.parseJsonLoose(bodyText));
-					}).catch(rememberSolved);
-				}
-			} catch (e) {
-				// Fall through to the legacy behaviour below.
-			}
-			rememberSolved();
+		.then(function () {
+			// The solved token is now the submission token, full stop.
+			//
+			// THE TOKEN PUBLISHED HERE ALWAYS HAS A SERVER-SIDE ROW BEHIND IT. This used
+			// to read the response body and, on {rechallenge:true}, adopt the freshly
+			// received — and NOT YET SOLVED — chain token as the submission token, then
+			// keep computing. That is what made a submission sent during such a round
+			// fail closed (no_pow:chain_no_row): the published token was valid but had no
+			// stamp row until the round finished, and the server's bridging poll window
+			// was calibrated on an optimistic hash rate. The solve-time gate that issued
+			// those re-challenges is gone (see class-stamp.php / class-proof-of-work.php),
+			// so there is nothing left to adopt — and nothing may be published here again
+			// before the server has confirmed it.
+			//
+			// A site still running an older build answers {rechallenge:true}; this client
+			// then keeps the base token, which has no row, and the submission falls back
+			// to the IP path — exactly as for a client that never solved. Note this is
+			// genuinely WORSE than the pre-update script on that same old server, which
+			// would have played the chain out and landed a row: the combination only
+			// arises from a rollback with the new JS still cached, it is self-healing on
+			// the next cache cycle, and it is the price of not letting this client be
+			// talked into publishing an unsolved token ever again.
+			gdpr_compliant_recaptcha_token = hashStamp;
+			gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
 		});
 		return true;
 	},
