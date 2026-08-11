@@ -365,6 +365,19 @@ class Message_Page {
 			}
 		}
 
+		// What the stamp table held while a "no proof of work" verdict was made (technical
+		// row `_gdpr_pow_probe`, written by Stamp::save_message() only for those verdicts).
+		// Same carve-out as the three lines above: rendered once as a labelled line, raw
+		// row skipped in the loop below. This is THE line to ask a reporter for — the
+		// reason names the path that failed, this names the evidence.
+		$probe_value = null;
+		foreach ( $details as $detail ) {
+			if ( '_gdpr_pow_probe' === $detail->rgd_attribute ) {
+				$probe_value = (string) $detail->rgd_value;
+				break;
+			}
+		}
+
 		$html_details = '';
 		if ( null !== $reason_value ) {
 			$html_details .= '<p class="gdpr-reason-line">'
@@ -386,6 +399,28 @@ class Message_Page {
 					. esc_html( $reason_detail )
 					. '</p>';
 			}
+
+			// The bridge between where the problem is SEEN and where it can be
+			// ANSWERED. Someone whose forms are being flagged lives on this screen, not
+			// in the settings; without this line the self-test is a feature they have to
+			// already know about. Only offered for the "No proof of work" family, which
+			// is what the test actually diagnoses.
+			if ( Classification_Reason::CODE_NO_POW === Classification_Reason::code( $reason_value ) ) {
+				$html_details .= '<p class="gdpr-reason-selftest">'
+					. '<a href="' . esc_url( admin_url( 'options-general.php' ) . '?page=' . Option::PREFIX . 'options#gdpr-self-test' ) . '">'
+					. esc_html__( 'Run the self-test', 'gdpr-compliant-recaptcha-for-all-forms' )
+					. '</a> '
+					. esc_html__( '— it performs this same check against your own site and says in one sentence what is wrong.', 'gdpr-compliant-recaptcha-for-all-forms' )
+					. '</p>';
+			}
+		}
+		if ( null !== $probe_value ) {
+			$html_details .= '<p class="gdpr-probe-line">'
+				. esc_html__( 'Measured at that moment:', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. ' <code>' . esc_html( $probe_value ) . '</code>'
+				. '<br><span class="gdpr-probe-hint">'
+				. esc_html__( 'Solved puzzles found for this submission\'s token and for its address, with their age in seconds and how often they had already been used. token_rows=0 together with ip_rows=0 means nothing was stored at all — quote this line when reporting the problem.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. '</span></p>';
 		}
 		if ( null !== $route_value ) {
 			$html_details .= '<p class="gdpr-route-line">'
@@ -431,7 +466,8 @@ class Message_Page {
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
 			// Already shown as the badge/route/scoring line above — do not repeat as a raw row.
-			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute || '_gdpr_scoring' === $detail->rgd_attribute ) {
+			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute
+				|| '_gdpr_scoring' === $detail->rgd_attribute || '_gdpr_pow_probe' === $detail->rgd_attribute ) {
 				continue;
 			}
 			$html_details .= '<tr class="table-body">';

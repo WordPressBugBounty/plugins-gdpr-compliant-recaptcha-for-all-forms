@@ -78,6 +78,34 @@ class Option {
 	/** @var string */
 	const POW_ECHO_LOCK_ENABLED = self::PREFIX . 'pow_echo_lock_enabled';
 
+	/**
+	 * Stage 2 of the Abilities API surface: let an AI agent EXTEND the monitored
+	 * scope. Off by default and deliberately its own switch — a write path into the
+	 * security boundary must never appear through an update.
+	 *
+	 * @var string
+	 */
+	const POW_ABILITIES_WRITE = self::PREFIX . 'pow_abilities_write';
+
+	/**
+	 * Stage 3: let an AI agent read stored submissions and change protection
+	 * settings. Off by default, does NOT follow from POW_ABILITIES_WRITE, and
+	 * carries a permanent admin notice while on.
+	 *
+	 * @var string
+	 */
+	const POW_ABILITIES_UNSAFE = self::PREFIX . 'pow_abilities_unsafe';
+
+	/**
+	 * Audit trail of scope changes made through an ability. Bookkeeping, not a
+	 * setting: not in prepare_options(), autoload=no. A short-lived transient (the
+	 * Scope_Sync notice pattern) would be useless here — an agent writes while the
+	 * admin is by definition not at the screen.
+	 *
+	 * @var string
+	 */
+	const POW_ABILITIES_LOG = self::PREFIX . 'pow_abilities_log';
+
 	/** @var bool */
 	const POW_BLOCK_LOGIN = self::PREFIX . 'pow_block_login';
 
@@ -270,6 +298,31 @@ class Option {
 
 	/** @var string */
 	const POW_FP_LAST_MISMATCH_AT = self::PREFIX . 'pow_fp_last_mismatch_at';
+
+	/**
+	 * Storage-failure diagnosis (see Stamp::record_store_failure()): how often an
+	 * ACCEPTED solve could not be persisted into `…_stamp_rgs`, when that last happened
+	 * (unix timestamp), and the database error that came with it.
+	 *
+	 * Why this exists at all: `INSERT IGNORE` (check_stamp()) downgrades a real failure
+	 * — missing table, half-applied migration, read-only or full database — to a warning
+	 * and returns the same 0 a legitimate duplicate returns. Before this counter, such a
+	 * site answered every handshake with {accepted:true} while never writing a single
+	 * row, so EVERY submission was classified no_pow:token_no_row and the site owner had
+	 * nothing to look at (HANDBUCH.md §12 cause 7).
+	 *
+	 * Bookkeeping, not settings: absent from prepare_options()/activate() seeding,
+	 * written with autoload=no, read on the settings screen only.
+	 *
+	 * @var string
+	 */
+	const POW_STORE_FAILED_TOTAL = self::PREFIX . 'pow_store_failed_total';
+
+	/** @var string */
+	const POW_STORE_LAST_FAILED_AT = self::PREFIX . 'pow_store_last_failed_at';
+
+	/** @var string */
+	const POW_STORE_LAST_ERROR = self::PREFIX . 'pow_store_last_error';
 
 	/**
 	 * Lookback window (hours) of the "submissions without a stamp row" health counter.
@@ -628,6 +681,41 @@ class Option {
 		return array(
 			'warn'  => $warn,
 			'class' => $warn ? 'gdpr-status-amber' : '',
+		);
+	}
+
+	/**
+	 * Pure decision for the "solved puzzles are not being stored" alarm
+	 * (POW_STORE_* counters, written by Stamp::record_store_failure()).
+	 *
+	 * Shown only while the failure is RECENT: every visitor handshake retries the write,
+	 * so a site that stopped failing stops reporting on its own, and one long-past
+	 * hiccup does not stick a red pill on the settings screen forever. Conversely a
+	 * still-broken site re-arms it with the next visitor. Same window as the no-stamp
+	 * health counter, for one story on that strip.
+	 *
+	 * Red, not amber: unlike the no-stamp counter (which a bit of scripted traffic
+	 * raises legitimately), this one cannot fire at all on a healthy site — the server
+	 * has verified its own accepted solve is not in the table.
+	 *
+	 * No WordPress dependency (hence the literal 3600 instead of HOUR_IN_SECONDS) so it
+	 * stays in the WP-free unit suite — tests/unit/OptionHealthCounterTest.php.
+	 *
+	 * @param int $total        POW_STORE_FAILED_TOTAL.
+	 * @param int $last_at      POW_STORE_LAST_FAILED_AT (unix timestamp, 0 = never).
+	 * @param int $now          Current unix timestamp.
+	 * @param int $window_hours How long a failure keeps the alarm lit.
+	 * @return array{show: bool, class: string} Whether to show it, plus the CSS class.
+	 */
+	public static function store_failure_status( $total, $last_at, $now, $window_hours = self::HEALTH_NO_POW_WINDOW_HOURS ) {
+		$total   = max( 0, (int) $total );
+		$last_at = max( 0, (int) $last_at );
+		$age     = (int) $now - $last_at;
+		$show    = $total > 0 && $last_at > 0 && $age >= 0 && $age <= max( 1, (int) $window_hours ) * 3600;
+
+		return array(
+			'show'  => $show,
+			'class' => $show ? 'gdpr-status-red' : '',
 		);
 	}
 

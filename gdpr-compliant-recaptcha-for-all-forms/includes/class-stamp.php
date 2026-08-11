@@ -105,6 +105,30 @@ class Stamp {
 	private $pow_fail_reason;
 
 	/**
+	 * The token check_request() evaluated, sanitized exactly as it evaluated it ('' when
+	 * none was posted). Kept solely so measure_pow_probe() can look up the same row the
+	 * consume queries looked for — reading $request_data again there would risk
+	 * measuring something subtly different from what was actually decided on.
+	 *
+	 * @var string
+	 */
+	private $pow_token = '';
+
+	/**
+	 * What the stamp table actually held when a submission was classified "no proof of
+	 * work" (Classification_Reason::pow_probe()), or null when nothing was measured.
+	 * Persisted as the technical field `_gdpr_pow_probe` in save_message(), on exactly
+	 * the same terms as `_gdpr_reason`: additive, rgm_posted = false, absent on every
+	 * other classification.
+	 *
+	 * Measured in check_submit() — i.e. only once check_request() has actually returned
+	 * false — so the healthy path pays nothing for it.
+	 *
+	 * @var string|null
+	 */
+	private $pow_probe;
+
+	/**
 	 * The REST route this request targets, as extracted by check_rest_routes(), or
 	 * null when the request is not a REST request at all. Set whether or not the
 	 * route ends up matching POW_REST_ROUTES — it describes the request, not the
@@ -423,11 +447,18 @@ class Stamp {
 	 * hashPWFields structure — a safe superset of the exact path matching
 	 * save_message() performs, fine for an exemption list.
 	 *
+	 * Static and public since the Abilities API surface exists: the classify-text
+	 * ability has to score a supplied field map with EXACTLY this exemption list.
+	 * A second, parallel implementation there would be worse than useless — a
+	 * diagnostic tool that judges differently from the live path sends whoever
+	 * trusts it in the wrong direction. This method holds no instance state, so
+	 * sharing it costs nothing.
+	 *
 	 * @param mixed $fields The submission's field map (pre strip_plugin_fields);
 	 *                      request-/hook-derived, so not guaranteed to be an array.
 	 * @return string[]
 	 */
-	private function gibberish_exempt_field_names( $fields ) {
+	public static function gibberish_exempt_field_names( $fields ) {
 		$names = array();
 		if ( is_array( $fields ) && isset( $fields['hashPWFields'] ) && is_string( $fields['hashPWFields'] ) ) {
 			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- benign: hashPWFields is the plugin's own base64-encoded password-field skip list (client twin in recaptcha-gdpr-analysis.js), not obfuscated code.
@@ -771,7 +802,12 @@ class Stamp {
 				'stamp'      => $stamp['stamp'],
 				'difficulty' => (string) $stamp['difficulty'],
 				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-				'timeout'    => get_option( Option::POW_TIME_WINDOW ),
+				// Same default as every server-side reader of this option, so a missing
+				// option row cannot make the client's renew cadence disagree with the
+				// window the server actually enforces. (renewIntervalMs() clamps an
+				// empty value to the same 10 minutes, so this changes no behaviour — it
+				// removes the second definition of that number.)
+				'timeout'    => get_option( Option::POW_TIME_WINDOW, 10 ),
 			)
 		);
 	}
@@ -831,6 +867,7 @@ class Stamp {
 		$this->plugin_spam           = false;
 		$this->classification_reason = null;
 		$this->clean_scoring         = null;
+		$this->pow_probe             = null;
 
 		// Process the spam check
 		if ( ! ( $this->check_request() ) ) {
@@ -841,6 +878,10 @@ class Stamp {
 			// returned false — a failing path whose IP fallback still succeeded never
 			// gets here. This is the first check in the function, so it always wins.
 			$this->classification_reason = $this->pow_fail_reason;
+			// …and record WHAT THE TABLE HELD while deciding that. The reason names the
+			// path that failed; this names the evidence. Only here, i.e. only on an
+			// actually-failed check, so the healthy path never runs these queries.
+			$this->pow_probe = $this->measure_pow_probe( $this->pow_token );
 			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
 			// genuine PoW/token failures, never for the simulation mode below.
 			$this->increment_spam_counter();
@@ -944,7 +985,7 @@ class Stamp {
 		if ( $gdpr_fields && ! $this->plugin_spam ) {
 			$analysis = Gibberish_Detector::analyze_message(
 				self::strip_plugin_fields( $gdpr_fields ),
-				$this->gibberish_exempt_field_names( $gdpr_fields )
+				self::gibberish_exempt_field_names( $gdpr_fields )
 			);
 		}
 		if ( $analysis['gibberish'] ) {
@@ -1441,6 +1482,17 @@ class Stamp {
 				$technical_fields['_gdpr_reason'] = $this->classification_reason;
 			}
 
+			// WHAT THE STAMP TABLE HELD while the "no proof of work" verdict was made
+			// (measure_pow_probe(); null on every other classification → no row at all).
+			// The reason above names the path that failed, this names the evidence: a
+			// row for the token that was too old, one that was spent, or none anywhere.
+			// Same conventions as _gdpr_reason in every respect, including the leading
+			// underscore that keeps Echo_Values::is_technical_key() from ever letting it
+			// seed or match a value.
+			if ( null !== $this->pow_probe ) {
+				$technical_fields['_gdpr_pow_probe'] = $this->pow_probe;
+			}
+
 			// WHY this submission was NOT classified as spam (null = it was → no row at
 			// all; the two are mutually exclusive, see $clean_scoring). Same conventions
 			// as _gdpr_reason above in every respect: additive, rgm_posted = false, and
@@ -1806,6 +1858,10 @@ class Stamp {
 			? preg_replace( '/[^a-zA-Z0-9]/', '', $this->request_data['gdpr_pow_token'] )
 			: '';
 
+		// Remembered for measure_pow_probe() (check_submit), so the measurement looks up
+		// exactly the value this function decided on.
+		$this->pow_token = $token;
+
 		$token_length = strlen( $token );
 
 		// TRANSITIONAL chain-token path (120 = v2, 112 = in-flight legacy), one release
@@ -2055,12 +2111,20 @@ class Stamp {
 		global $wpdb;
 		$hashed_ip = $this->hash_values( $this->get_client_ip() );
 		// Delete all lines which are older than the predefined time limit + 2 minutes buffer time
-		// ... or which are available for the current IP already
+		//
+		// THE DEFAULT IS LOAD-BEARING and was missing here while every other reader of
+		// this option passes it (check_request(), both verify calls above). Without it, an
+		// installation whose option row is absent deletes rows after 2 minutes while its
+		// tokens stay valid for 12 — so a visitor who takes longer than two minutes to
+		// fill in a form posts a perfectly valid token whose row the next visitor's
+		// check_stamp has already swept away: no_pow:token_no_row with an empty IP
+		// fallback, on a site where nothing is broken. That is the reported symptom
+		// exactly (HANDBUCH.md §12), reachable without a single defect elsewhere.
 		$wpdb->query(
 			$wpdb->prepare(
 				'DELETE FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
                             WHERE rgs_time < NOW() - INTERVAL %d MINUTE',
-				get_option( Option::POW_TIME_WINDOW ) + 2
+				(int) get_option( Option::POW_TIME_WINDOW, 10 ) + 2
 			)
 		);
 
@@ -2077,7 +2141,7 @@ class Stamp {
 		// rgs_ip stays the hashed, server-resolved address: pure bookkeeping for the
 		// IP fallback in check_request() (no-JS clients, cached pages), NOT a condition
 		// on this token's validity.
-		$wpdb->query(
+		$inserted = $wpdb->query(
 			$wpdb->prepare(
 				'INSERT IGNORE INTO ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs (
                                 rgs_ip,
@@ -2090,6 +2154,43 @@ class Stamp {
 				$stamp
 			)
 		);
+
+		// {accepted:true} MUST MEAN "a row exists for this token" — the client treats that
+		// answer as its licence to publish the token as the submission token, and
+		// check_request() will look for exactly this row.
+		//
+		// The catch is IGNORE: it downgrades a REAL failure (missing table, half-applied
+		// migration, read-only/full database) to a warning and returns 0 — the very same 0
+		// a legitimate duplicate returns. So 0 is ambiguous and has to be resolved by
+		// looking, and only then; the extra SELECT never runs on the healthy path (a
+		// successful insert returns 1).
+		//
+		// Answering {accepted:true} anyway is what made a broken-storage site
+		// undiagnosable: a green handshake, and every single submission afterwards
+		// classified no_pow:token_no_row (HANDBUCH.md §12 cause 7).
+		if ( 1 !== (int) $inserted ) {
+			$row_exists = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs WHERE rgs_stamp = %s',
+					$stamp
+				)
+			);
+
+			if ( $row_exists < 1 ) {
+				$this->record_store_failure( (string) $wpdb->last_error );
+				// NOT a rejection of the proof of work — the solve was valid, this server
+				// just cannot keep it. Fail-closed is untouched (no row means the
+				// submission still has to pass check_request()); the client simply must
+				// not publish a token it has no row for, and gets told so instead of
+				// being lied to.
+				wp_send_json(
+					array(
+						'accepted' => false,
+						'stored'   => false,
+					)
+				);
+			}
+		}
 
 		// Every path that reaches this point is an accepted, persisted solve — the two
 		// re-challenge branches and every rejection already left the function. Answer
@@ -2148,6 +2249,107 @@ class Stamp {
 			update_option( Option::POW_FP_MISMATCHED_TOTAL, (int) get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 ) + 1, false );
 			update_option( Option::POW_FP_LAST_MISMATCH_AT, time(), false );
 		}
+	}
+
+	/** Measure what `…_stamp_rgs` actually held while a submission was being classified
+	 * "no proof of work" — the evidence the reason string cannot carry.
+	 *
+	 * MEASUREMENT, NEVER A DECISION: this runs AFTER check_request() has already
+	 * returned false, its result is only ever written to a technical detail row, and no
+	 * code path reads it back. It cannot change a verdict, in either direction.
+	 *
+	 * Deliberately queried WITHOUT the `rgs_time >= NOW() - INTERVAL …` filter the
+	 * consume queries use: "there was a row, but it was outside the window" and "there
+	 * was no row at all" are opposite findings, and a filtered query reports both as
+	 * nothing — which is exactly the ambiguity that cost two support rounds.
+	 *
+	 * Cost: at most three SELECTs, only ever on the already-slow spam path (which has
+	 * just spent up to 2 seconds polling), never on a clean submission.
+	 *
+	 * @param string $token The sanitized token check_request() evaluated ('' when none).
+	 * @return string Classification_Reason::pow_probe() string.
+	 */
+	private function measure_pow_probe( $token ) {
+		global $wpdb;
+
+		$token_row = null;
+		if ( '' !== $token ) {
+			$token_row = $wpdb->get_row(
+				$wpdb->prepare(
+					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, NOW() ) AS age_s
+					   FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
+					  WHERE rgs_stamp = %s
+					  LIMIT 1',
+					$token
+				)
+			);
+		}
+
+		// The address side, measured on ONE row — the NEWEST, which is the one a healthy
+		// handshake just created and therefore the one a reader wants to see.
+		//
+		// An earlier version aggregated MIN(age) and MIN(uses) over all rows of the
+		// address and called that "the best case the fallback had". It is not: the
+		// fallback needs freshness AND remaining budget ON THE SAME ROW, so a fresh
+		// exhausted row next to an old unused one would have printed `age_s=5,uses=0` —
+		// a state no single row was in, reading as "the fallback should have worked".
+		// A measurement that can describe a row that does not exist is worse than none.
+		$ip_count = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs WHERE rgs_ip = %s',
+				$this->hash_values( $this->get_client_ip() )
+			)
+		);
+
+		$ip_row = null;
+		if ( $ip_count > 0 ) {
+			$ip_row = $wpdb->get_row(
+				$wpdb->prepare(
+					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, NOW() ) AS age_s
+					   FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
+					  WHERE rgs_ip = %s
+					  ORDER BY rgs_time DESC, rgs_id DESC
+					  LIMIT 1',
+					$this->hash_values( $this->get_client_ip() )
+				)
+			);
+		}
+
+		$ip_rows = $ip_row ? $ip_count : 0;
+
+		return Classification_Reason::pow_probe(
+			$token_row ? 1 : 0,
+			$token_row ? $token_row->age_s : null,
+			$token_row ? $token_row->rgs_uses : null,
+			$ip_rows,
+			$ip_row ? $ip_row->age_s : null,
+			$ip_row ? $ip_row->rgs_uses : null
+		);
+	}
+
+	/** Record that an ACCEPTED solve could not be stored — the one failure mode the
+	 * plugin used to answer {accepted:true} to.
+	 *
+	 * Not a security decision and not a rate limit: purely the signal the site owner
+	 * needs. Without it, a site whose `…_stamp_rgs` table is missing or unwritable looks
+	 * perfectly healthy from the outside (get_stamp fine, check_stamp "accepted") while
+	 * classifying every single submission as spam — the shape that cost two support
+	 * rounds to even locate (HANDBUCH.md §12 cause 7).
+	 *
+	 * The database error is stored verbatim but capped, because it is the only thing
+	 * that names the actual cause ("Table '…_stamp_rgs' doesn't exist", "The MySQL server
+	 * is running with the --read-only option"). It is rendered escaped on the settings
+	 * screen and never used in a query. Non-atomic get+update on purpose, the same
+	 * accepted trade-off as the fingerprint counters.
+	 *
+	 * @param string $db_error $wpdb->last_error at the time of the failure ('' if the
+	 *                         driver reported none — a silently swallowed IGNORE).
+	 * @return void
+	 */
+	private function record_store_failure( $db_error ) {
+		update_option( Option::POW_STORE_FAILED_TOTAL, (int) get_option( Option::POW_STORE_FAILED_TOTAL, 0 ) + 1, false );
+		update_option( Option::POW_STORE_LAST_FAILED_AT, time(), false );
+		update_option( Option::POW_STORE_LAST_ERROR, substr( sanitize_text_field( $db_error ), 0, 200 ), false );
 	}
 
 	/** check that the hash of the stamp + nonce meets the difficulty target

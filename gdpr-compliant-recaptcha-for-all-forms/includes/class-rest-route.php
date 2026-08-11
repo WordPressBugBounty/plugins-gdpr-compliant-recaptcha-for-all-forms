@@ -69,6 +69,17 @@ final class RestRoute {
 		'wp-site-health',
 		'wp-block-editor',
 		'oembed',
+		// The Abilities API's own REST surface (core since WP 6.9) and the namespace
+		// the official WordPress/mcp-adapter serves its server under. Neither is
+		// wp-admin, so neither fits the "takes wp-admin down" rule above — they are
+		// here for the other half of the same idea: these are the channels through
+		// which an agent reaches this site at all. Putting them behind the PoW gate
+		// would let one scope entry cut off the caller that made it (and every other
+		// plugin's abilities with it), with no way back from the outside. Since
+		// Scope_Add exposes exactly this option to an agent, the guard has to cover
+		// them before the ability does.
+		'wp-abilities/v1',
+		'mcp',
 	);
 
 	/**

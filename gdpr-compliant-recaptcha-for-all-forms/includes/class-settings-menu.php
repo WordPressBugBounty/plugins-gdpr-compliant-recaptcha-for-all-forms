@@ -27,16 +27,65 @@ class Settings_Menu {
 	/** What to do with the action */
 	const UPDATE = 'update';
 
-	/** Action value for the "reset repeat-sender echo lock" status-strip button. */
-	const RESET_ECHO = 'reset_echo';
-
-	/** Action value for the "reset address-change counters" status-strip button. */
-	const RESET_FP = 'reset_fp';
-
 	/** Constructor of the class
 	 */
 	public function __construct() {
 		add_action( 'init', array( $this, 'run' ) );
+		// Second surface for the self-test (Ability_Probe). The first one is the
+		// Abilities API, which only an AI agent can call — while the person who
+		// actually needs the answer is the admin looking at a screen full of spam.
+		add_action( 'wp_ajax_' . self::AJAX_SELF_TEST, array( $this, 'self_test_callback' ) );
+		add_action( 'wp_ajax_' . self::AJAX_DIAG_TASK, array( $this, 'diag_task_callback' ) );
+	}
+
+	/** Ajax action + nonce of the settings-page self-test button. */
+	const AJAX_SELF_TEST = 'gdpr_pow_self_test';
+
+	/** Ajax action + nonce of the two diagnostic resets. */
+	const AJAX_DIAG_TASK = 'gdpr_pow_diag_task';
+
+	/** Panel id of the synthetic Diagnostics tab (not derived from an option group). */
+	const TAB_DIAGNOSTICS = 'gdpr-tab-diagnostics';
+
+	/**
+	 * Run the plugin's own handshake against this site and answer in plain language
+	 * (Ability_Probe::run(), the same verdicts the Abilities API returns).
+	 *
+	 * Admin-only and nonce-guarded: the probe performs two loopback HTTP requests and
+	 * a bounded server-side hash search, so it must not be reachable by anyone who
+	 * happens to know the action name.
+	 *
+	 * @return void
+	 */
+	public function self_test_callback() {
+		$nonce = isset( $_POST['security_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['security_nonce'] ) ) : '';
+
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $nonce, self::AJAX_SELF_TEST ) ) {
+			wp_send_json_error( array( 'message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+		}
+
+		$result = Ability_Probe::run();
+
+		// A green self-test is PROOF that a solve was stored — the probe redeems a real
+		// puzzle over HTTP and check_stamp only answers `accepted` once the row is
+		// confirmed. So it is also the one moment at which "storage is broken" can be
+		// declared over. Without this the red box hangs around for up to 24 hours after
+		// the admin fixed the cause, with no way to say so — and an alarm nobody can
+		// clear is one people learn to ignore.
+		if ( 'ok' === $result['verdict'] ) {
+			delete_option( Option::POW_STORE_FAILED_TOTAL );
+			delete_option( Option::POW_STORE_LAST_FAILED_AT );
+			delete_option( Option::POW_STORE_LAST_ERROR );
+		}
+
+		wp_send_json_success(
+			array(
+				'verdict' => $result['verdict'],
+				'code'    => $result['code'],
+				'message' => $result['message'],
+				'notes'   => isset( $result['details']['notes'] ) ? (array) $result['details']['notes'] : array(),
+			)
+		);
 	}
 
 	/**
@@ -1042,12 +1091,46 @@ class Settings_Menu {
 					<br>
 					<br><strong>Just a bonus layer:</strong> this only <em>adds</em> to the proof-of-work check; it never replaces it. Values are stored as hashes only (never in plain text) and expire on their own after about a day and a half.
 					<br>
-					<br><strong>Turn it off if</strong> (rarely) you would rather not carry values over between submissions at all — for example while diagnosing a false positive. Addresses of your registered users are already excluded automatically, so this is seldom necessary. You can also clear all currently held values at any time via <em>Reset repeat-sender lock</em> in the status bar at the top of this page.',
+					<br><strong>Turn it off if</strong> (rarely) you would rather not carry values over between submissions at all — for example while diagnosing a false positive. Addresses of your registered users are already excluded automatically, so this is seldom necessary. You can also release all currently held values at any time under <em>Diagnostics</em> on this page.',
 					'gdpr-compliant-recaptcha-for-all-forms'
 				),
 				__( 'Algorithm', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🔁',
 				__( 'Briefly remembers the core values of spam submissions (as hashes) so the same sender/domain is caught again on any form. A bonus layer over the proof-of-work; on by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_ABILITIES_WRITE         => new Option(
+				__( 'Let agents extend what is monitored', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				__(
+					'<strong>What it does:</strong> With this on, an AI agent acting as a logged-in administrator can add form actions, field patterns and REST routes to the monitored scope — the same three lists you edit under <em>Recognition</em>. This is what makes it possible for an agent to notice an unprotected form and connect it up for you.
+					<br>
+					<br><strong>What it cannot do:</strong> entries are only ever added, never removed, and the agent cannot touch anything you added yourself. Entries that would make the plugin evaluate WordPress\' own admin traffic are refused outright, as are patterns built only from generic field names, and patterns that block senders rather than monitor forms.
+					<br>
+					<br><strong>What you take on:</strong> a badly chosen entry makes the plugin evaluate requests it should not, which shows up as genuine submissions being treated as spam. Every change is recorded, and you can review and undo all of it under <em>Recognition</em>. Off by default.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'AI & Agents', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🤖',
+				__( 'Let an AI agent add form actions, field patterns and REST routes to the monitored scope. Only ever adds, never removes. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_ABILITIES_UNSAFE        => new Option(
+				__( 'Let agents read submissions and change protection', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				__(
+					'<strong>Leave this off unless you know why you need it.</strong> It is the one setting here that can undo the protection rather than adjust it.
+					<br>
+					<br><strong>What it does:</strong> it opens two things to an AI agent acting as a logged-in administrator — reading stored submissions, and changing protection settings (including switching blocking off).
+					<br>
+					<br><strong>Why that is different from the setting above:</strong> an agent usually runs on an external AI service. This plugin still contacts nobody on its own, but with this on, content your visitors typed into your forms can be read by whatever agent you connect, and it stops being this plugin alone that decides where that content goes. What your agent does with it is yours to answer for, including under data-protection law.
+					<br>
+					<br>While this is on, a warning stays visible in your admin area. Off by default.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'AI & Agents', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'⚠️',
+				__( 'Let an AI agent read stored submissions and change protection settings. Submitted content can leave your site through the agent. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 		);
 
@@ -1067,8 +1150,6 @@ class Settings_Menu {
 		$this->plugin_name = __( 'Invisible Anti-Spam', 'gdpr-compliant-recaptcha-for-all-forms' );
 
 		$this->update_settings();
-		$this->maybe_reset_echo_store();
-		$this->maybe_reset_fp_counters();
 
 		foreach ( $this->options as $id => $option ) {
 
@@ -1187,11 +1268,19 @@ class Settings_Menu {
 			'text'  => __( 'Can lock out visitors', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 		return array(
-			Option::POW_BLOCK       => $warn,
-			Option::POW_BLOCK_LOGIN => $warn,
+			Option::POW_BLOCK            => $warn,
+			Option::POW_BLOCK_LOGIN      => $warn,
+			Option::POW_ABILITIES_WRITE  => array(
+				'class' => 'gdpr-badge gdpr-badge-warn',
+				'text'  => __( 'Agent can change monitoring', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			),
+			Option::POW_ABILITIES_UNSAFE => array(
+				'class' => 'gdpr-badge gdpr-badge-warn',
+				'text'  => __( 'Submissions can leave your site', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			),
 			// Static recommendation: there is no difficulty ceiling any more, so there
 			// is nothing left to warn about here (the boost is never clipped).
-			Option::POW_DIFFICULTY  => array(
+			Option::POW_DIFFICULTY       => array(
 				'class' => 'gdpr-badge gdpr-badge-recommend',
 				'text'  => __( 'Recommended: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			),
@@ -1336,65 +1425,53 @@ class Settings_Menu {
 			),
 		);
 
-		// Address-change measurement (fingerprint diagnosis, see Stamp::record_fp_status()):
-		// what share of solved puzzles came back from a different address than the token
-		// was issued to. Shown only once something has been measured. This is DIAGNOSIS —
-		// no protection behaviour depends on it; a high share means "a cache or proxy sits
-		// in front of this site", not "attack".
-		$fp_share = Option::fp_mismatch_share(
-			get_option( Option::POW_FP_MATCHED_TOTAL, 0 ),
-			get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 )
+		// Storage alarm: the server accepted a proof of work and could NOT write its row
+		// (Stamp::record_store_failure()). This is the only state in which everything else
+		// on this page looks healthy while literally every submission is classified spam —
+		// so it gets its own red item plus the database error underneath the strip.
+		$store_failures = (int) get_option( Option::POW_STORE_FAILED_TOTAL, 0 );
+		$store_status   = Option::store_failure_status(
+			$store_failures,
+			(int) get_option( Option::POW_STORE_LAST_FAILED_AT, 0 ),
+			time()
 		);
-		if ( $fp_share['total'] > 0 ) {
+		if ( $store_status['show'] ) {
 			$items[] = array(
-				'class' => '',
-				'text'  => sprintf(
-					/* translators: %d: percentage of solved puzzles redeemed from a different IP address than they were issued to */
-					__( '%d%% of solved puzzles came from another IP than issued', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					$fp_share['percent']
-				),
+				'class' => $store_status['class'],
+				'text'  => __( 'Solved puzzles cannot be stored', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			);
 		}
 
-		// Repeat-sender echo lock: how many values it currently holds, plus a one-click
-		// reset (offered only when non-empty). The count reflects the store even when
-		// the feature is toggled off, so a stale value can still be released.
-		$echo_count = Echo_Store::count();
-		$items[]    = array(
-			'class' => '',
-			'text'  => sprintf(
-				/* translators: %d: number of values currently held in the repeat-sender echo lock */
-				_n( '%d value in repeat-sender lock', '%d values in repeat-sender lock', $echo_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
-				$echo_count
-			),
-		);
 		?>
 		<div class="gdpr-status-strip">
 			<?php foreach ( $items as $item ) : ?>
 				<span class="gdpr-status-item <?php echo esc_attr( $item['class'] ); ?>"><?php echo esc_html( $item['text'] ); ?></span>
 			<?php endforeach; ?>
 		</div>
-		<?php if ( $fp_share['total'] > 0 ) : ?>
-			<form method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>" class="gdpr-echo-reset">
-				<?php wp_nonce_field( 'gdpr_reset_fp_nonce', 'gdpr_reset_fp_nonce_field' ); ?>
-				<input type="hidden" name="<?php echo esc_attr( self::RCM_ACTION ); ?>" value="<?php echo esc_attr( self::RESET_FP ); ?>">
-				<button type="submit" class="button button-secondary"><?php esc_html_e( 'Reset address measurement', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></button>
-				<span class="gdpr-echo-reset-hint">
-					<?php esc_html_e( 'Each puzzle is handed out to one visitor and solved a moment later. This measures how often the solution comes back from a different IP address than the puzzle went to. Submissions are accepted either way — a high share simply means a cache or proxy sits in front of your site (or the visitor\'s address changes between requests). If it is high, check the "Trusted proxies" setting. Resetting starts a fresh measurement, e.g. after changing that setting.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
-				</span>
-			</form>
+		<?php if ( $store_status['show'] ) : ?>
+			<p class="gdpr-store-failure-hint">
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %d: how often a solved puzzle could not be written to the database */
+						_n(
+							'%d solved puzzle could not be written to the database. While this lasts, every submission is treated as spam — the check that protects your forms looks for exactly that stored puzzle.',
+							'%d solved puzzles could not be written to the database. While this lasts, every submission is treated as spam — the check that protects your forms looks for exactly that stored puzzle.',
+							$store_failures,
+							'gdpr-compliant-recaptcha-for-all-forms'
+						),
+						$store_failures
+					)
+				);
+				?>
+				<?php $store_error = (string) get_option( Option::POW_STORE_LAST_ERROR, '' ); ?>
+				<?php if ( '' !== $store_error ) : ?>
+					<br><code><?php echo esc_html( $store_error ); ?></code>
+				<?php endif; ?>
+				<br><?php esc_html_e( 'Usually the plugin\'s own table is missing or the database is read-only. Deactivating and reactivating the plugin re-creates the table; if it comes back, your host has to look at the database user\'s write permissions. Once you have fixed it, run the self-test under Diagnostics — a green result clears this message.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+			</p>
 		<?php endif; ?>
 		<?php $this->render_proxy_hint(); ?>
-		<?php if ( $echo_count > 0 ) : ?>
-			<form method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>" class="gdpr-echo-reset">
-				<?php wp_nonce_field( 'gdpr_reset_echo_nonce', 'gdpr_reset_echo_nonce_field' ); ?>
-				<input type="hidden" name="<?php echo esc_attr( self::RCM_ACTION ); ?>" value="<?php echo esc_attr( self::RESET_ECHO ); ?>">
-				<button type="submit" class="button button-secondary"><?php esc_html_e( 'Reset repeat-sender lock', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></button>
-				<span class="gdpr-echo-reset-hint">
-					<?php esc_html_e( 'The repeat-sender lock briefly remembers values from spam submissions (as one-way hashes) so the same sender is caught again on any form. Resetting releases every currently held value at once — use it if a legitimate address got caught. No data is lost, and the lock rebuilds itself as new spam arrives.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
-				</span>
-			</form>
-		<?php endif; ?>
 		<?php
 	}
 
@@ -1611,62 +1688,6 @@ class Settings_Menu {
 		}
 	}
 
-	/** Handle the "reset repeat-sender echo lock" status-strip button.
-	 *
-	 * Native admin-post-style flow: the button submits a normal form to the settings
-	 * page carrying self::RESET_ECHO plus its own CSRF nonce. Runs on admin_init (via
-	 * prepare_options()) BEFORE the page renders, so the status strip already shows the
-	 * emptied store. Gated by both a valid nonce and the manage_options capability.
-	 *
-	 * @return void
-	 */
-	public function maybe_reset_echo_store() {
-		$post_action = strval( filter_input( INPUT_POST, self::RCM_ACTION, FILTER_SANITIZE_SPECIAL_CHARS ) );
-		if ( self::RESET_ECHO !== $post_action || ! current_user_can( 'manage_options' ) ) {
-			return;
-		}
-		$nonce = isset( $_POST['gdpr_reset_echo_nonce_field'] ) ? sanitize_text_field( wp_unslash( $_POST['gdpr_reset_echo_nonce_field'] ) ) : '';
-		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'gdpr_reset_echo_nonce' ) ) {
-			wp_die( esc_html__( 'Security check failed. This request was blocked by an active CSRF protection mechanism. It may have been triggered by another webpage you recently visited or an unrelated browser tab. To resolve this issue, close untrusted sites, check browser extensions, and refresh your WordPress session by logging in again.', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-		}
-		Echo_Store::clear();
-		add_settings_error(
-			Option::PREFIX . 'options',
-			'gdpr-echo-reset',
-			__( 'The repeat-sender lock has been reset — all currently held values were released.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'updated'
-		);
-	}
-
-	/** Handle the "reset address-change counters" status-strip button.
-	 *
-	 * Same native admin-post-style flow (own action value, own nonce, manage_options)
-	 * as maybe_reset_echo_store(). The counters are pure diagnosis, so resetting them
-	 * changes no protection behaviour at all — it just starts a fresh measurement after
-	 * a proxy/cache configuration change.
-	 *
-	 * @return void
-	 */
-	public function maybe_reset_fp_counters() {
-		$post_action = strval( filter_input( INPUT_POST, self::RCM_ACTION, FILTER_SANITIZE_SPECIAL_CHARS ) );
-		if ( self::RESET_FP !== $post_action || ! current_user_can( 'manage_options' ) ) {
-			return;
-		}
-		$nonce = isset( $_POST['gdpr_reset_fp_nonce_field'] ) ? sanitize_text_field( wp_unslash( $_POST['gdpr_reset_fp_nonce_field'] ) ) : '';
-		if ( '' === $nonce || ! wp_verify_nonce( $nonce, 'gdpr_reset_fp_nonce' ) ) {
-			wp_die( esc_html__( 'Security check failed. This request was blocked by an active CSRF protection mechanism. It may have been triggered by another webpage you recently visited or an unrelated browser tab. To resolve this issue, close untrusted sites, check browser extensions, and refresh your WordPress session by logging in again.', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-		}
-		delete_option( Option::POW_FP_MATCHED_TOTAL );
-		delete_option( Option::POW_FP_MISMATCHED_TOTAL );
-		delete_option( Option::POW_FP_LAST_MISMATCH_AT );
-		add_settings_error(
-			Option::PREFIX . 'options',
-			'gdpr-fp-reset',
-			__( 'The address-change measurement has been reset — counting starts from zero.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'updated'
-		);
-	}
-
 	/** Filter special chars if not int
 	 *
 	 */
@@ -1692,10 +1713,19 @@ class Settings_Menu {
 		foreach ( $groups as $group ) {
 			$tab_ids[] = 'gdpr-tab-' . sanitize_title( $group );
 		}
+		// The one panel that is NOT derived from an option group: three ACTIONS with a
+		// live state and no stored value (self-test, and the two diagnostic resets).
+		// They used to hang above the tabs as loose forms, which is exactly what made
+		// the head of this page look like a junk drawer. get_groups() stays purely
+		// option-derived; only this method knows about the extra tab — and $tab_ids must
+		// carry it too, or a save from this tab bounces the admin back to the first one.
+		$tab_ids[] = self::TAB_DIAGNOSTICS;
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- read-only: only re-selects the active pill tab for display (sanitize_key()'d, no state change); the actual save path in update_settings() already verifies gdpr_settings_nonce before writing anything.
 		$requested_tab = isset( $_POST['gdpr-settings-selection'] ) ? sanitize_key( wp_unslash( $_POST['gdpr-settings-selection'] ) ) : '';
-		$active_tab    = in_array( $requested_tab, $tab_ids, true ) ? $requested_tab : ( isset( $tab_ids[0] ) ? $tab_ids[0] : '' );
+		// $tab_ids is never empty since the Diagnostics tab is appended unconditionally,
+		// so the first entry always exists — no isset() dance needed any more.
+		$active_tab = in_array( $requested_tab, $tab_ids, true ) ? $requested_tab : $tab_ids[0];
 		?>
 		<div class="wrap gdpr-settings-wrap">
 			<h1><?php echo esc_html( $this->plugin_name . ' - ' . __( 'Settings', 'gdpr-compliant-recaptcha-for-all-forms' ) ); ?></h1>
@@ -1709,6 +1739,7 @@ class Settings_Menu {
 					?>
 					<button type="button" class="gdpr-pill-tab<?php echo $is_active ? ' is-active' : ''; ?>" data-tab-target="<?php echo esc_attr( $tab_id ); ?>"><?php echo esc_html( $group ); ?></button>
 				<?php endforeach; ?>
+				<button type="button" class="gdpr-pill-tab<?php echo self::TAB_DIAGNOSTICS === $active_tab ? ' is-active' : ''; ?>" data-tab-target="<?php echo esc_attr( self::TAB_DIAGNOSTICS ); ?>"><?php esc_html_e( 'Diagnostics', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></button>
 			</nav>
 			<form class="gdpr-settings-form" method="post" action="<?php echo esc_attr( Option::PAGE_QUERY ); ?>">
 				<?php wp_nonce_field( 'gdpr_settings_nonce', 'gdpr_settings_nonce_field' ); // CSRF-protection add ?>
@@ -1731,11 +1762,178 @@ class Settings_Menu {
 						</div>
 					</section>
 				<?php endforeach; ?>
+				<?php $this->render_diagnostics_panel( self::TAB_DIAGNOSTICS === $active_tab ); ?>
 				<div id="submit-container">
 					<?php submit_button(); ?>
 				</div>
 			</form>
 		</div>
 		<?php
+	}
+
+	/** The Diagnostics panel: actions, not settings.
+	 *
+	 * Same grammar as render_option_row() — label + one-line description on the left,
+	 * control on the right, the long explanation behind the same `?` popover — because
+	 * those long sentences standing in the open above the tabs were the actual eyesore.
+	 * Two things an option row does not have: a live VALUE the action operates on (shown
+	 * next to the button, so "what will this do" is answered before the click), and a
+	 * full-width RESULT area under the row, since a self-test verdict is several
+	 * sentences and must not be squeezed into the control column.
+	 *
+	 * Every button here is type="button" on purpose: the panel sits inside the settings
+	 * form, so a forgotten type would turn a diagnostic click into a settings save.
+	 *
+	 * @param bool $is_active Whether this panel is the visible one.
+	 * @return void
+	 */
+	private function render_diagnostics_panel( $is_active ) {
+		$fp_share   = Option::fp_mismatch_share(
+			get_option( Option::POW_FP_MATCHED_TOTAL, 0 ),
+			get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 )
+		);
+		$echo_count = Echo_Store::count();
+		$diag_nonce = wp_create_nonce( self::AJAX_DIAG_TASK );
+		?>
+	<section class="gdpr-tab-panel" id="<?php echo esc_attr( self::TAB_DIAGNOSTICS ); ?>"<?php echo $is_active ? '' : ' hidden'; ?>>
+		<div class="gdpr-card">
+
+			<div class="gdpr-option-row gdpr-action-row" id="gdpr-self-test">
+				<div class="gdpr-option-main">
+					<span class="gdpr-option-label"><?php esc_html_e( 'Self-test', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></span>
+					<p class="gdpr-option-short"><?php esc_html_e( 'Runs the whole invisible check against your own site and answers in one sentence.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
+				</div>
+				<div class="gdpr-option-control">
+					<button type="button" class="button button-secondary" id="gdpr-self-test-btn"
+						data-nonce="<?php echo esc_attr( wp_create_nonce( self::AJAX_SELF_TEST ) ); ?>"
+						data-running="<?php esc_attr_e( 'Testing…', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+						data-failed="<?php esc_attr_e( 'The test itself could not be run. Reload the page and try again.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+							data-verdict-ok="<?php esc_attr_e( 'Everything works', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+							data-verdict-problem="<?php esc_attr_e( 'Something is wrong', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>">
+						<?php esc_html_e( 'Run self-test', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</button>
+					<button type="button" class="gdpr-help-toggle" aria-expanded="false" aria-controls="help_gdpr_self_test">?</button>
+					<div class="gdpr-help-popover" id="help_gdpr_self_test" hidden>
+						<?php esc_html_e( 'Fetches a puzzle from this site, solves it and hands it back in — exactly the handshake a visitor\'s browser performs. It says whether that works and, if not, what to do about it. This is the first thing to run when submissions are being flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</div>
+				</div>
+				<div class="gdpr-action-result" id="gdpr-self-test-result" hidden></div>
+			</div>
+
+			<div class="gdpr-option-row gdpr-action-row" data-diag-task="reset_fp">
+				<div class="gdpr-option-main">
+					<span class="gdpr-option-label"><?php esc_html_e( 'Address measurement', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></span>
+					<p class="gdpr-option-short"><?php esc_html_e( 'How often a solved puzzle came back from a different address than it was handed to — the sign of a cache or proxy in front of your site.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
+				</div>
+				<div class="gdpr-option-control">
+					<span class="gdpr-action-value" data-diag-value="fp">
+						<?php
+						echo esc_html(
+							$fp_share['total'] > 0
+								/* translators: 1: percentage from another address, 2: number of measured puzzles */
+								? sprintf( __( '%1$d%% of %2$d measured', 'gdpr-compliant-recaptcha-for-all-forms' ), $fp_share['percent'], $fp_share['total'] )
+								: __( 'nothing measured yet', 'gdpr-compliant-recaptcha-for-all-forms' )
+						);
+						?>
+					</span>
+					<button type="button" class="button button-secondary" data-diag-run="reset_fp"
+						data-nonce="<?php echo esc_attr( $diag_nonce ); ?>"
+						<?php disabled( 0, $fp_share['total'] ); ?>>
+						<?php esc_html_e( 'Reset', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</button>
+					<button type="button" class="gdpr-help-toggle" aria-expanded="false" aria-controls="help_gdpr_reset_fp">?</button>
+					<div class="gdpr-help-popover" id="help_gdpr_reset_fp" hidden>
+						<?php esc_html_e( 'Each puzzle is handed to one visitor and solved a moment later. This measures how often the solution comes back from a different IP address than the puzzle went to. Submissions are accepted either way — a high share simply means a cache or proxy sits in front of your site, or the visitor\'s address changes between requests. If it is high, check the "Trusted proxies" setting. Resetting starts a fresh measurement, e.g. after changing that setting.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</div>
+				</div>
+				<div class="gdpr-action-result" hidden></div>
+			</div>
+
+			<div class="gdpr-option-row gdpr-action-row" data-diag-task="reset_echo">
+				<div class="gdpr-option-main">
+					<span class="gdpr-option-label"><?php esc_html_e( 'Repeat-sender lock', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></span>
+					<p class="gdpr-option-short"><?php esc_html_e( 'Values from recent spam, briefly remembered as one-way hashes so the same sender is caught again on any form.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
+				</div>
+				<div class="gdpr-option-control">
+					<span class="gdpr-action-value" data-diag-value="echo">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: %d: number of values currently held in the repeat-sender lock */
+								_n( '%d value held', '%d values held', $echo_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
+								$echo_count
+							)
+						);
+						?>
+					</span>
+					<button type="button" class="button button-secondary" data-diag-run="reset_echo"
+						data-nonce="<?php echo esc_attr( $diag_nonce ); ?>"
+						data-confirm="<?php esc_attr_e( 'Release all held values?', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+						data-confirm-yes="<?php esc_attr_e( 'Release', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+						data-confirm-no="<?php esc_attr_e( 'Cancel', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+						<?php disabled( 0, $echo_count ); ?>>
+						<?php esc_html_e( 'Release', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</button>
+					<button type="button" class="gdpr-help-toggle" aria-expanded="false" aria-controls="help_gdpr_reset_echo">?</button>
+					<div class="gdpr-help-popover" id="help_gdpr_reset_echo" hidden>
+						<?php esc_html_e( 'The repeat-sender lock briefly remembers values from spam submissions (as one-way hashes) so the same sender is caught again on any form. Releasing frees every value it currently holds at once — use it if a legitimate sender got caught. No data is lost, and the lock rebuilds itself as new spam arrives.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</div>
+				</div>
+				<div class="gdpr-action-result" hidden></div>
+			</div>
+
+		</div>
+	</section>
+		<?php
+	}
+
+	/**
+	 * Run one of the two diagnostic resets and answer with the FRESH value, so the row
+	 * can update itself — the changed number is the success feedback, no toast needed.
+	 *
+	 * Admin-only and nonce-guarded, like the self-test: one of these clears a spam
+	 * defence, which is nothing a stranger who knows an action name may trigger.
+	 *
+	 * @return void
+	 */
+	public function diag_task_callback() {
+		$nonce = isset( $_POST['security_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['security_nonce'] ) ) : '';
+		$task  = isset( $_POST['task'] ) ? sanitize_key( wp_unslash( $_POST['task'] ) ) : '';
+
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $nonce, self::AJAX_DIAG_TASK ) ) {
+			wp_send_json_error( array( 'message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+		}
+
+		if ( 'reset_fp' === $task ) {
+			delete_option( Option::POW_FP_MATCHED_TOTAL );
+			delete_option( Option::POW_FP_MISMATCHED_TOTAL );
+			delete_option( Option::POW_FP_LAST_MISMATCH_AT );
+
+			wp_send_json_success(
+				array(
+					'value'   => __( 'nothing measured yet', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'message' => __( 'Measurement restarted.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'empty'   => true,
+				)
+			);
+		}
+
+		if ( 'reset_echo' === $task ) {
+			Echo_Store::clear();
+
+			wp_send_json_success(
+				array(
+					'value'   => sprintf(
+						/* translators: %d: number of values currently held in the repeat-sender lock */
+						_n( '%d value held', '%d values held', 0, 'gdpr-compliant-recaptcha-for-all-forms' ),
+						0
+					),
+					'message' => __( 'All held values released.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'empty'   => true,
+				)
+			);
+		}
+
+		wp_send_json_error( array( 'message' => __( 'Unknown task.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
 	}
 }

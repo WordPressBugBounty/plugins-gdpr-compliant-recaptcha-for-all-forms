@@ -61,8 +61,126 @@
 	color: #8a5a00;
 }
 
+/* Diagnostics panel (Settings_Menu::render_diagnostics_panel()): action rows speak the
+ * same grammar as option rows, plus two things an option has not — the live value the
+ * action operates on, and a full-width result area under the row. */
+.gdpr-action-row {
+	flex-wrap: wrap;
+	scroll-margin-top: 60px;
+}
+
+.gdpr-action-value {
+	font-size: 12px;
+	color: #666;
+	white-space: nowrap;
+}
+
+.gdpr-action-result {
+	flex-basis: 100%;
+	margin-top: 10px;
+	padding: 10px 12px;
+	background: #fff;
+	border: 1px solid #e0e0e0;
+	border-left: 4px solid #d0d0d0;
+	border-radius: 8px;
+	color: #1d2327;
+	max-width: 90ch;
+}
+
+/* Colour lives on the left edge and in the verdict — not as a full-bleed tint, which
+ * would make this the loudest thing on a page of white cards. */
+.gdpr-action-result.gdpr-result-ok {
+	border-left-color: #1e7e34;
+}
+
+.gdpr-action-result.gdpr-result-problem {
+	border-left-color: #a50e0e;
+}
+
+.gdpr-action-result.gdpr-result-ask {
+	border-left-color: #8a5a00;
+}
+
+.gdpr-result-verdict {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.gdpr-result-verdict::before {
+	content: "";
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: #b0b0b0;
+	flex: 0 0 auto;
+}
+
+.gdpr-result-ok .gdpr-result-verdict::before {
+	background: #1e7e34;
+}
+
+.gdpr-result-problem .gdpr-result-verdict::before {
+	background: #a50e0e;
+}
+
+.gdpr-result-ask .gdpr-result-verdict::before {
+	background: #8a5a00;
+}
+
+.gdpr-result-code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 11px;
+	font-weight: 400;
+	color: #666;
+	background: #f2f2f2;
+	border-radius: 4px;
+	padding: 1px 6px;
+}
+
+.gdpr-result-body {
+	margin: 6px 0 0;
+	font-size: 13px;
+	line-height: 1.55;
+	color: #3c434a;
+}
+
+.gdpr-result-note {
+	margin: 6px 0 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #666;
+}
+
+.gdpr-confirm-cancel {
+	font-size: 12px;
+}
+
+/* Storage alarm (Settings_Menu::render_status_strip()): the server accepted a proof of
+ * work and could not store it. Red rather than amber because, unlike the other health
+ * items, this one cannot fire on a healthy site. */
+.gdpr-status-item.gdpr-status-red {
+	background: #fce8e6;
+	color: #a50e0e;
+}
+
+.gdpr-store-failure-hint {
+	margin: 8px 0 16px;
+	color: #a50e0e;
+	max-width: 780px;
+}
+
+.gdpr-store-failure-hint code {
+	background: #fce8e6;
+	color: #a50e0e;
+}
+
 .gdpr-status-item.gdpr-status-green::before,
-.gdpr-status-item.gdpr-status-amber::before {
+.gdpr-status-item.gdpr-status-amber::before,
+.gdpr-status-item.gdpr-status-red::before {
 	content: "";
 	width: 8px;
 	height: 8px;

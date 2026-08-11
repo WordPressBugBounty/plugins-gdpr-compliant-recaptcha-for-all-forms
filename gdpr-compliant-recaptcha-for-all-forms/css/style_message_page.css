@@ -234,6 +234,43 @@
 	border-radius: 4px;
 }
 
+/* Link from a "No proof of work" verdict to the settings-page self-test. Quiet, but it
+ * is the one actionable step from this screen — see Message_Page::render_message(). */
+.gdpr-reason-selftest {
+	margin: -4px 0 10px 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #666;
+	max-width: 90ch;
+}
+
+/* PoW-probe line above the detail table (technical row `_gdpr_pow_probe`,
+ * Message_Page::render_message()). Only present on "no proof of work" verdicts, and the
+ * one line worth quoting in a support report — hence the monospace value plus a full
+ * sentence of guidance underneath, styled like .gdpr-reason-detail so the two read as
+ * one block: verdict, cause, evidence. */
+.gdpr-probe-line {
+	margin: 0 0 8px 0;
+	font-size: 12px;
+	color: #555;
+}
+
+.gdpr-probe-line code {
+	font-size: 11px;
+	background: #f0f0f1;
+	padding: 1px 6px;
+	border-radius: 4px;
+}
+
+.gdpr-probe-hint {
+	display: inline-block;
+	margin-top: 4px;
+	font-size: 12px;
+	line-height: 1.5;
+	color: #666;
+	max-width: 90ch;
+}
+
 /* Same pill shape as .gdpr-block-btn, neutral color like .gdpr-credential-btn — this
  * button adds an admin-configured monitoring rule, not a block. */
 .gdpr-monitor-route-btn {

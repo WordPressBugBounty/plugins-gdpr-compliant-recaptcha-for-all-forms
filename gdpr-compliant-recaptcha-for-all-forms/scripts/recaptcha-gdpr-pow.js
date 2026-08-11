@@ -38,6 +38,10 @@ var gdpr_compliant_recaptcha_token = null;
 var gdpr_compliant_recaptcha = {
 	stampLoaded : false,
 	renewDebounceTimer : null,
+	// Consecutive solves the server did not confirm with {accepted:true} (see
+	// handleUnconfirmedSolve()). Reset to 0 by every confirmed solve; bounds the retry
+	// so a permanently broken check_stamp cannot become a request storm.
+	unconfirmedSolves : 0,
 	// Create an array to store override functions
 	originalFetches : [],
 	originalXhrOpens : [],
@@ -609,32 +613,93 @@ var gdpr_compliant_recaptcha = {
 					'&hashDifficulty=' + encodeURIComponent(hashDifficulty) +
 					'&hashNonce=' + encodeURIComponent(nonce)
 		})
-		.then(function () {
-			// The solved token is now the submission token, full stop.
+		.then(function (response) {
+			var ok = !!(response && response.ok);
+			return response.text().then(function (text) {
+				return { ok: ok, text: text };
+			}, function () {
+				return { ok: false, text: '' };
+			});
+		})
+		.then(function (answer) {
+			// THE TOKEN PUBLISHED HERE MUST HAVE A SERVER-SIDE ROW BEHIND IT — and until
+			// 5.3.2 this .then() published it no matter what came back, because it ignored
+			// the response entirely. Every way check_stamp() can decline (wp_die() on an
+			// expired token or a difficulty below the current base, a WAF answering 403 to
+			// the POST, an admin-ajax "0", a server that accepted the solve but could not
+			// STORE it) therefore produced exactly the same silent damage: a valid token
+			// with no row, published as the submission token, so the next submission was
+			// classified no_pow:token_no_row and blocked — with a green-looking handshake
+			// in the network tab (HANDBUCH.md §12 cause 7).
 			//
-			// THE TOKEN PUBLISHED HERE ALWAYS HAS A SERVER-SIDE ROW BEHIND IT. This used
-			// to read the response body and, on {rechallenge:true}, adopt the freshly
-			// received — and NOT YET SOLVED — chain token as the submission token, then
-			// keep computing. That is what made a submission sent during such a round
-			// fail closed (no_pow:chain_no_row): the published token was valid but had no
-			// stamp row until the round finished, and the server's bridging poll window
-			// was calibrated on an optimistic hash rate. The solve-time gate that issued
-			// those re-challenges is gone (see class-stamp.php / class-proof-of-work.php),
-			// so there is nothing left to adopt — and nothing may be published here again
-			// before the server has confirmed it.
-			//
-			// A site still running an older build answers {rechallenge:true}; this client
-			// then keeps the base token, which has no row, and the submission falls back
-			// to the IP path — exactly as for a client that never solved. Note this is
-			// genuinely WORSE than the pre-update script on that same old server, which
-			// would have played the chain out and landed a row: the combination only
-			// arises from a rollback with the new JS still cached, it is self-healing on
-			// the next cache cycle, and it is the price of not letting this client be
-			// talked into publishing an unsolved token ever again.
-			gdpr_compliant_recaptcha_token = hashStamp;
-			gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
+			// So: publish only on an explicit {accepted:true}. Anything else is treated as
+			// "not confirmed" — the client keeps whatever token it already had (which does
+			// have a row) and tries the handshake again, once.
+			if (gdpr_compliant_recaptcha.solveConfirmed(answer.ok, answer.text)) {
+				gdpr_compliant_recaptcha.unconfirmedSolves = 0;
+				gdpr_compliant_recaptcha_token = hashStamp;
+				gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
+				return;
+			}
+			gdpr_compliant_recaptcha.handleUnconfirmedSolve('check_stamp did not confirm the solved puzzle');
+		})
+		.catch(function () {
+			// No .catch existed here before: a network failure on this POST was an
+			// unhandled rejection, and the pipeline simply stopped without a word.
+			gdpr_compliant_recaptcha.handleUnconfirmedSolve('check_stamp request failed');
 		});
 		return true;
+	},
+
+	// Whether a check_stamp answer really confirms a stored solve. Pure (no DOM, no
+	// globals) so tests/js/pow-helpers.test.js can pin it: a 4xx/5xx, an empty body, a
+	// bare admin-ajax "0", an {accepted:false} from a server that could not store the
+	// row, and an older server's {rechallenge:true} must all read as NOT confirmed.
+	// parseJsonLoose() keeps a stray PHP notice in front of the JSON from counting as a
+	// failure.
+	solveConfirmed : function ( ok, text ) {
+		if ( ! ok ) {
+			return false;
+		}
+		var data = gdpr_compliant_recaptcha.parseJsonLoose( text );
+		return !! ( data && true === data.accepted );
+	},
+
+	// Whether an unconfirmed solve should be retried, given how many have already gone
+	// unconfirmed in a row. Pure, so the bound itself is pinned by
+	// tests/js/pow-helpers.test.js: exactly ONE retry. Both ends matter — dropping the
+	// retry leaves a transient hiccup as a dead end for the whole page view, and
+	// dropping the bound turns a permanently broken check_stamp (a WAF that answers 403
+	// forever) into a request storm, one full proof-of-work per round.
+	shouldRetryUnconfirmed : function ( unconfirmedSolves ) {
+		return ( parseInt( unconfirmedSolves, 10 ) || 0 ) < 2;
+	},
+
+	// A solve the server did not confirm. Retry the whole handshake ONCE (a fresh token
+	// costs one more solve and heals a transient 5xx/WAF hiccup or a token that expired
+	// while a slow device was hashing); after that, warn and wait for the setInterval
+	// renew rather than turning a permanently broken check_stamp into a request storm.
+	// The console line is deliberate: it is the one artefact that tells a site owner
+	// "the handshake is NOT green" while everything else still looks fine.
+	//
+	// THE ACCEPTED COST of not publishing here: if the server DID store the row and only
+	// its answer was unreadable (a corrupted body no parseJsonLoose() can salvage), this
+	// client withholds a token that would have worked, and the submission falls back to
+	// the address path. Under a stable address that path holds the very row this solve
+	// created, so nothing is lost; under a ROTATING address (dual stack, proxy pool) it
+	// is a block where the old client delivered. Two faults have to coincide for that,
+	// and the alternative — publishing on an unread answer — is precisely the silent
+	// failure this whole change removes.
+	handleUnconfirmedSolve : function ( reason ) {
+		gdpr_compliant_recaptcha.unconfirmedSolves++;
+		if ( typeof console !== 'undefined' && console.warn ) {
+			console.warn( 'gdpr-recaptcha: ' + reason + ' — the solved puzzle was not stored, so this token stays unpublished.' );
+		}
+		if ( gdpr_compliant_recaptcha.shouldRetryUnconfirmed( gdpr_compliant_recaptcha.unconfirmedSolves ) ) {
+			setTimeout( function () {
+				gdpr_compliant_recaptcha.initCaptcha();
+			}, 1500 );
+		}
 	},
 
 	// Last resort when get_stamp is unreachable: solve the token that was embedded at
@@ -893,6 +958,8 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		cacheBuster : gdpr_compliant_recaptcha.cacheBuster,
 		isPluginCall : gdpr_compliant_recaptcha.isPluginCall,
 		bodyBrand : gdpr_compliant_recaptcha.bodyBrand,
-		injectTokenIntoBody : gdpr_compliant_recaptcha.injectTokenIntoBody
+		injectTokenIntoBody : gdpr_compliant_recaptcha.injectTokenIntoBody,
+		solveConfirmed : gdpr_compliant_recaptcha.solveConfirmed,
+		shouldRetryUnconfirmed : gdpr_compliant_recaptcha.shouldRetryUnconfirmed
 	};
 }

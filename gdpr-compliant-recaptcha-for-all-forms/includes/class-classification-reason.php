@@ -227,6 +227,62 @@ final class Classification_Reason {
 	}
 
 	/**
+	 * Build the PoW PROBE string: what the server actually saw in `…_stamp_rgs` at the
+	 * moment it decided a submission had no usable proof of work.
+	 *
+	 * Deliberately NOT part of the reason string, for the same reason scoring() is not:
+	 * reason strings are corpus labels living in stored rows and exported training data,
+	 * and appending measurements to `no_pow:token_no_row` would both break their
+	 * comparability across releases and knock every such row out of DETAIL_LABELS (the
+	 * human explanation the message view shows). This is a separate datum in its own
+	 * technical field `_gdpr_pow_probe`.
+	 *
+	 * WHY IT EXISTS. "No proof of work" has several possible shapes, and until now the
+	 * server threw away the one piece of evidence that tells them apart — whether a row
+	 * for that token existed at all, whether one existed but was too old or spent, or
+	 * whether the address had nothing either. Two support rounds were spent guessing
+	 * between exactly those (HANDBUCH.md §12 cause 7). One line per blocked submission
+	 * ends the guessing.
+	 *
+	 * Format (stable): `token_rows=<n>,token_age_s=<n|->,token_uses=<n|->,ip_rows=<n>,ip_age_s=<n|->,ip_uses=<n|->`
+	 * - `token_*` describe the row keyed by the submitted token (unique, so 0 or 1).
+	 * - `ip_rows` counts EVERY row for the submitting address; `ip_age_s` and `ip_uses`
+	 *   both describe the NEWEST of them — ONE row, so the pair always describes a state
+	 *   that actually existed. (Aggregating each value over all rows separately would
+	 *   print a row that never existed, e.g. a fresh exhausted row's age next to an old
+	 *   unused row's count, reading as "the fallback should have worked".)
+	 * - `-` means "no such row", never 0: "no row" and "a fresh row with 0 uses" are
+	 *   opposite findings and must not print the same.
+	 *
+	 * Ages are measured WITHOUT the time filter the consume queries apply, on purpose:
+	 * a row that exists but sits outside the window is precisely one of the answers this
+	 * is meant to distinguish, and a filtered query could never show it.
+	 *
+	 * @param int      $token_rows  Rows found for the token (0/1; 0 when no token was posted).
+	 * @param int|null $token_age_s Age of that row in seconds, null when there is none.
+	 * @param int|null $token_uses  Its consumed-use count, null when there is none.
+	 * @param int      $ip_rows     Rows found for the submitting address.
+	 * @param int|null $ip_age_s    Age of the newest of them, null when there are none.
+	 * @param int|null $ip_uses     Lowest use count among them, null when there are none.
+	 * @return string e.g. "token_rows=0,token_age_s=-,token_uses=-,ip_rows=1,ip_age_s=7,ip_uses=0".
+	 */
+	public static function pow_probe( $token_rows, $token_age_s, $token_uses, $ip_rows, $ip_age_s, $ip_uses ) {
+		$number = static function ( $value ) {
+			return null === $value ? '-' : (string) max( 0, (int) $value );
+		};
+
+		// The two counts are always a number (0 = "no such row"); only the ages and use
+		// counts can be absent, and those are exactly the values where 0 would be a
+		// misleading answer rather than a missing one.
+		return 'token_rows=' . max( 0, (int) $token_rows )
+			. ',token_age_s=' . $number( $token_age_s )
+			. ',token_uses=' . $number( $token_uses )
+			. ',ip_rows=' . max( 0, (int) $ip_rows )
+			. ',ip_age_s=' . $number( $ip_age_s )
+			. ',ip_uses=' . $number( $ip_uses );
+	}
+
+	/**
 	 * The code part of a reason string: everything before the first colon (the whole
 	 * string for codes that carry no detail).
 	 *

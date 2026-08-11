@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.3.2
+Stable tag: 5.3.3
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.3.3 =
+Maintenance release — see the changelog for details.
 = 5.3.2 =
 Maintenance release — see the changelog for details.
 = 5.3.1 =
@@ -173,6 +175,21 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.3.3 =
+* Added: once you have fixed a storage problem, a green self-test clears the warning instead of leaving it up for a day
+* Changed: the self-test and the two diagnostic resets now live on their own Diagnostics tab
+* Changed: a self-test result now leads with its verdict and shows the error code, instead of one long coloured sentence
+* Added: a blocked message links straight to the self-test, one click from where the problem is visible
+* Added: a self-test button that runs the whole invisible check against your own site and answers in one sentence
+* Added: the self-test now says outright when a solved puzzle could not be stored, instead of blaming stale code
+* Fixed: where the time-window setting had gone missing, solved puzzles were discarded while still counted as valid
+* Added: a blocked submission records what the server actually found, so a support case can be settled in one round
+* Fixed: a solved puzzle the server could not store was still reported as accepted, so every later submission was blocked
+* Fixed: the browser no longer treats an unanswered or rejected puzzle as solved, and retries the handshake instead
+* Added: the settings screen now names it outright when solved puzzles cannot be written to the database
+* New: AI agents can now run a plain-language self-test of the spam protection and read its health figures.
+* New: optional and off by default -- an AI agent can extend which forms are monitored, guarded against lockouts
+* New: the plugin now appears on the Connectors screen of WordPress 7.0, stating plainly that it uses no external service.
 = 5.3.2 =
 * Fixed: the block reason shown for follow-up tokens no longer refers to a waiting window that no longer exists
 * Removed: the extra second puzzle some visitors were given is gone — one puzzle per visitor, always

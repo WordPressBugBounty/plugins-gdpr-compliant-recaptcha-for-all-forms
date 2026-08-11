@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.3.2
+	 * Version: 5.3.3
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.3.2';
+	const VERSION = '5.3.3';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -84,6 +84,9 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-stamp.php';
 		require_once __DIR__ . '/includes/class-settings-menu.php';
 		require_once __DIR__ . '/includes/class-scope-sync.php';
+		require_once __DIR__ . '/includes/class-scope-add.php';
+		require_once __DIR__ . '/includes/class-ability-probe.php';
+		require_once __DIR__ . '/includes/class-abilities.php';
 		require_once __DIR__ . '/includes/class-dashboard-widget.php';
 		require_once __DIR__ . '/includes/class-analysis.php';
 
@@ -114,6 +117,10 @@ class RCM_Main {
 		// Same idiom: registers the credential-field proposal notice, its two
 		// one-click handlers and the message-inbox rescue ajax endpoint.
 		new Credential_Learning();
+		// Same idiom: registers the Abilities API surface (core 6.9+), the Connectors
+		// card (core 7.0+) and the stage-3 warning notice. All internally guarded, so
+		// this costs nothing on older WordPress.
+		new Abilities();
 		$this->dashboard_widget = new Dashboard_Widget();
 		if ( get_option( Option::POW_DIRECT_ANALYSIS_MODE ) ) {
 			$this->instance_analysis = new Analysis();
@@ -467,6 +474,27 @@ class RCM_Main {
 					// phpcs:enable WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				}
 
+				// rgs_stamp must be wide enough for the LONGEST token format, or
+				// `INSERT IGNORE` (check_stamp()) silently TRUNCATES instead of failing:
+				// affected rows would be 1, the storage confirmation would find its row,
+				// and consume_token_row() would then look for the full token and never
+				// match it — the token path dead, every submission quietly riding the IP
+				// fallback. Both new alarms are blind to that shape, which is why the
+				// column width is checked here instead: one-time, idempotent, and it can
+				// only ever widen. (This repo has created the column as VARCHAR(255) since
+				// 4.1.2; an installation older than that is the case this covers.)
+				$stamp_column = $wpdb->get_row(
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name from $wpdb->prefix, not user input; identifiers cannot be placeholders.
+					$wpdb->prepare( 'SHOW COLUMNS FROM ' . $table_name_stamp . ' LIKE %s', 'rgs_stamp' )
+				);
+				if ( $stamp_column && isset( $stamp_column->Type ) // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- MySQL's own column name in SHOW COLUMNS output.
+					&& preg_match( '/varchar\((\d+)\)/i', (string) $stamp_column->Type, $width ) // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase -- see above.
+					&& (int) $width[1] < 255
+				) {
+					// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name from $wpdb->prefix, not user input; identifiers cannot be placeholders.
+					$wpdb->query( 'ALTER TABLE ' . $table_name_stamp . ' MODIFY rgs_stamp VARCHAR(255)' );
+				}
+
 				// AP3: UNIQUE index on rgs_stamp. The uniqueness (not just lookup speed)
 				// is security-relevant: check_stamp() inserts with INSERT IGNORE, and
 				// only the unique key makes N concurrent solves of the SAME token
@@ -537,6 +565,9 @@ class RCM_Main {
 			add_option( Option::POW_UNDER_ATTACK_MODE, true );
 			add_option( Option::POW_UNDER_ATTACK_QUARANTINE, false );
 			add_option( Option::POW_CREDENTIAL_FIELDS, '' );
+			// Both AI-agent switches: a missing row must never read as "on".
+			add_option( Option::POW_ABILITIES_WRITE, false );
+			add_option( Option::POW_ABILITIES_UNSAFE, false );
 
 			if ( $is_fresh_install ) {
 				// Brand-new tables: there is no legacy cleartext credential to redact,
