@@ -17,11 +17,13 @@
  *
  * Fixed-width parsing (2/10/8/16/64), no separator.
  *
- * NO IP IN THE HMAC (v2, see POW_IP_BINDING_PLAN.md). The v1 format (92 chars, still
- * accepted for one release via create()/verify() below) bound the server-resolved IP
- * into the HMAC, which made every honest client whose observed address changes between
- * issuing and solving — page/response cache in front of get_stamp, proxy pool, plain
- * IPv4/IPv6 dual stack — fail verification and be classified as spam. Validity is
+ * NO IP IN THE HMAC (v2, see POW_IP_BINDING_PLAN.md). The v1 format (92 chars) bound
+ * the server-resolved IP into the HMAC, which made every honest client whose observed
+ * address changes between issuing and solving — page/response cache in front of
+ * get_stamp, proxy pool, plain IPv4/IPv6 dual stack — fail verification and be
+ * classified as spam. It was accepted for one transitional release and is gone since
+ * 5.3.4; there is now exactly ONE token format, and reintroducing a second one means
+ * reintroducing a path whose validity depends on the resolved address. Validity is
  * therefore IP-FREE now: the token identifies itself (its own row is looked up by
  * rgs_stamp), the IP was only ever an extra condition on top. What the HMAC still
  * binds is difficulty, issue time, the fingerprint and the random component, so none
@@ -39,7 +41,7 @@
  * hashed or not, ends up in the page source).
  *
  * No WordPress dependencies (no options, no $wpdb) → unit-testable in isolation,
- * see tests/unit/StampTokenTest.php. Stamp::get_stamp()/check_stamp() are the only
+ * see tests/unit/StampTokenV2Test.php. Stamp::get_stamp()/check_stamp() are the only
  * callers on the server side; the client never inspects the token's structure, it
  * only ever uses it as an opaque string to run the same hashcash search over
  * (scripts/recaptcha-gdpr-pow.js, unchanged proof-of-work algorithm).
@@ -60,9 +62,6 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * Stateless submission-binding token helpers.
  */
 final class StampToken {
-
-	/** LEGACY (v1) token length: 2 (difficulty) + 10 (issued_at) + 16 (random) + 64 (hmac). */
-	const LENGTH = 92;
 
 	/** Current (v2) token length: 2 + 10 (issued_at) + 8 (fingerprint) + 16 (random) + 64 (hmac). */
 	const LENGTH_V2 = 100;
@@ -241,116 +240,5 @@ final class StampToken {
 		return hash_equals( self::fingerprint( $ip, $salt ), $parsed['fp'] )
 			? self::STATUS_MATCH
 			: self::STATUS_MISMATCH;
-	}
-
-	/**
-	 * Build a LEGACY (v1) token string.
-	 *
-	 * Kept unchanged for one release so tokens issued by the previous version — and
-	 * still in flight in a browser tab or a cached page — keep verifying. Removal is
-	 * tracked in BACKLOG.md; nothing new is ever issued in this format.
-	 *
-	 * @param string $ip         Client IP the token is bound to (server-resolved).
-	 * @param string $salt       Server-side HMAC key (Option::POW_SALT).
-	 * @param int    $difficulty Number of leading zero bits the PoW must meet.
-	 * @param int    $issued_at  Unix timestamp the token was issued at.
-	 * @param string $random_hex 16 lower-case hex chars of caller-supplied randomness
-	 *                           (e.g. bin2hex(random_bytes(8))) — kept out of this pure
-	 *                           function so it stays deterministic and testable.
-	 * @return string 92-char token.
-	 */
-	public static function create( $ip, $salt, $difficulty, $issued_at, $random_hex ) {
-		$difficulty_part = sprintf( '%02d', max( 0, min( 99, (int) $difficulty ) ) );
-		$issued_at_part  = sprintf( '%010d', max( 0, (int) $issued_at ) );
-		$random_part     = strtolower( (string) $random_hex );
-
-		$hmac = hash_hmac(
-			'sha256',
-			(string) $ip . '|' . $difficulty_part . '|' . $issued_at_part . '|' . $random_part,
-			(string) $salt
-		);
-
-		return $difficulty_part . $issued_at_part . $random_part . $hmac;
-	}
-
-	/**
-	 * Parse a LEGACY (v1) token into its fields, strictly validating shape/length/charset.
-	 *
-	 * @param mixed $token Candidate token.
-	 * @return array{difficulty:int,issued_at:int,random:string,hmac:string}|null
-	 */
-	public static function parse( $token ) {
-		if ( ! is_string( $token ) || self::LENGTH !== strlen( $token ) ) {
-			return null;
-		}
-		// Whole token must be lower-case hex (decimal digits are a subset of hex, so
-		// the DD/II segments — which must be strictly decimal — are covered too).
-		if ( ! preg_match( '/^[0-9a-f]{92}$/', $token ) ) {
-			return null;
-		}
-
-		$difficulty_part = substr( $token, 0, 2 );
-		$issued_at_part  = substr( $token, 2, 10 );
-		$random_part     = substr( $token, 12, 16 );
-		$hmac_part       = substr( $token, 28, 64 );
-
-		// DD/II are sprintf('%0Nd', ...)-formatted decimal by create() and must never
-		// contain a-f — reject a token that smuggled a hex letter into those positions
-		// instead of silently (int)-casting a truncated value.
-		if ( ! ctype_digit( $difficulty_part ) || ! ctype_digit( $issued_at_part ) ) {
-			return null;
-		}
-
-		return array(
-			'difficulty' => (int) $difficulty_part,
-			'issued_at'  => (int) $issued_at_part,
-			'random'     => $random_part,
-			'hmac'       => $hmac_part,
-		);
-	}
-
-	/**
-	 * Verify a LEGACY (v1) token: well-formed, HMAC matches for the given IP/salt (via
-	 * hash_equals, timing-safe), not expired, and not implausibly far in the future.
-	 * Transitional only — see create(); v2 tokens go through verify_integrity().
-	 *
-	 * @param string $token          Candidate token.
-	 * @param string $ip             The IP to verify against — MUST be the server-
-	 *                               resolved IP (Stamp::get_client_ip()), never a
-	 *                               client-posted value, or the binding is worthless.
-	 * @param string $salt           Server-side HMAC key (Option::POW_SALT).
-	 * @param int    $now            Current unix timestamp.
-	 * @param int    $window_minutes Configured validity window (Option::POW_TIME_WINDOW);
-	 *                               clamped to a minimum of 1, mirroring ProofOfWork::time_bucket().
-	 * @return bool
-	 */
-	public static function verify( $token, $ip, $salt, $now, $window_minutes ) {
-		$parsed = self::parse( $token );
-		if ( null === $parsed ) {
-			return false;
-		}
-
-		$expected = self::create( $ip, $salt, $parsed['difficulty'], $parsed['issued_at'], $parsed['random'] );
-		if ( ! hash_equals( $expected, (string) $token ) ) {
-			return false;
-		}
-
-		$now = (int) $now;
-
-		// Future-skew tolerance: small clock drift between servers/load balancers is
-		// normal, but a token "issued" far in the future is a forgery attempt (or the
-		// server clock is broken either way — reject).
-		if ( $parsed['issued_at'] > ( $now + 120 ) ) {
-			return false;
-		}
-
-		// Expiry mirrors the same "window + 2 minutes" grace used elsewhere (rollover
-		// tolerance / DB cleanup buffer, see ProofOfWork::time_bucket / Stamp::check_request).
-		$window_seconds = ( max( 1, (int) $window_minutes ) + 2 ) * 60;
-		if ( ( $now - $parsed['issued_at'] ) > $window_seconds ) {
-			return false;
-		}
-
-		return true;
 	}
 }

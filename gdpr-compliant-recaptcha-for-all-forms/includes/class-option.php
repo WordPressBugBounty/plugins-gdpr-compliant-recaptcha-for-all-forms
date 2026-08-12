@@ -97,6 +97,19 @@ class Option {
 	const POW_ABILITIES_UNSAFE = self::PREFIX . 'pow_abilities_unsafe';
 
 	/**
+	 * Stage 3, READ half: an agent may list and read stored submissions.
+	 *
+	 * Named "..._READ_SUBMISSIONS", not "..._READ", on purpose. Option names become
+	 * API once published, and a bare "READ" next to the existing "WRITE" (which is
+	 * stage 2, scope additions) would read as the harmless one — while it actually
+	 * grants access to stored submissions including personal data. The name has to
+	 * say what is being read.
+	 *
+	 * @var string
+	 */
+	const POW_ABILITIES_READ_SUBMISSIONS = self::PREFIX . 'pow_abilities_read_submissions';
+
+	/**
 	 * Audit trail of scope changes made through an ability. Bookkeeping, not a
 	 * setting: not in prepare_options(), autoload=no. A short-lived transient (the
 	 * Scope_Sync notice pattern) would be useless here — an agent writes while the
@@ -150,6 +163,15 @@ class Option {
 
 	/** @var string */
 	const POW_TRUSTED_PROXIES = self::PREFIX . 'pow_trusted_proxies';
+
+	/**
+	 * Opt-in: treat a private/loopback peer as a reverse proxy while POW_TRUSTED_PROXIES
+	 * is empty. Default false — see ClientIp::is_private() for what it heals and what it
+	 * costs.
+	 *
+	 * @var string
+	 */
+	const POW_TRUST_PRIVATE_PROXY = self::PREFIX . 'pow_trust_private_proxy';
 
 	/** @var bool */
 	const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
@@ -505,7 +527,13 @@ class Option {
 
 		$filter_today = '';
 		if ( $today ) {
-			$filter_today = ' AND DATE(rgm.rgm_date) = CURDATE() ';
+			// rgm_date is written via current_time('mysql') (WP local time). CURDATE() reads
+			// the MySQL SESSION's timezone instead, so on any host where that differs from
+			// WordPress's the "today" filter would include/exclude the wrong rows. The
+			// threshold is computed in PHP from current_time() and handed to MySQL as a
+			// ready-made literal via prepare(), so MySQL never evaluates "now" itself.
+			$filter_today = ' AND rgm.rgm_date >= %s ';
+			$parameters[] = gmdate( 'Y-m-d 00:00:00', current_time( 'timestamp' ) ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
 		}
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber, WordPress.DB.PreparedSQL.NotPrepared -- $hidden_actions_placeholders/$existing_actions_placeholders only ever contain comma-separated "%s" tokens (their count matches the actual values later merged into $parameters); $sql_array/$hidden_sql_array are pre-built LIKE fragments from admin-defined JSON patterns (Option::generate_paths), not raw request input; $filter_today is one of two hardcoded literals. The sniff cannot statically verify the dynamic %s count, hence the false-positive replacement-count warning too.
 		$rows = $wpdb->get_results(
@@ -622,11 +650,16 @@ class Option {
 	 */
 	public static function count_messages_since_days( $type, $days ) {
 		global $wpdb;
-		$count = $wpdb->get_var(
+		// rgm_date is written via current_time('mysql') (WP local time); NOW() reads the
+		// MySQL SESSION's timezone instead, so on a host where that differs from WordPress's
+		// the count would drift. Threshold computed in PHP from current_time() and passed as
+		// a ready-made literal via prepare(), so MySQL never evaluates "now" itself.
+		$threshold = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) - $days * DAY_IN_SECONDS ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
+		$count     = $wpdb->get_var(
 			$wpdb->prepare(
-				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm WHERE rgm_type = %s AND rgm_date >= NOW() - INTERVAL %d DAY',
+				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm WHERE rgm_type = %s AND rgm_date >= %s',
 				$type,
-				$days
+				$threshold
 			)
 		);
 		return (int) $count;
@@ -651,20 +684,112 @@ class Option {
 	 */
 	public static function count_no_pow_reasons_since_hours( $hours ) {
 		global $wpdb;
-		$count = $wpdb->get_var(
+		// rgm_date is written via current_time('mysql') (WP local time); NOW() reads the
+		// MySQL SESSION's timezone instead, so on a host where that differs from WordPress's
+		// the count would drift. Threshold computed in PHP from current_time() and passed as
+		// a ready-made literal via prepare(), so MySQL never evaluates "now" itself.
+		$threshold = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) - $hours * HOUR_IN_SECONDS ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
+		$count     = $wpdb->get_var(
 			$wpdb->prepare(
 				'SELECT COUNT(*) FROM ' . $wpdb->prefix . 'recaptcha_gdpr_details_rgd rgd'
 				. ' INNER JOIN ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm rgm ON rgm.rgm_id = rgd.rgm_id'
-				. ' WHERE rgd.rgd_attribute = %s AND rgd.rgd_value LIKE %s AND rgm.rgm_date >= NOW() - INTERVAL %d HOUR',
+				. ' WHERE rgd.rgd_attribute = %s AND rgd.rgd_value LIKE %s AND rgm.rgm_date >= %s',
 				'_gdpr_reason',
 				// Underscore escaped: `_` is a single-character SQL wildcard, and the
 				// prefix must match literally even if a future reason code differs only
 				// in that position.
 				'no\_pow:%',
-				$hours
+				$threshold
 			)
 		);
 		return (int) $count;
+	}
+
+	/**
+	 * Bucket size (minutes) of the storage-independent no-stamp health counter.
+	 *
+	 * One hour per bucket, so HEALTH_NO_POW_WINDOW_HOURS buckets cover the window.
+	 * Coarser than the 5-minute buckets of the under-attack counter on purpose: that
+	 * one drives a live decision and needs to react within minutes, this one answers
+	 * "is something wrong with this site today".
+	 *
+	 * @var int
+	 */
+	const HEALTH_BUCKET_MINUTES = 60;
+
+	/**
+	 * Count one submission that was classified "no proof of work", independently of
+	 * whether it was stored.
+	 *
+	 * WHY THIS EXISTS NEXT TO count_no_pow_reasons_since_hours(). That one counts
+	 * `_gdpr_reason` rows, which only exist when save_message() ran — and for spam that
+	 * is gated behind POW_SAVE_SPAM. On a site with spam storage switched off it
+	 * therefore reads 0 forever, and 0 reads like "healthy" exactly where the operator
+	 * has nothing else to look at either. The "everything is suddenly spam" case is the
+	 * most common support case there is; a counter that goes blind precisely on the
+	 * sites that need it most is worse than no counter.
+	 *
+	 * DSGVO-neutral by construction, same shape as Stamp::increment_spam_counter():
+	 * one transient per time bucket, holding a number. No per-client data, nothing that
+	 * could identify a visitor, and it expires on its own.
+	 *
+	 * Non-atomic get+set, the same accepted trade-off as the under-attack counter: a
+	 * lost increment under concurrency moves a diagnostic number by one and never a
+	 * security decision.
+	 *
+	 * @return void
+	 */
+	public static function increment_no_pow_health_counter() {
+		$key   = self::health_bucket_key( time() );
+		$count = (int) get_transient( $key );
+		// TTL one hour beyond the window, so the oldest bucket the sum reads is still
+		// alive when it is read.
+		set_transient( $key, $count + 1, ( self::HEALTH_NO_POW_WINDOW_HOURS + 1 ) * HOUR_IN_SECONDS );
+	}
+
+	/**
+	 * Sum of the storage-independent counter over the lookback window.
+	 *
+	 * @return int
+	 */
+	public static function no_pow_health_counter_sum() {
+		$now   = time();
+		$total = 0;
+		for ( $hours_ago = 0; $hours_ago < self::HEALTH_NO_POW_WINDOW_HOURS; $hours_ago++ ) {
+			$total += (int) get_transient( self::health_bucket_key( $now - ( $hours_ago * HOUR_IN_SECONDS ) ) );
+		}
+
+		return $total;
+	}
+
+	/**
+	 * Transient key of the bucket a timestamp falls into.
+	 *
+	 * @param int $timestamp Unix timestamp.
+	 * @return string
+	 */
+	private static function health_bucket_key( $timestamp ) {
+		return self::PREFIX . 'no_pow_health_' . ProofOfWork::time_bucket( (int) $timestamp, self::HEALTH_BUCKET_MINUTES );
+	}
+
+	/**
+	 * The figure the status strip and the dashboard widget show: the LARGER of the two
+	 * no-stamp counters.
+	 *
+	 * MAXIMUM, not sum. Both count the same events — a submission classified no_pow —
+	 * they just see different subsets of them: the stored-rows query misses everything
+	 * that was not saved, the bucket counter misses everything from before it existed
+	 * or from outside its transient lifetime. Adding them would double-count every
+	 * submission both of them saw, which on a normal site is most of them. The maximum
+	 * is the sharpest lower bound the two can jointly justify.
+	 *
+	 * @return int
+	 */
+	public static function no_pow_health_count() {
+		return max(
+			self::count_no_pow_reasons_since_hours( self::HEALTH_NO_POW_WINDOW_HOURS ),
+			self::no_pow_health_counter_sum()
+		);
 	}
 
 	/**

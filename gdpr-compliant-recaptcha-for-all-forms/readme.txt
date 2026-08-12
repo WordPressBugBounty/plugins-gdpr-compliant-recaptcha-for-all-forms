@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.3.3
+Stable tag: 5.3.4
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.3.4 =
+Fixes every submission being flagged as spam where PHP and the database run in different time zones, and closes three security gaps around address checking. If you use the site whitelist, check that its entries name your site's real address.
 = 5.3.3 =
 Maintenance release — see the changelog for details.
 = 5.3.2 =
@@ -175,6 +177,22 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.3.4 =
+* Fixed: submissions are no longer all flagged as spam on servers whose database connections disagree about the time zone.
+* Fixed: the spam and health figures in the status bar and dashboard widget now count the right day on servers whose database time zone differs from the site's.
+* Fixed: old messages are now deleted exactly on schedule on sites whose time zone is not UTC, instead of a few hours early or late.
+* Security: a "/0" range in the trusted proxy list no longer makes every visitor a trusted proxy.
+* Security: the site whitelist can no longer be claimed with a forged Host header.
+* Security: a submission can no longer exempt its own fields from spam analysis by declaring them password fields.
+* Added: a "/0" entry in the trusted proxy list is now refused when you save it, with an explanation, instead of being stored and quietly doing nothing.
+* Added: AI agents can be allowed to read stored submissions, and separately to change protection settings and delete submissions. Two switches, both off by default.
+* Added: an option to trust a proxy on a private network when no trusted proxy is configured, for sites whose host does not publish the proxy address.
+* Added: the analysis mode now shows why a submission was judged the way it was, not just what it was.
+* Added: the status bar shows which address the plugin sees for you, and where it took it from.
+* Fixed: the "submissions without a stamp row" figure now also counts when storing spam is switched off, where it used to read zero and look healthy.
+* Fixed: the IP whitelist now understands subnets and different spellings of the same address, instead of matching text exactly.
+* Changed: only the current puzzle format is accepted now; the transitional formats carried since 5.3.2 are gone.
+* Note: site whitelist entries must name your site's real address; an entry naming an alias (www versus the bare domain) no longer matches.
 = 5.3.3 =
 * Added: once you have fixed a storage problem, a green self-test clears the warning instead of leaving it up for a day
 * Changed: the self-test and the two diagnostic resets now live on their own Diagnostics tab

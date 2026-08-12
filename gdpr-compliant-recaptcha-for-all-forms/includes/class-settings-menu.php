@@ -481,7 +481,7 @@ class Settings_Menu {
 		);
 
 		$this->options = array(
-			Option::POW_DIRECT_ANALYSIS_MODE    => new Option(
+			Option::POW_DIRECT_ANALYSIS_MODE       => new Option(
 				__( 'Direct analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -504,7 +504,7 @@ class Settings_Menu {
 				'🕵️',
 				__( 'Adds an inline helper to your live forms so you can teach the spam check about them without leaving the page.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ANALYSIS_MODE           => new Option(
+			Option::POW_ANALYSIS_MODE              => new Option(
 				__( 'Analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -532,7 +532,7 @@ class Settings_Menu {
 				'🔍',
 				__( 'Records every incoming POST submission so you can add unrecognized form types to the spam check.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_EXPLICIT_ACTION         => new Option(
+			Option::POW_EXPLICIT_ACTION            => new Option(
 				__( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_ajax_actions(),
@@ -556,7 +556,7 @@ class Settings_Menu {
 				'⚙️✔️',
 				__( 'Names the specific AJAX/form actions that the spam check should apply to when running in Explicit mode.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_PARAMETER_PATTERN       => new Option(
+			Option::POW_PARAMETER_PATTERN          => new Option(
 				__( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_recognition_patterns(),
@@ -577,7 +577,7 @@ class Settings_Menu {
 				'🔍✔️',
 				__( 'Defines field/value patterns that identify a submission type so the spam check applies to it.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_REST_ROUTES             => new Option(
+			Option::POW_REST_ROUTES                => new Option(
 				__( 'Apply on REST routes', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_rest_routes(),
@@ -596,7 +596,7 @@ class Settings_Menu {
 				'🧭✔️',
 				__( 'Names the REST API routes that the spam check should apply to, for builders that submit over REST.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK_LOGIN             => new Option(
+			Option::POW_BLOCK_LOGIN                => new Option(
 				__( 'Apply for WordPress-Login', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -612,7 +612,7 @@ class Settings_Menu {
 				'🔒',
 				__( 'Applies the proof-of-work check to the WordPress login form in addition to your other forms.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK                   => new Option(
+			Option::POW_BLOCK                      => new Option(
 				__( 'Block spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -621,7 +621,7 @@ class Settings_Menu {
 				'⛔', // Blocking
 				__( 'Blocks submissions classified as spam instead of letting them through.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SPAM               => new Option(
+			Option::POW_FLAG_SPAM                  => new Option(
 				__( 'Flag spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -630,7 +630,7 @@ class Settings_Menu {
 				'🚩',
 				__( 'Lets spam through but marks it so your mail client can filter it into a spam folder.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SUFFIXES           => new Option(
+			Option::POW_FLAG_SUFFIXES              => new Option(
 				__( 'Fieldname:prefix to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -639,7 +639,7 @@ class Settings_Menu {
 				'_*',
 				__( 'Adds a text prefix such as [spam] to a chosen field when a message is flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_TAGS               => new Option(
+			Option::POW_FLAG_TAGS                  => new Option(
 				__( 'New "POST" field to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -665,7 +665,7 @@ class Settings_Menu {
 				'+',
 				__( 'Adds a brand-new field with a fixed value to messages that are flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ERROR_MESSAGE           => new Option(
+			Option::POW_ERROR_MESSAGE              => new Option(
 				__( 'Error message', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::STRING,
 				__( 'Your message has been classified as spam! If you are a human, we are very sorry. Please give us notice via email.', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -681,7 +681,7 @@ class Settings_Menu {
 				'❌',
 				__( 'Sets the message shown to visitors on the frontend when their submission is blocked as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SIMULATE_SPAM           => new Option(
+			Option::POW_SIMULATE_SPAM              => new Option(
 				__( 'Simulate spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -693,7 +693,7 @@ class Settings_Menu {
 				'📈',
 				__( 'Treats every incoming submission as spam so you can safely test blocking and flagging before going live.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FAIL_2_BAN_PATH         => new Option(
+			Option::POW_FAIL_2_BAN_PATH            => new Option(
 				__( 'Path to save spam approaches to syslog', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -720,7 +720,7 @@ class Settings_Menu {
 				'🛡',
 				__( 'Writes failed logins and spam attempts to log files that tools like Fail2Ban can monitor.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_CLEAN              => new Option(
+			Option::POW_SAVE_CLEAN                 => new Option(
 				__( 'Save clean messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -733,7 +733,7 @@ class Settings_Menu {
 				'💾',
 				__( 'Stores non-spam submissions in the message inbox so you can review them later.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_SPAM               => new Option(
+			Option::POW_SAVE_SPAM                  => new Option(
 				__( 'Save spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -742,7 +742,7 @@ class Settings_Menu {
 				'💾',
 				__( 'Stores submissions classified as spam in the spam inbox so you can review them later.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_LOGIN              => new Option(
+			Option::POW_SAVE_LOGIN                 => new Option(
 				__( 'Save Logins', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -751,7 +751,7 @@ class Settings_Menu {
 				'🔒💾',
 				__( 'Records login and password-reset submissions in the message inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SAVE               => new Option(
+			Option::POW_FLAG_SAVE                  => new Option(
 				__( 'Save spam messages with flag', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -760,7 +760,7 @@ class Settings_Menu {
 				'🚩💾',
 				__( 'Keeps the spam flag on messages that are saved, instead of stripping it before saving.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_IP                 => new Option(
+			Option::POW_SAVE_IP                    => new Option(
 				__( 'Save spam messages with IP', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -769,7 +769,7 @@ class Settings_Menu {
 				'🛡️💾',
 				__( "Stores the submitter's IP address with saved spam messages (not GDPR-compliant).", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SKIP_FIELDS             => new Option(
+			Option::POW_SKIP_FIELDS                => new Option(
 				__( 'Skip fields from saving and spam analysis', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -810,7 +810,7 @@ class Settings_Menu {
 				'🚫▭',
 				__( 'Excludes specific fields, such as passwords, from being saved with messages and from spam/gibberish analysis.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CREDENTIAL_FIELDS       => new Option(
+			Option::POW_CREDENTIAL_FIELDS          => new Option(
 				__( 'Credential fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -832,7 +832,7 @@ class Settings_Menu {
 				'🔑🚫',
 				__( 'Field names whose values are stored as "[redacted]" — normally filled by confirming the plugin\'s own suggestions.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MESSAGE_HEADS           => new Option(
+			Option::POW_MESSAGE_HEADS              => new Option(
 				__( 'Subject fields', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -861,7 +861,7 @@ class Settings_Menu {
 				'🔤',
 				__( 'Builds a readable subject line for saved messages from one or more submitted fields.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SAVE_CART               => new Option(
+			Option::POW_SAVE_CART                  => new Option(
 				__( 'Save WooCommerce shopping carts', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -870,7 +870,7 @@ class Settings_Menu {
 				'🛒',
 				__( 'Saves WooCommerce shopping cart activity as messages in the inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_INBOX       => new Option(
+			Option::POW_CRON_DELETE_INBOX          => new Option(
 				__( 'Automatic Message Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -879,7 +879,7 @@ class Settings_Menu {
 				'🗑️✉️',
 				__( 'Automatically deletes messages from the inbox after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_SPAM        => new Option(
+			Option::POW_CRON_DELETE_SPAM           => new Option(
 				__( 'Automatic Spam Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -888,7 +888,7 @@ class Settings_Menu {
 				'🗑️📩',
 				__( 'Automatically deletes messages from the spam inbox after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_CRON_DELETE_TRASH       => new Option(
+			Option::POW_CRON_DELETE_TRASH          => new Option(
 				__( 'Automatic Trash Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -897,7 +897,7 @@ class Settings_Menu {
 				'🗑️📨',
 				__( 'Automatically deletes messages from the trash after a set number of days.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_IP_WHITELIST            => new Option(
+			Option::POW_IP_WHITELIST               => new Option(
 				__( 'IP-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -906,7 +906,7 @@ class Settings_Menu {
 				'🌐',
 				__( 'Exempts the listed IP addresses from the spam check entirely.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SITE_WHITELIST          => new Option(
+			Option::POW_SITE_WHITELIST             => new Option(
 				__( 'Site-Whitelist', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -923,7 +923,7 @@ class Settings_Menu {
 				'📄',
 				__( 'Exempts the listed URLs (without protocol) from the spam check entirely.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_TRUSTED_PROXIES         => new Option(
+			Option::POW_TRUSTED_PROXIES            => new Option(
 				__( 'Trusted proxies', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -941,7 +941,27 @@ class Settings_Menu {
 				'🛰️',
 				__( "Lists proxy IPs allowed to supply the visitor's real IP via forwarding headers.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_HIDE_ACTION             => new Option(
+			Option::POW_TRUST_PRIVATE_PROXY        => new Option(
+				__( 'Trust a private-network proxy', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				__(
+					'<strong>Only has any effect while "Trusted proxies" above is empty.</strong> Once you list a proxy there, that list decides and this setting is ignored.
+                        <br>
+                        <br><strong>What it does:</strong> If the request reaches WordPress from a private or loopback address (10.x, 172.16-31.x, 192.168.x, 127.x, ::1), there is in practice always a reverse proxy in front of it — a hosting load balancer, a firewall, a container gateway. With this on, the X-Forwarded-For header from such a peer is believed, and your visitors are seen under their own addresses again.
+                        <br>
+                        <br><strong>When you want it:</strong> your host puts a proxy in front of the site but does not tell you its address, so every visitor looks like the same IP — spam counts, the IP whitelist and fail2ban all point at one address.
+                        <br>
+                        <br><strong>What it costs:</strong> if the genuine visitors of this site come from a private network (an intranet, a VPN-only site), then any of them can choose their own apparent address by sending that header. The IP whitelist becomes claimable, fail2ban logs the wrong address, and per-IP limits can be stepped around. On a public site reached through a proxy this does not apply; on an internal site it does.
+                        <br>
+                        <br>If you know your proxy address, entering it under "Trusted proxies" is always the better answer.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Scope', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🛰️',
+				__( 'If no trusted proxy is configured and the request comes from a private address, believe its X-Forwarded-For header.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_HIDE_ACTION                => new Option(
 				__( 'Hide actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -957,7 +977,7 @@ class Settings_Menu {
 				'⚙️🚫',
 				__( 'Hides the listed action names from the Analytic Box while Analysis mode is recording.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_HIDE_PATTERN            => new Option(
+			Option::POW_HIDE_PATTERN               => new Option(
 				__( 'Hide Patterns', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -975,7 +995,7 @@ class Settings_Menu {
 				'🔍🚫',
 				__( 'Hides submissions matching the listed patterns from the Analytic Box.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MENU_POSITION           => new Option(
+			Option::POW_MENU_POSITION              => new Option(
 				__( 'Messages Inbox Position', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				0,
@@ -988,7 +1008,7 @@ class Settings_Menu {
 				'📌', //Number symbol
 				__( 'Sets where the message inbox appears in the WordPress admin menu.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_DASHBOARD               => new Option(
+			Option::POW_DASHBOARD                  => new Option(
 				__( 'Message counters on the Wordpress Dashboard', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -997,7 +1017,7 @@ class Settings_Menu {
 				'📊', //Dashboard symbol
 				__( 'Shows message counters as a widget on the WordPress dashboard.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SALT                    => new Option(
+			Option::POW_SALT                       => new Option(
 				__( 'Salt', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::STRING,
 				hash( 'sha256', gmdate( 'Y-m-d H:i:s.u' ) ),
@@ -1006,7 +1026,7 @@ class Settings_Menu {
 				'🔑',
 				__( "Adds a secret random string to the proof-of-work puzzle so it can't be pre-computed client-side.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_TIME_WINDOW             => new Option(
+			Option::POW_TIME_WINDOW                => new Option(
 				__( 'Time Window', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				10,
@@ -1015,7 +1035,7 @@ class Settings_Menu {
 				'⌛',
 				__( 'Sets how many minutes a generated hash-puzzle stays valid before it must be solved again.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_DIFFICULTY              => new Option(
+			Option::POW_DIFFICULTY                 => new Option(
 				__( 'Difficulty', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				14,
@@ -1048,7 +1068,7 @@ class Settings_Menu {
 				'🧩',
 				__( "Controls how much computing power a visitor's browser must spend solving the proof-of-work puzzle. Recommended base: 15–16, to leave headroom for the under-attack boost.", 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_MAX_USES                => new Option(
+			Option::POW_MAX_USES                   => new Option(
 				__( 'Max submissions per solved challenge', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::INT,
 				10,
@@ -1057,7 +1077,7 @@ class Settings_Menu {
 				'🔁',
 				__( 'Caps how many form submissions a single solved proof-of-work may be used for within the validity window.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_UNDER_ATTACK_MODE       => new Option(
+			Option::POW_UNDER_ATTACK_MODE          => new Option(
 				__( 'Under-attack mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -1066,7 +1086,7 @@ class Settings_Menu {
 				'🚨',
 				__( 'Temporarily raises the puzzle difficulty for all visitors when site-wide spam suddenly spikes (+3 bits, roughly 8x the computing time, whenever 15+ blocked/flagged submissions occur within about 10 minutes).', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_UNDER_ATTACK_QUARANTINE => new Option(
+			Option::POW_UNDER_ATTACK_QUARANTINE    => new Option(
 				__( 'Under-attack quarantine', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -1082,7 +1102,7 @@ class Settings_Menu {
 				'🛡️',
 				__( 'During a detected spam wave, treat otherwise-clean submissions as spam and hold them in the spam folder for review. Off by default; nothing is ever lost.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ECHO_LOCK_ENABLED       => new Option(
+			Option::POW_ECHO_LOCK_ENABLED          => new Option(
 				__( 'Repeat-sender echo lock', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -1098,7 +1118,7 @@ class Settings_Menu {
 				'🔁',
 				__( 'Briefly remembers the core values of spam submissions (as hashes) so the same sender/domain is caught again on any form. A bonus layer over the proof-of-work; on by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ABILITIES_WRITE         => new Option(
+			Option::POW_ABILITIES_WRITE            => new Option(
 				__( 'Let agents extend what is monitored', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -1114,23 +1134,43 @@ class Settings_Menu {
 				'🤖',
 				__( 'Let an AI agent add form actions, field patterns and REST routes to the monitored scope. Only ever adds, never removes. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ABILITIES_UNSAFE        => new Option(
-				__( 'Let agents read submissions and change protection', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			Option::POW_ABILITIES_READ_SUBMISSIONS => new Option(
+				__( 'Let agents read stored submissions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
 				__(
-					'<strong>Leave this off unless you know why you need it.</strong> It is the one setting here that can undo the protection rather than adjust it.
+					'<strong>What it does:</strong> an AI agent acting as a logged-in administrator may list and read the submissions in your inbox and spam folder — the same entries you see on the Messages screen, with password fields redacted.
 					<br>
-					<br><strong>What it does:</strong> it opens two things to an AI agent acting as a logged-in administrator — reading stored submissions, and changing protection settings (including switching blocking off).
+					<br><strong>What it costs:</strong> an agent usually runs on an external AI service. This plugin still contacts nobody on its own, but with this on, what your visitors typed into your forms can be read by whatever agent you connect, and it stops being this plugin alone that decides where that content goes. What your agent does with it is yours to answer for, including under data-protection law.
 					<br>
-					<br><strong>Why that is different from the setting above:</strong> an agent usually runs on an external AI service. This plugin still contacts nobody on its own, but with this on, content your visitors typed into your forms can be read by whatever agent you connect, and it stops being this plugin alone that decides where that content goes. What your agent does with it is yours to answer for, including under data-protection law.
+					<br><strong>What it deliberately does not open:</strong> the analysis folder. Analysis mode records every POST on the site while it runs, including admin screens of other plugins — so those entries can contain API keys and passwords that were never meant for a form. They stay unreadable here.
 					<br>
-					<br>While this is on, a warning stays visible in your admin area. Off by default.',
+					<br>Reading only. Changing or deleting anything needs the separate setting below. While this is on, a notice stays visible in your admin area. Off by default.',
 					'gdpr-compliant-recaptcha-for-all-forms'
 				),
 				__( 'AI & Agents', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'⚠️',
-				__( 'Let an AI agent read stored submissions and change protection settings. Submitted content can leave your site through the agent. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( 'Let an AI agent read stored submissions. Submitted content can leave your site through the agent. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_ABILITIES_UNSAFE           => new Option(
+				__( 'Let agents change protection and delete submissions', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				__(
+					'<strong>Leave this off unless you know why you need it.</strong> It is the one setting here that lets something other than you undo the protection.
+					<br>
+					<br><strong>What it does:</strong> an AI agent acting as a logged-in administrator may change three settings — the puzzle difficulty, whether spam is blocked, and under-attack mode — and permanently delete individual submissions.
+					<br>
+					<br><strong>What it cannot do, on purpose:</strong> everything else. It cannot touch the trusted-proxy or whitelist settings, the monitored scope, spam simulation, whether spam is stored at all, the secret behind the puzzles — or these agent permissions themselves. An agent must not be able to widen its own rights.
+					<br>
+					<br>The difficulty is also bounded (8–25): unbounded, a single call could set a value no browser can solve and lock out every real visitor.
+					<br>
+					<br>Every change and every deletion is written to an audit trail with the previous value, so you can see what happened and put it back. While this is on, a notice stays visible in your admin area. Off by default.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'AI & Agents', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'⚠️',
+				__( 'Let an AI agent change three protection settings and delete submissions. It can never change its own permissions. Off by default.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 		);
 
@@ -1268,19 +1308,23 @@ class Settings_Menu {
 			'text'  => __( 'Can lock out visitors', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 		return array(
-			Option::POW_BLOCK            => $warn,
-			Option::POW_BLOCK_LOGIN      => $warn,
-			Option::POW_ABILITIES_WRITE  => array(
+			Option::POW_BLOCK                      => $warn,
+			Option::POW_BLOCK_LOGIN                => $warn,
+			Option::POW_ABILITIES_WRITE            => array(
 				'class' => 'gdpr-badge gdpr-badge-warn',
 				'text'  => __( 'Agent can change monitoring', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			),
-			Option::POW_ABILITIES_UNSAFE => array(
+			Option::POW_ABILITIES_READ_SUBMISSIONS => array(
 				'class' => 'gdpr-badge gdpr-badge-warn',
 				'text'  => __( 'Submissions can leave your site', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			),
+			Option::POW_ABILITIES_UNSAFE           => array(
+				'class' => 'gdpr-badge gdpr-badge-warn',
+				'text'  => __( 'Agent can weaken protection', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			),
 			// Static recommendation: there is no difficulty ceiling any more, so there
 			// is nothing left to warn about here (the boost is never clipped).
-			Option::POW_DIFFICULTY       => array(
+			Option::POW_DIFFICULTY                 => array(
 				'class' => 'gdpr-badge gdpr-badge-recommend',
 				'text'  => __( 'Recommended: 15–16', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			),
@@ -1392,6 +1436,26 @@ class Settings_Menu {
 			);
 		}
 
+		// WHICH ADDRESS DOES THE PLUGIN ACTUALLY BIND? Answering that used to require
+		// opening the network tab, and it is the first question in nearly every
+		// proxy/cache support case (whitelist has no effect, fail2ban logs the wrong
+		// address, every visitor counts as one). Now it is a line on the strip, with the
+		// SOURCE named — the address alone does not say whether it was believed.
+		//
+		// Privacy: this is the address of the logged-in administrator reading the page,
+		// shown only to them, and nothing is stored. Different situation entirely from
+		// the token fingerprint, which has to be address-free because the page it sits
+		// in is cacheable and shared between visitors.
+		$items[] = array(
+			'class' => '',
+			'text'  => sprintf(
+				/* translators: 1: resolved client IP address, 2: where it came from */
+				__( 'Your address: %1$s (%2$s)', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Stamp::resolve_client_ip(),
+				self::client_ip_source()
+			),
+		);
+
 		// Quarantine is gated on the raw wave detection (Stamp::is_under_attack()),
 		// independent of POW_UNDER_ATTACK_MODE (which only gates the difficulty boost
 		// above) — so it can be actively sorting even when $under_attack is false here.
@@ -1414,7 +1478,7 @@ class Settings_Menu {
 		// row" (no_pow:*) in the last 24h — the fingerprint of a broken client-PoW
 		// pipeline (HANDBUCH §12). Amber above the threshold; the decision itself is the
 		// pure Option::health_counter_status().
-		$no_pow_count  = Option::count_no_pow_reasons_since_hours( Option::HEALTH_NO_POW_WINDOW_HOURS );
+		$no_pow_count  = Option::no_pow_health_count();
 		$no_pow_status = Option::health_counter_status( $no_pow_count, Option::HEALTH_NO_POW_WARN_THRESHOLD );
 		$items[]       = array(
 			'class' => $no_pow_status['class'],
@@ -1513,9 +1577,67 @@ class Settings_Menu {
 					implode( ', ', $present )
 				)
 			);
+			// The operator standing in front of this hint is precisely the one who often
+			// cannot answer it: a managed host puts the proxy there and does not publish
+			// its address. Naming the fallback here rather than only in the settings row
+			// below is the difference between a hint and a dead end. Deliberately NOT a
+			// suggested address — the "detected" proxy address would come from a
+			// client-settable header, and offering it for one click is how an attacker
+			// gets an admin to trust an address of the attacker's choosing (see
+			// BACKLOG.md, "Proxy-Erkennung mit Lern-/Bestätigungsmuster").
+			if ( self::is_private_peer() ) {
+				echo ' ';
+				echo esc_html__( 'This request also came from a private network address, which normally means the proxy is your own hosting infrastructure. If you cannot find out its address, the "Trust a private-network proxy" setting below is the fallback — read what it costs before enabling it.', 'gdpr-compliant-recaptcha-for-all-forms' );
+			}
 			?>
 		</p>
 		<?php
+	}
+
+	/**
+	 * Where the address on the status strip came from — in the operator's words, not
+	 * the code's.
+	 *
+	 * The address on its own is not the useful half. "203.0.113.5" tells nobody whether
+	 * the plugin took it from the connection or from a header it decided to believe,
+	 * and that difference is the whole content of a proxy support case. Three answers,
+	 * matching the three states ClientIp::resolve() can be in.
+	 *
+	 * @return string
+	 */
+	private static function client_ip_source() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- validated in ClientIp; never output.
+		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+		$resolved    = Stamp::resolve_client_ip();
+
+		if ( $resolved === $remote_addr ) {
+			return __( 'from the connection', 'gdpr-compliant-recaptcha-for-all-forms' );
+		}
+
+		if ( '' === trim( (string) get_option( Option::POW_TRUSTED_PROXIES ) ) ) {
+			// Only one way to get here: the private-proxy opt-in is on and did the work.
+			// Named separately from the configured-proxy case on purpose — an operator
+			// who forgot the switch is on should see that it is what decided.
+			return __( 'from X-Forwarded-For, via the private-network proxy setting', 'gdpr-compliant-recaptcha-for-all-forms' );
+		}
+
+		return __( 'from X-Forwarded-For, via a trusted proxy', 'gdpr-compliant-recaptcha-for-all-forms' );
+	}
+
+	/**
+	 * Whether the CURRENT request's peer is a private/loopback address.
+	 *
+	 * Observation of this one request, nothing stored, and the value is never printed —
+	 * only whether it is private. Used to decide whether the proxy hint should mention
+	 * the private-proxy fallback at all.
+	 *
+	 * @return bool
+	 */
+	private static function is_private_peer() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- validated inside ClientIp::is_private(); never output or stored.
+		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+
+		return ClientIp::is_private( $remote_addr );
 	}
 
 	/** Renders one option row: label, optional badge, optional short description,
@@ -1652,6 +1774,29 @@ class Settings_Menu {
 								/* translators: %s: the rejected route lines, comma separated */
 								__( 'These REST route lines were not saved: %s. They would also cover WordPress\' own core routes, which would block your post saves and lock you out of wp-admin. All other lines were saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 								implode( ', ', $rejected_routes )
+							),
+							'error'
+						);
+					}
+				}
+
+				// A `/0` trusted-proxy line trusts every peer on the internet, which makes
+				// every X-Forwarded-For believable and the resolved visitor address freely
+				// choosable. ClientIp::matches_list() already refuses to honour one, so
+				// the site is safe either way — but an entry that saves and then quietly
+				// does nothing sends the operator debugging the wrong thing. Dropped
+				// before storing and NAMED, exactly like the self-lockout route guard
+				// above.
+				if ( Option::POW_TRUSTED_PROXIES === $key && is_string( $post_value ) ) {
+					list( $post_value, $rejected_ranges ) = ClientIp::reject_all_matching_ranges( $post_value );
+					if ( ! empty( $rejected_ranges ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-trusted-proxies-rejected',
+							sprintf(
+								/* translators: %s: the rejected proxy lines, comma separated */
+								__( 'These trusted-proxy lines were not saved: %s. A /0 range covers every address on the internet, which would make every visitor able to choose their own apparent address — defeating the IP whitelist, fail2ban logging and per-IP limits. Enter your proxy\'s actual address or subnet instead. All other lines were saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								implode( ', ', $rejected_ranges )
 							),
 							'error'
 						);

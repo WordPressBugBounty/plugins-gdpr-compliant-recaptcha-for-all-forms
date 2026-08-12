@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.3.3
+	 * Version: 5.3.4
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.3.3';
+	const VERSION = '5.3.4';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -73,7 +73,6 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-client-ip.php';
 		require_once __DIR__ . '/includes/class-rest-route.php';
 		require_once __DIR__ . '/includes/class-stamp-token.php';
-		require_once __DIR__ . '/includes/class-chain-token.php';
 		require_once __DIR__ . '/includes/class-gibberish-detector.php';
 		require_once __DIR__ . '/includes/class-classification-reason.php';
 		require_once __DIR__ . '/includes/class-credential-fields.php';
@@ -85,6 +84,7 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-settings-menu.php';
 		require_once __DIR__ . '/includes/class-scope-sync.php';
 		require_once __DIR__ . '/includes/class-scope-add.php';
+		require_once __DIR__ . '/includes/class-agent-access.php';
 		require_once __DIR__ . '/includes/class-ability-probe.php';
 		require_once __DIR__ . '/includes/class-abilities.php';
 		require_once __DIR__ . '/includes/class-dashboard-widget.php';
@@ -171,8 +171,17 @@ class RCM_Main {
 				global $wpdb;
 				$rgm_type = $key;
 				$days     = $days_to_keep[ $key ];
-				// Calculate the date threshold (older than X days)
-				$threshold_date = gmdate( 'Y-m-d H:i:s', strtotime( "-{$days} days" ) );
+				// Calculate the date threshold (older than X days).
+				//
+				// The threshold has to be built from current_time(), because that is the
+				// clock rgm_date was WRITTEN with (current_time('mysql'), i.e. the site's
+				// local time). Computing it from UTC instead — as this line did — put the
+				// cutoff off by the site's UTC offset, so messages were kept a few hours
+				// too long or deleted a few hours too early. Same defect class as the
+				// stamp-row one (HANDBUCH.md §12 cause 8), a milder dose: the reader has
+				// to use the writer's clock. Note that no assertion catches this half of
+				// the rule — see tests/unit/OneClockTest.php.
+				$threshold_date = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) - $days * DAY_IN_SECONDS ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
 
 				// Define the table names
 				$message_table = $wpdb->prefix . 'recaptcha_gdpr_message_rgm';
@@ -561,6 +570,9 @@ class RCM_Main {
 			// real behaviour. add_option() is a no-op if the row already exists, so
 			// explicit admin choices are never overwritten.
 			add_option( Option::POW_TRUSTED_PROXIES, '' );
+			// Seeded explicitly with false: a missing row must never read as "on" for
+			// an option that widens which forwarding headers are believed.
+			add_option( Option::POW_TRUST_PRIVATE_PROXY, false );
 			add_option( Option::POW_MAX_USES, 10 );
 			add_option( Option::POW_UNDER_ATTACK_MODE, true );
 			add_option( Option::POW_UNDER_ATTACK_QUARANTINE, false );
@@ -568,6 +580,7 @@ class RCM_Main {
 			// Both AI-agent switches: a missing row must never read as "on".
 			add_option( Option::POW_ABILITIES_WRITE, false );
 			add_option( Option::POW_ABILITIES_UNSAFE, false );
+			add_option( Option::POW_ABILITIES_READ_SUBMISSIONS, false );
 
 			if ( $is_fresh_install ) {
 				// Brand-new tables: there is no legacy cleartext credential to redact,

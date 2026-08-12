@@ -84,7 +84,7 @@ class Dashboard_Widget {
 		// row" (no_pow:*) in the last 24h — the fingerprint of a broken client-PoW
 		// pipeline (HANDBUCH §12). Amber above the threshold, same colours as
 		// .gdpr-status-amber on the settings page (this widget has no stylesheet).
-		$no_pow_count  = Option::count_no_pow_reasons_since_hours( Option::HEALTH_NO_POW_WINDOW_HOURS );
+		$no_pow_count  = Option::no_pow_health_count();
 		$no_pow_status = Option::health_counter_status( $no_pow_count, Option::HEALTH_NO_POW_WARN_THRESHOLD );
 		$no_pow_style  = $no_pow_status['warn']
 			? 'display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px; font-weight: 600; background: #fdf3e1; color: #8a5a00;'

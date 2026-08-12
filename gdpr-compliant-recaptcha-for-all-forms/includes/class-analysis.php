@@ -332,19 +332,12 @@ class Analysis {
 			);
 		}
 
-		// IP resolution mirrors Stamp::get_client_ip() (private there — this duplicates
-		// the same Forwarded-header/trusted-proxy pattern rather than widening that
-		// method's visibility for a single extra caller).
-		$forwarded_headers = array();
-		foreach ( array( 'HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED' ) as $header_name ) {
-			$value = isset( $_SERVER[ $header_name ] ) ? $_SERVER[ $header_name ] : getenv( $header_name );
-			if ( is_string( $value ) && '' !== $value ) {
-				$forwarded_headers[ $header_name ] = $value;
-			}
-		}
-		$remote_addr     = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : (string) getenv( 'REMOTE_ADDR' );
-		$trusted_proxies = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_TRUSTED_PROXIES ), -1, PREG_SPLIT_NO_EMPTY );
-		$client_ip       = ClientIp::resolve( $remote_addr, $forwarded_headers, $trusted_proxies );
+		// THE shared resolution, not a copy. This used to be a hand-duplicated block
+		// whose comment claimed to mirror Stamp::get_client_ip() while actually reading
+		// a wider header list. Two address decisions in one plugin answer differently
+		// the moment an option changes what "the client's address" means — which
+		// POW_TRUST_PRIVATE_PROXY does.
+		$client_ip = Stamp::resolve_client_ip();
 
 		$posted_site = null;
 		if ( array_key_exists( 'REQUEST_URI', $_SERVER ) && array_key_exists( 'HTTP_HOST', $_SERVER ) ) {

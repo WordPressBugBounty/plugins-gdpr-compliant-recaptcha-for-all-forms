@@ -60,21 +60,43 @@ document.addEventListener('DOMContentLoaded', function () {
 	});
 });
 
+/**
+ * The message-list filter checkboxes, as the query-string fragment every request that
+ * renders or mutates the list has to carry.
+ *
+ * One function because there used to be five copies of the same six lines, and five
+ * copies of a filter set is how a filter silently stops applying to one of the five
+ * paths -- the list then looks correct after a search and wrong after a bulk action,
+ * which is a bug nobody reproduces on the first try.
+ *
+ * Returns "" when no box is ticked, and each fragment already carries its leading "&",
+ * so every call site can keep appending it exactly as before.
+ *
+ * @returns {string}
+ */
+function collectFilters() {
+	return [
+		'listedActions',
+		'listedPatterns',
+		'whitelistedSites',
+		'whitelistedIPs',
+		'hiddenActions',
+		'hiddenPatterns',
+	].map(function (id) {
+		var box = document.querySelector('#' + id);
+		return box && box.checked ? '&' + id + '=' + box.checked : '';
+	}).join('');
+}
+
 function messageSearch( page ) {
 	var search = document.querySelector('.messageSearch').value;
-	var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
-	var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-	var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
-	var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
-	var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
-	var hiddenPatterns = document.querySelector('#hiddenPatterns') && document.querySelector('#hiddenPatterns').checked ? '&hiddenPatterns=' + document.querySelector('#hiddenPatterns').checked : '';
 	showSpinner();
 	fetch(gdprMsg.ajaxUrl, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/x-www-form-urlencoded'
 		},
-		body: `action=render_messages&page=${page}&search=${encodeURIComponent(search)}&messageType=${gdprMsg.messageType}&search_nonce=${gdprMsg.nonces.search}${listedActions}${listedPatterns}${whitelistedSites}${whitelistedIPs}${hiddenActions}${hiddenPatterns}`
+		body: `action=render_messages&page=${page}&search=${encodeURIComponent(search)}&messageType=${gdprMsg.messageType}&search_nonce=${gdprMsg.nonces.search}${collectFilters()}`
 	})
 	.then(response => response.json())
 	.then(function(response) {
@@ -272,12 +294,6 @@ function changeMessageType( messages, changeType, search ) {
 				hideSpinner();
 			}
 		};
-		var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
-		var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-		var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
-		var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
-		var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
-		var hiddenPatterns = document.querySelector('#hiddenPatterns') && document.querySelector('#hiddenPatterns').checked ? '&hiddenPatterns=' + document.querySelector('#hiddenPatterns').checked : '';
 		showSpinner();
 		xhr.send(
 			"action=change_message_type" +
@@ -286,12 +302,7 @@ function changeMessageType( messages, changeType, search ) {
 			"&messages=" + encodeURIComponent(JSON.stringify(messages)) +
 			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
-			listedActions +
-			listedPatterns +
-			whitelistedSites +
-			whitelistedIPs +
-			hiddenActions +
-			hiddenPatterns
+			collectFilters()
 		);
 	}
 
@@ -373,12 +384,6 @@ function deleteMessage( messages, search ) {
 			}
 			hideSpinner();
 		};
-		var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
-		var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-		var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
-		var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
-		var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
-		var hiddenPatterns = document.querySelector('#hiddenPatterns') && document.querySelector('#hiddenPatterns').checked ? '&hiddenPatterns=' + document.querySelector('#hiddenPatterns').checked : '';
 		showSpinner();
 		xhr.send(
 			"action=delete_message" +
@@ -386,12 +391,7 @@ function deleteMessage( messages, search ) {
 			"&messages=" + encodeURIComponent(JSON.stringify(messages)) +
 			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
-			listedActions +
-			listedPatterns +
-			whitelistedSites +
-			whitelistedIPs +
-			hiddenActions +
-			hiddenPatterns
+			collectFilters()
 		);
 	}
 
@@ -438,12 +438,6 @@ function saveListParameter(e, listKey, buttonId, hide = false) {
 		}
 		hideSpinner();
 	};
-	var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
-	var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-	var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
-	var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
-	var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
-	var hiddenPatterns = document.querySelector('#hiddenPatterns') && document.querySelector('#hiddenPatterns').checked ? '&hiddenPatterns=' + document.querySelector('#hiddenPatterns').checked : '';
 	var search = document.querySelector('.messageSearch').value;
 	showSpinner()
 	xhr.send(
@@ -454,12 +448,7 @@ function saveListParameter(e, listKey, buttonId, hide = false) {
 		"&security_nonce=" + gdprMsg.nonces.saveList +
 		"&search=" + encodeURIComponent(search) +
 		"&search_nonce=" + gdprMsg.nonces.search +
-		listedActions +
-		listedPatterns +
-		whitelistedSites +
-		whitelistedIPs +
-		hiddenActions +
-		hiddenPatterns
+		collectFilters()
 	);
 }
 
@@ -548,12 +537,6 @@ function savePattern(e, messageID, buttonId, hide = false) {
 			}
 			hideSpinner();
 		};
-		var listedActions = document.querySelector('#listedActions') && document.querySelector('#listedActions').checked ? '&listedActions=' + document.querySelector('#listedActions').checked : '';
-		var listedPatterns = document.querySelector('#listedPatterns') && document.querySelector('#listedPatterns').checked ? '&listedPatterns=' + document.querySelector('#listedPatterns').checked : '';
-		var whitelistedSites = document.querySelector('#whitelistedSites') && document.querySelector('#whitelistedSites').checked ? '&whitelistedSites=' + document.querySelector('#whitelistedSites').checked : '';
-		var whitelistedIPs = document.querySelector('#whitelistedIPs') && document.querySelector('#whitelistedIPs').checked ? '&whitelistedIPs=' + document.querySelector('#whitelistedIPs').checked : '';
-		var hiddenActions = document.querySelector('#hiddenActions') && document.querySelector('#hiddenActions').checked ? '&hiddenActions=' + document.querySelector('#hiddenActions').checked : '';
-		var hiddenPatterns = document.querySelector('#hiddenPatterns') && document.querySelector('#hiddenPatterns').checked ? '&hiddenPatterns=' + document.querySelector('#hiddenPatterns').checked : '';
 		var search = document.querySelector('.messageSearch').value;
 		showSpinner();
 		xhr.send(
@@ -564,12 +547,7 @@ function savePattern(e, messageID, buttonId, hide = false) {
 			"&security_nonce=" + gdprMsg.nonces.savePattern +
 			"&search=" + encodeURIComponent(search) +
 			"&search_nonce=" + gdprMsg.nonces.search +
-			listedActions +
-			listedPatterns +
-			whitelistedSites +
-			whitelistedIPs +
-			hiddenActions +
-			hiddenPatterns
+			collectFilters()
 		);
 	}else{
 		showAlert(gdprMsg.i18n.choosePattern);
@@ -708,3 +686,10 @@ function treatAsCredential(button) {
 	);
 }
 
+// Expose the pure-ish helpers for the Node-based regression tests (tests/js/, run via
+// `node --test`). No effect in the browser: `module` is undefined there, so this block
+// is skipped and the file stays a plain enqueued script. Same pattern as
+// recaptcha-gdpr-pow.js.
+if ( typeof module !== 'undefined' && module.exports ) {
+	module.exports = { collectFilters, gdprSerializeForm };
+}

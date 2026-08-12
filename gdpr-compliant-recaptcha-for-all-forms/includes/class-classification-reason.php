@@ -11,9 +11,11 @@
  * Format: `code` or `code:detail`, both lower-case ASCII. The full taxonomy:
  *
  *   no_pow:no_token        Submission carried no proof-of-work token at all.
- *   no_pow:invalid_token   A token was posted but failed StampToken/ChainToken verification.
+ *   no_pow:invalid_token   A token was posted but failed StampToken verification (or had a
+ *                          length this build no longer accepts).
  *   no_pow:token_no_row    Valid token, but no solved-PoW row landed within the poll window.
- *   no_pow:chain_no_row    Valid chain token, but its row never landed (extended window).
+ *   no_pow:chain_no_row    HISTORIC (5.3.0-5.3.3): valid chain token, but its row never
+ *                          landed. Nothing writes it since 5.3.4 — see HISTORIC_CODES.
  *   no_pow:token_ip_changed
  *                          Valid token, no row, and redeemed from a different address
  *                          than it was issued to (cache/proxy signature — diagnosis).
@@ -107,8 +109,28 @@ final class Classification_Reason {
 	/** Token verified, but no solved-PoW row was found within the poll window. */
 	const NO_POW_TOKEN_NO_ROW = 'no_pow:token_no_row';
 
-	/** Chain token verified, but no solved-PoW row was found for it. Transitional, see handbuch/pow.md. */
+	/**
+	 * DISPLAY-ONLY SINCE 5.3.4. No code path writes this any more — the chain-token
+	 * branch that produced it went with the ChainToken class. It stays because stored
+	 * `_gdpr_reason` rows on installations that ran 5.3.0-5.3.3 still carry the string,
+	 * and a message detail that renders a raw reason code instead of a sentence is a
+	 * worse regression than an unused constant. Remove it with a general cleanup pass
+	 * over historic reason strings, not on its own.
+	 */
 	const NO_POW_CHAIN_NO_ROW = 'no_pow:chain_no_row';
+
+	/**
+	 * Reason codes that NO code path writes any more — kept only so stored rows from
+	 * older versions still render as a sentence instead of a raw code.
+	 *
+	 * Exists so the integration suite's coverage printout can tell "never covered"
+	 * apart from "cannot be covered any more" without a second, hand-maintained list
+	 * living in the test harness (which would drift from this class the moment either
+	 * side changed). The fact belongs here, next to the constants it describes.
+	 *
+	 * @var string[]
+	 */
+	const HISTORIC_CODES = array( self::NO_POW_CHAIN_NO_ROW );
 
 	/**
 	 * Token valid and unexpired, but redeemed from a different address than it was

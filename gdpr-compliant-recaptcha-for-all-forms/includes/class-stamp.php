@@ -144,6 +144,20 @@ class Stamp {
 	 */
 	private $rest_route = null;
 
+	/**
+	 * The `rgm_id` of the type-4 analysis row save_for_analysis() wrote for THIS
+	 * request, or null when analysis mode wrote nothing.
+	 *
+	 * Kept because save_for_analysis() runs in the CONSTRUCTOR, i.e. before any
+	 * check_submit(), so at write time $classification_reason and $clean_scoring are
+	 * still null and the row gets neither. Whoever opens the analysis mode is asking
+	 * exactly the question those two answer ("why was this flagged — or why was it
+	 * not?"), so the values are written onto the existing row afterwards instead.
+	 *
+	 * @var int|null
+	 */
+	private $analysis_row_id = null;
+
 	/** JSON that holds the data of the request */
 	private $request_data;
 	private $whole_request_data;
@@ -165,29 +179,49 @@ class Stamp {
 		// update/delete in THIS request drops the cached hash set. Cheap — add_action
 		// only, the actual rebuild is lazy on the next echo record()/matches().
 		Echo_Store::register_cache_hooks();
-		$posted_site = null;
-		if ( array_key_exists( 'REQUEST_URI', $_SERVER ) && array_key_exists( 'HTTP_HOST', $_SERVER ) ) {
-			$posted_site = $_SERVER['HTTP_HOST'] . preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['REQUEST_URI'] );
-		}
-		//Check whether the IP is whitelisted
-		$ip_whitelisted = false;
-		$client_ip      = $this->get_client_ip();
-		$lines          = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_IP_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY );
-		if ( count( $lines ) > 0 ) {
-			foreach ( $lines as $line ) {
-				if ( trim( $line ) === $client_ip ) {
-					$ip_whitelisted = true;
-				}
-			}
-		}
+		// Check whether the IP is whitelisted.
+		//
+		// Compared through ClientIp::matches_list() — THE address-list comparison of
+		// this plugin — not with `===` as it was until 5.3.4. The string compare meant
+		// the notation decided: ClientIp::resolve() hands back the candidate verbatim,
+		// exactly as the proxy wrote it, so an operator who noted their office IPv6
+		// differently than their proxy sends it (or whose visitors arrive as
+		// ::ffff:203.0.113.5) silently had no whitelist at all, without any feedback.
+		// Subnets could not be entered either. Two consequences of the change, both
+		// intended: notations that denote the same address now compare equal, and a
+		// CIDR line works. A `/0` line does NOT (see ClientIp::ip_in_cidr) — otherwise
+		// "whitelist everything" would be a one-liner.
+		$ip_whitelisted = ClientIp::matches_list(
+			$this->get_client_ip(),
+			preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_IP_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY )
+		);
 
-		//Check whether the site is whitelisted
+		// Check whether the site is whitelisted.
+		//
+		// THE HOST COMES FROM THE SERVER, NEVER FROM THE REQUEST. Until 5.3.4 this
+		// matched against HTTP_HOST . REQUEST_URI, and HTTP_HOST is set by the client —
+		// so anyone who knew a configured line could claim the whitelist with a single
+		// forged header and pass unevaluated (measured, ISSUES.md). It was the last
+		// remnant of the header-decides-the-gate class that the referer terms belonged
+		// to. Host AND port are taken from the `home` option (the port matters: an
+		// install reachable on :8080 has entries written that way), plus `siteurl` as a
+		// second admissible host for setups whose wp-admin lives on another domain.
+		//
+		// Semantics of existing entries are preserved as long as they name the site's
+		// REAL host. Entries naming an alias (www. vs. bare, a mapped second domain)
+		// stop matching — fail-safe (the whitelist only ever gets narrower, never
+		// wider), but a real behaviour change, hence documented in handbuch/gate.md.
 		$site_whitelisted = false;
-		$lines            = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_SITE_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY );
-		if ( count( $lines ) > 0 ) {
-			foreach ( $lines as $line ) {
-				if ( is_string( $posted_site ) && is_string( trim( $line ) ) && strpos( $posted_site, trim( $line ) ) === 0 ) {
-					$site_whitelisted = true;
+		$lines            = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_SITE_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY );
+		if ( count( $lines ) > 0 && array_key_exists( 'REQUEST_URI', $_SERVER ) ) {
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared, never output or stored; sanitizing would alter the path being compared.
+			$request_uri = preg_replace( '/^(https?:\/\/)/i', '', (string) wp_unslash( $_SERVER['REQUEST_URI'] ) );
+			foreach ( self::server_known_hosts() as $host ) {
+				foreach ( $lines as $line ) {
+					$line = trim( $line );
+					if ( '' !== $line && strpos( $host . $request_uri, $line ) === 0 ) {
+						$site_whitelisted = true;
+					}
 				}
 			}
 		}
@@ -302,6 +336,38 @@ class Stamp {
 	 * @param string $action Effective action of this request (`$_REQUEST['action']`).
 	 * @return bool
 	 */
+	/**
+	 * The host[:port] values this installation is actually reachable under, taken from
+	 * its own options — never from the request.
+	 *
+	 * Two entries at most, deduplicated: `home` (where visitors are) and `siteurl`
+	 * (where wp-admin is; on most installs identical, on some a different domain). The
+	 * PORT is part of the value on purpose: `HTTP_HOST` carried it, so a POW_SITE_WHITELIST
+	 * line for an install served on :8080 was written with it, and dropping it here
+	 * would silently stop matching those lines.
+	 *
+	 * Reads the raw options rather than home_url()/site_url(): this runs at plugin
+	 * include time, before third-party filters on those functions are registered, so
+	 * the option value is both what they would return and the more predictable source.
+	 * Multisite needs no special case — the options are resolved per site.
+	 *
+	 * @return string[] Lower-cased host[:port] values, possibly empty.
+	 */
+	private static function server_known_hosts() {
+		$hosts = array();
+		foreach ( array( 'home', 'siteurl' ) as $option_name ) {
+			$url  = (string) get_option( $option_name );
+			$host = (string) wp_parse_url( $url, PHP_URL_HOST );
+			if ( '' === $host ) {
+				continue;
+			}
+			$port    = wp_parse_url( $url, PHP_URL_PORT );
+			$hosts[] = strtolower( $host ) . ( $port ? ':' . (int) $port : '' );
+		}
+
+		return array_values( array_unique( $hosts ) );
+	}
+
 	private function is_special_case_request( $action = '' ) {
 		if ( ! array_key_exists( 'REQUEST_URI', $_SERVER ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
 			return false;
@@ -413,7 +479,7 @@ class Stamp {
 					|| ( $ajax && ! in_array( $action, $excluded_actions_for_analysis, true ) )
 			)
 		) {
-			$this->save_message( $this->whole_request_data, $action, $ajax, 4, $this->hash_values( $client_ip ) );
+			$this->analysis_row_id = $this->save_message( $this->whole_request_data, $action, $ajax, 4, $this->hash_values( $client_ip ) );
 		}
 	}
 
@@ -468,12 +534,29 @@ class Stamp {
 				while ( $stack ) {
 					$node = array_pop( $stack );
 					foreach ( $node as $key => $value ) {
-						if ( is_string( $key ) && '' !== $key ) {
+						// EVERY name from here is ATTACKER-SUPPLIED. hashPWFields travels
+						// with the request; until 5.3.4 each key and each string leaf of
+						// the decoded structure became an exempt field name unchecked. A
+						// bot that passes the PoW (headless browser running our own JS —
+						// the class the 2026-07-16 field data documents) and has read the
+						// publicly available source could therefore list its target's real
+						// field names ("your-message", "your-email") as hashPWFields
+						// entries and become invisible to gibberish scoring, whatever it
+						// actually sent. See ISSUES.md.
+						//
+						// The marker's legitimate job is narrow: naming the password
+						// fields of THIS form so their values are not scored as gibberish.
+						// So a name is only honoured if it plausibly IS a credential field
+						// name. A password field with an unusual name loses its exemption
+						// until an admin confirms it — that is what Credential_Learning's
+						// suggestion path is for, and its learned names are added below,
+						// server-side and unfiltered.
+						if ( is_string( $key ) && '' !== $key && Credential_Fields::is_password_key( $key ) ) {
 							$names[] = $key;
 						}
 						if ( is_array( $value ) ) {
 							$stack[] = $value;
-						} elseif ( is_string( $value ) && '' !== $value ) {
+						} elseif ( is_string( $value ) && '' !== $value && Credential_Fields::is_password_key( $value ) ) {
 							$names[] = $value;
 						}
 					}
@@ -885,6 +968,21 @@ class Stamp {
 			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
 			// genuine PoW/token failures, never for the simulation mode below.
 			$this->increment_spam_counter();
+			// Health counter for the #1 support case ("everything is spam"), counted
+			// HERE and not where check_request() sets pow_fail_reason: that method
+			// records a reason on every failing path it takes, including ones whose IP
+			// fallback then succeeds — those requests came through, and counting them
+			// would inflate the number that is supposed to mean "submissions that found
+			// no stamp row". This line is the promotion point, so it counts exactly the
+			// submissions that were actually classified no_pow.
+			//
+			// WHY A SECOND COUNTER AT ALL. The existing one
+			// (Option::count_no_pow_reasons_since_hours()) reads `_gdpr_reason` detail
+			// rows, which only exist when save_message() ran — and for spam that is
+			// gated by POW_SAVE_SPAM. On a site with spam storage off it therefore
+			// reads 0 forever, and 0 reads like "healthy" precisely where the operator
+			// can see nothing else either. This one is storage-independent.
+			Option::increment_no_pow_health_counter();
 		}
 
 		// Process the spam simulation
@@ -1139,6 +1237,21 @@ class Stamp {
 			}
 		}
 
+		// Carry the verdict back onto the analysis row, if there is one.
+		//
+		// save_for_analysis() writes its type-4 row in the CONSTRUCTOR, i.e. before this
+		// method has computed anything, so that row got `_gdpr_route` and nothing else.
+		// The result was that the one screen built for the question "why was this
+		// message judged the way it was" could not answer it: you needed "Save clean
+		// messages" instead of the analysis mode. Not a regression — `_gdpr_reason` was
+		// always missing there too — but it halved the value of the scoring field the
+		// moment it was introduced.
+		//
+		// Written for BOTH fields, not just scoring. Consistency is the cheaper answer
+		// here, and the diagnosis gains more from the pair than from either alone: a
+		// reason says why it was flagged, a scoring line says why it was not.
+		$this->update_analysis_verdict();
+
 		// If message shall be saved after flagging
 		if ( get_option( Option::POW_SAVE_SPAM )
 			&& get_option( Option::POW_FLAG_SAVE )
@@ -1348,6 +1461,82 @@ class Stamp {
 	 * "this was a login" from hashPWFields + wp-submit, which silently failed whenever
 	 * the client JS had not run or the POST was minimal.
 	 */
+	/**
+	 * Write `_gdpr_reason` / `_gdpr_scoring` onto the type-4 analysis row of THIS
+	 * request, after check_submit() has decided.
+	 *
+	 * Same upsert convention as Analysis::upsert_route_row(): existence is asked
+	 * EXPLICITLY rather than inferred from $wpdb->update()'s return value, because
+	 * MySQL reports 0 affected rows both for "no such row" and for "row exists, value
+	 * unchanged" — treating that 0 as "insert one" duplicates the row on every repeat.
+	 *
+	 * A null value REMOVES the row rather than leaving a stale one. On this path that
+	 * matters for `_gdpr_scoring`: a message that is clean carries a scoring line and a
+	 * message that is spam does not, so a row left over from a different verdict would
+	 * describe a judgment that was not made.
+	 *
+	 * Costs nothing when analysis mode is off: $analysis_row_id is null and this
+	 * returns immediately, before touching the database.
+	 *
+	 * @return void
+	 */
+	private function update_analysis_verdict() {
+		if ( null === $this->analysis_row_id ) {
+			return;
+		}
+
+		$this->upsert_analysis_detail( '_gdpr_reason', $this->classification_reason );
+		$this->upsert_analysis_detail( '_gdpr_scoring', $this->clean_scoring );
+	}
+
+	/**
+	 * Insert, update or delete one technical detail row of the analysis entry.
+	 *
+	 * @param string      $attribute Technical attribute name (leading underscore).
+	 * @param string|null $value     Value, or null to remove the row.
+	 * @return void
+	 */
+	private function upsert_analysis_detail( $attribute, $value ) {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';
+		$where = array(
+			'rgm_id'        => (int) $this->analysis_row_id,
+			'rgd_attribute' => $attribute,
+		);
+
+		if ( null === $value || '' === $value ) {
+			$wpdb->delete( $table, $where, array( '%d', '%s' ) );
+			return;
+		}
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->prefix, values via prepare()
+		$exists = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT rgd_id FROM $table WHERE rgm_id = %d AND rgd_attribute = %s LIMIT 1",
+				(int) $this->analysis_row_id,
+				$attribute
+			)
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		if ( $exists ) {
+			$wpdb->update( $table, array( 'rgd_value' => $value ), $where, array( '%s' ), array( '%d', '%s' ) );
+			return;
+		}
+
+		$wpdb->insert(
+			$table,
+			array(
+				'rgm_id'        => (int) $this->analysis_row_id,
+				'rgd_attribute' => $attribute,
+				'rgd_value'     => $value,
+				'rgm_posted'    => 0,
+			),
+			array( '%d', '%s', '%s', '%d' )
+		);
+	}
+
 	public function save_message( $fields, $action, $ajax, $message_type, $ip, $origin = '' ) {
 		if (
 			// Check whether the message stems from a login and shall be saved
@@ -1569,7 +1758,11 @@ class Stamp {
 				$wpdb->prepare( $query, $values )
 			);
 			$wpdb->query( 'COMMIT' );
+
+			return $my_id;
 		}
+
+		return null;
 	}
 
 	/** Function to get a stamp that can be invoked via ajax
@@ -1720,12 +1913,32 @@ class Stamp {
 	 *
 	 */
 	private function get_client_ip() {
+		return self::resolve_client_ip();
+	}
+
+	/**
+	 * THE client-IP resolution of this plugin: read the request and the options, hand
+	 * both to the pure ClientIp::resolve().
+	 *
+	 * Static and shared because there is more than one caller and there used to be more
+	 * than one implementation. `Analysis::store_analysis_entry()` carried its own copy,
+	 * whose comment claimed to mirror this method but read a WIDER header list than
+	 * ClientIp::HEADER_PRIORITY (harmless only by accident — resolve() ignores the
+	 * extra names). Two copies of an address decision is one too many: the moment an
+	 * option like POW_TRUST_PRIVATE_PROXY changes what "the client's address" means,
+	 * a second copy silently answers differently in the same request.
+	 *
+	 * @return string
+	 */
+	public static function resolve_client_ip() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- passed to ClientIp::resolve(), which validates every address it returns.
 		$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? (string) $_SERVER['REMOTE_ADDR'] : (string) getenv( 'REMOTE_ADDR' );
 
 		// Exactly the headers ClientIp honors — read from the class instead of keeping a
 		// second list here, which is how the two drifted apart before.
 		$forwarded_headers = array();
 		foreach ( ClientIp::HEADER_PRIORITY as $header_name ) {
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- see above; the chain is parsed and validated in ClientIp.
 			$value = isset( $_SERVER[ $header_name ] ) ? $_SERVER[ $header_name ] : getenv( $header_name );
 			if ( is_string( $value ) && '' !== $value ) {
 				$forwarded_headers[ $header_name ] = $value;
@@ -1737,7 +1950,12 @@ class Stamp {
 		// itself a configured trusted proxy — otherwise REMOTE_ADDR wins outright.
 		$trusted_proxies = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_TRUSTED_PROXIES ), -1, PREG_SPLIT_NO_EMPTY );
 
-		return ClientIp::resolve( $remote_addr, $forwarded_headers, $trusted_proxies );
+		// Opt-in, default OFF, and only effective while the list above is empty: treat a
+		// private/loopback peer as a proxy. See ClientIp::is_private() for both halves of
+		// the trade-off.
+		$trust_private = (bool) get_option( Option::POW_TRUST_PRIVATE_PROXY, false );
+
+		return ClientIp::resolve( $remote_addr, $forwarded_headers, $trusted_proxies, $trust_private );
 	}
 
 	/** Hash helper — delegates to the pure ProofOfWork primitive (single source of truth).
@@ -1747,9 +1965,42 @@ class Stamp {
 		return ProofOfWork::hash_value( $x );
 	}
 
+	/** Format a point in time for the `rgs_time` column — THE ONE CLOCK this table is
+	 * read and written with.
+	 *
+	 * Every rgs_time comparison used to be `NOW() - INTERVAL n MINUTE`, i.e. the clock of
+	 * whichever database session happened to run the query. Token validity, meanwhile,
+	 * has always been decided in PHP (`time()` against the HMAC-bound `issued_at`). Two
+	 * clocks deciding one lifetime is a defect waiting for a host to expose it, and one
+	 * did: where the writing and the reading session disagreed by two hours, every solved
+	 * row read as two hours old, no row was ever consumable, and every submission on the
+	 * site was spam while the handshake and the self-test stayed green (HANDBUCH.md §12
+	 * cause 8).
+	 *
+	 * So PHP states the time and the database only compares: no NOW(), no INTERVAL, no
+	 * CURDATE() may return to any query touching this table. UTC rather than site-local
+	 * time because nothing ever displays rgs_time — it is short-lived bookkeeping, and a
+	 * site owner switching the WordPress timezone must not shift the frame of rows
+	 * already written.
+	 *
+	 * @param int $offset_seconds Seconds relative to now (negative = in the past).
+	 * @return string `Y-m-d H:i:s` in UTC, ready to bind as %s.
+	 */
+	private static function sql_utc( $offset_seconds = 0 ) {
+		return gmdate( 'Y-m-d H:i:s', time() + (int) $offset_seconds );
+	}
+
 	/** Atomically consume one use of the solved-stamp row matching the current IP
 	 * (AP2 rate-limit). LIMIT 1 so that, if an IP has solved multiple stamps
 	 * (multiple rows), only one row is charged per submission.
+	 *
+	 * THE FRESHNESS BOUND IS LOAD-BEARING HERE — unlike in consume_token_row(), where it
+	 * was redundant and has been dropped. This path has no token and therefore no expiry
+	 * of its own: the row is found by address alone, and the sweep in check_stamp() only
+	 * runs when somebody solves. Without the bound, one row on a quiet site would keep
+	 * delivering token-less traffic from that address until POW_MAX_USES was spent,
+	 * however many days later. "This address paid RECENTLY" is the entire semantics of
+	 * the fallback, not decoration on it.
 	 *
 	 * @param int $time_window Configured Option::POW_TIME_WINDOW, minutes.
 	 * @param int $max_uses    Configured Option::POW_MAX_USES.
@@ -1763,11 +2014,11 @@ class Stamp {
                     UPDATE ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
                        SET rgs_uses = rgs_uses + 1
                      WHERE rgs_ip = %s
-                       AND rgs_time >= NOW() - INTERVAL %d MINUTE
+                       AND rgs_time >= %s
                        AND rgs_uses < %d
                      LIMIT 1',
 				$this->hash_values( $this->get_client_ip() ),
-				$time_window + 2,
+				self::sql_utc( -( ( (int) $time_window + 2 ) * MINUTE_IN_SECONDS ) ),
 				$max_uses
 			)
 		);
@@ -1776,11 +2027,25 @@ class Stamp {
 	/** Atomically consume one use of the row keyed by this specific token (AP3
 	 * submission-binding) — the token, not the IP, is the rate-limit key here.
 	 *
-	 * @param string $token       The verified token (also the row's rgs_stamp value).
-	 * @param int    $time_window Configured Option::POW_TIME_WINDOW, minutes.
+	 * NO TIME PREDICATE, DELIBERATELY. A row is created (check_stamp) only after its
+	 * token was issued, so the row can never be older than the token — and the token's
+	 * age is already decided, one call earlier, by StampToken::verify_integrity(), which
+	 * is the sole gate this method sits behind (pinned by StampWiringTest). A second
+	 * freshness test could therefore never reject anything the first one let through: it
+	 * could only fire when the two clocks disagreed, which is precisely how a site with a
+	 * timezone-inconsistent database ended up classifying every submission as spam
+	 * (HANDBUCH.md §12 cause 8). The most robust time check on this path is the one that
+	 * is not there.
+	 *
+	 * What still bounds the row, with no clock involved: the token expiry above, the
+	 * TOKEN_MAX_USES budget below, the sweep in check_stamp(), and the fact that the row
+	 * is unreachable without presenting the matching valid token — the lookup is by
+	 * rgs_stamp, and the UNIQUE index keeps a second solve from minting fresh budget.
+	 *
+	 * @param string $token The verified token (also the row's rgs_stamp value).
 	 * @return int Affected rows (0 or 1).
 	 */
-	private function consume_token_row( $token, $time_window ) {
+	private function consume_token_row( $token ) {
 		global $wpdb;
 		return (int) $wpdb->query(
 			$wpdb->prepare(
@@ -1788,11 +2053,9 @@ class Stamp {
                     UPDATE ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
                        SET rgs_uses = rgs_uses + 1
                      WHERE rgs_stamp = %s
-                       AND rgs_time >= NOW() - INTERVAL %d MINUTE
                        AND rgs_uses < %d
                      LIMIT 1',
 				$token,
-				$time_window + 2,
 				self::TOKEN_MAX_USES
 			)
 		);
@@ -1864,52 +2127,22 @@ class Stamp {
 
 		$token_length = strlen( $token );
 
-		// TRANSITIONAL chain-token path (120 = v2, 112 = in-flight legacy), one release
-		// long: rows keyed on a chain token still exist until their window expires, and a
-		// client that was mid-chain across the update still posts one. Re-challenges are
-		// no longer issued anywhere (see check_stamp()), so there is no in-flight round
-		// left to bridge — this uses the SAME standard poll window as the base-token path
-		// below. That also retires the adaptive, difficulty-scaled window (up to 8s per
-		// worker), whose amortisability across addresses was a BACKLOG concern of its own.
-		if ( ChainToken::LENGTH_V2 === $token_length || ChainToken::LENGTH === $token_length ) {
-			$now_ms      = (int) round( microtime( true ) * 1000 );
-			$chain_is_v2 = ChainToken::LENGTH_V2 === $token_length;
-			$chain_valid = $chain_is_v2
-				? ChainToken::verify_integrity( $token, $salt, $now_ms, $time_window )
-				: ChainToken::verify( $token, $this->get_client_ip(), $salt, $now_ms, $time_window );
-
-			if ( $chain_valid ) {
-				$valid = $this->poll_for_row(
-					function () use ( $token, $time_window ) {
-						return $this->consume_token_row( $token, $time_window );
-					}
-				);
-				if ( $valid ) {
-					return $valid;
-				}
-				// Chain row never landed within the window — one IP-fallback
-				// consumption, no further polling, mirroring the base token path below.
-				// Record WHY this path failed before the fallback attempt: if the
-				// fallback still succeeds, check_request() returns true and
-				// check_submit() never reads the reason (observe only, no cleanup).
-				$this->pow_fail_reason = Classification_Reason::NO_POW_CHAIN_NO_ROW;
-				return $this->consume_ip_row( $time_window, $max_uses );
-			}
-		}
-
-		// Base-token path: 100 = v2 (integrity only, no IP), 92 = in-flight legacy.
-		$token_is_v2 = StampToken::LENGTH_V2 === $token_length;
-		if ( $token_is_v2 ) {
-			$token_valid = StampToken::verify_integrity( $token, $salt, time(), $time_window );
-		} else {
-			$token_valid = StampToken::LENGTH === $token_length
-				&& StampToken::verify( $token, $this->get_client_ip(), $salt, time(), $time_window );
-		}
+		// Base-token path — the ONLY token path. There is exactly one accepted format
+		// (v2, 100 chars, integrity-only, no IP in the HMAC). Two former branches sat
+		// here and are gone: the 92-char legacy format of the pre-v2 release, and the
+		// 112/120-char chain tokens of the removed solve-time gate. Both were explicit
+		// one-release transition paths; both transitions are over (5.3.3 shipped). See
+		// handbuch/pow.md, "Kein Solve-Zeit-Gate — und warum keins zurückkommt".
+		$token_valid = StampToken::LENGTH_V2 === $token_length
+			&& StampToken::verify_integrity( $token, $salt, time(), $time_window );
 
 		if ( $token_valid ) {
+			// verify_integrity() above has already bounded this token's age; the row it
+			// looks for cannot be older than the token itself, so consume_token_row()
+			// asks about the budget only and never about the clock (see there).
 			$valid = $this->poll_for_row(
-				function () use ( $token, $time_window ) {
-					return $this->consume_token_row( $token, $time_window );
+				function () use ( $token ) {
+					return $this->consume_token_row( $token );
 				}
 			);
 
@@ -1919,15 +2152,15 @@ class Stamp {
 
 			// Token didn't land a usable row within the poll window (e.g. check_stamp()
 			// hasn't landed yet, or the row is already exhausted) — one IP-fallback
-			// consumption, no further polling. Reason recorded before the fallback for
-			// the same reason as the chain path above.
+			// consumption, no further polling. Record WHY this path failed BEFORE the
+			// fallback attempt: if the fallback still succeeds, check_request() returns
+			// true and check_submit() never reads the reason (observe only, no cleanup).
 			//
 			// PURE LABELLING, NOT A DECISION: a fingerprint mismatch only picks the more
 			// specific reason string (the cache/proxy signature), so the site owner can
 			// tell "the handshake broke" from "this token came from somewhere else".
 			// The fallback attempt below is identical either way.
-			$mismatched = $token_is_v2
-				&& StampToken::STATUS_MISMATCH === StampToken::fp_status( $token, $this->get_client_ip(), $salt );
+			$mismatched = StampToken::STATUS_MISMATCH === StampToken::fp_status( $token, $this->get_client_ip(), $salt );
 
 			$this->pow_fail_reason = $mismatched
 				? Classification_Reason::NO_POW_TOKEN_IP_CHANGED
@@ -1936,8 +2169,8 @@ class Stamp {
 		}
 
 		// No usable token at all: either none was posted, or one was posted and failed
-		// verification (forged, expired, wrong length, or a chain token whose
-		// verification returned false above).
+		// verification (forged, expired, or of a length this build no longer accepts —
+		// which now includes the retired 92/112/120-char formats).
 		$this->pow_fail_reason = '' === $token
 			? Classification_Reason::NO_POW_NO_TOKEN
 			: Classification_Reason::NO_POW_INVALID_TOKEN;
@@ -1977,21 +2210,22 @@ class Stamp {
 		$this->print_debug_information( "stamp: $stamp" );
 		$this->print_debug_information( "nonce: $nonce" );
 
-		// Length decides the format: 100 = base token (v2), 120 = re-challenge chain
-		// token (v2), 92/112 = the same two formats issued by the previous release and
-		// still in flight (accepted for one release, see BACKLOG). All are exclusively
-		// hex/decimal, so this replaces the old single-length gate.
+		// ONE accepted length, and it must stay one. 100 = base token (v2). Three former
+		// alternatives are gone: the pre-AP3 64-char bucket stamp, the 92-char pre-v2
+		// token, and the 112/120-char chain tokens of the removed solve-time gate. Every
+		// one of them was a transitional path with an announced end; every one of them
+		// also weakened this gate while it lived (the 64er believed a POSTed IP, the
+		// 92/112er bound validity to the server-resolved address). A new length here
+		// needs the same kind of justification, not a convenience argument.
 		$stamp_length = strlen( $stamp );
 
-		if ( StampToken::LENGTH_V2 === $stamp_length || StampToken::LENGTH === $stamp_length ) {
-			// Base-token path. v2 (100) is verified for INTEGRITY ONLY — no IP enters
+		if ( StampToken::LENGTH_V2 === $stamp_length ) {
+			// Base-token path, verified for INTEGRITY ONLY — no IP enters
 			// StampToken::verify_integrity(), so a token issued behind a cache or to a
-			// rotating address still validates. v1 (92) keeps its IP-bound verify() for
-			// one release (in-flight tokens). The posted hashDifficulty/clientIP fields
-			// are ignored on both: the difficulty that matters is the one embedded (and
+			// rotating address still validates. The posted hashDifficulty/clientIP
+			// fields are ignored: the difficulty that matters is the one embedded (and
 			// HMAC-bound) in the token itself.
-			$token_is_v2      = StampToken::LENGTH_V2 === $stamp_length;
-			$parsed           = $token_is_v2 ? StampToken::parse_v2( $stamp ) : StampToken::parse( $stamp );
+			$parsed           = StampToken::parse_v2( $stamp );
 			$token_difficulty = $parsed ? (int) $parsed['difficulty'] : null;
 
 			// The difficulty is HMAC-bound inside the token (StampToken::create_v2()),
@@ -2007,9 +2241,7 @@ class Stamp {
 				wp_die();
 			}
 
-			$token_intact = $token_is_v2
-				? StampToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) )
-				: StampToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) );
+			$token_intact = StampToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), time(), get_option( Option::POW_TIME_WINDOW, 10 ) );
 
 			if ( ! $token_intact ) {
 				$this->print_debug_information( 'Token is incorrect or expired' );
@@ -2047,57 +2279,9 @@ class Stamp {
 			// VERWORFEN", breaking point (b) "Pre-Solve-and-Age") before the gate was built
 			// the same afternoon. Read that entry before proposing timing again.
 			// Pinned by StampWiringTest and tests/integration/cases/no-solve-time-gate.mjs.
-		} elseif ( ChainToken::LENGTH_V2 === $stamp_length || ChainToken::LENGTH === $stamp_length ) {
-			// TRANSITIONAL chain path — accept-only, one release long (same pattern as the
-			// 92/112 legacy token formats). Chains are no longer issued anywhere, but a
-			// client that was mid-chain when the site updated still holds a valid chain
-			// token and must be able to redeem it instead of silently losing its paid
-			// solve. Verify, check the PoW target, insert — never re-challenge, never
-			// feed a counter. Removal together with the ChainToken class, see BACKLOG.
-			//
-			// The sanitisation above already keeps only [a-zA-Z0-9]; a chain token is pure
-			// hex, so it survives.
-			$chain_is_v2 = ChainToken::LENGTH_V2 === $stamp_length;
-			$parsed      = $chain_is_v2 ? ChainToken::parse_v2( $stamp ) : ChainToken::parse( $stamp );
-			$dd          = $parsed ? (int) $parsed['difficulty'] : null;
-
-			// Difficulty gate mirrors the base-token path: the DD is HMAC-bound inside the
-			// chain token, so a client cannot lower it — accept anything from the current
-			// base upwards (an in-flight chain escalated a bit above the base it started
-			// from, and the base/boost may have shifted since).
-			if ( ! $parsed || $dd < (int) get_option( Option::POW_DIFFICULTY ) ) {
-				$this->print_debug_information( 'Chain token difficulty below base, or unparseable.' );
-				wp_die();
-			}
-
-			// v2 verifies integrity only (no IP — a chain spans several requests by
-			// construction); v1 keeps its IP-bound verify() for in-flight chains.
-			$now_ms      = (int) round( microtime( true ) * 1000 );
-			$chain_valid = $chain_is_v2
-				? ChainToken::verify_integrity( $stamp, get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) )
-				: ChainToken::verify( $stamp, $this->get_client_ip(), get_option( Option::POW_SALT ), $now_ms, get_option( Option::POW_TIME_WINDOW, 10 ) );
-
-			if ( ! $chain_valid ) {
-				$this->print_debug_information( 'Chain token is incorrect or expired.' );
-				wp_die();
-			}
-
-			// PoW target with the chain token's own difficulty.
-			if ( ! $this->check_proof_of_work( $dd, $stamp, $nonce ) ) {
-				$this->print_debug_information( 'Chain difficulty target was not met.' );
-				wp_die();
-			}
-
-			$this->print_debug_information( 'In-flight chain token redeemed (accept-only).' );
 		} else {
-			// The pre-AP3 64-char bucket stamp is gone (it was the last path that believed
-			// a POSTed IP, and back then the only one without a solve-time gate — a gate
-			// that no longer exists anywhere; a stamp in that
-			// format could only come from a >1-year-old cache copy and would be expired
-			// anyway).
 			$this->print_debug_information(
-				"stamp size: $stamp_length expected: " . StampToken::LENGTH_V2 . ', ' . ChainToken::LENGTH_V2
-				. ' (or ' . StampToken::LENGTH . '/' . ChainToken::LENGTH . ' in flight)'
+				"stamp size: $stamp_length expected: " . StampToken::LENGTH_V2
 			);
 			wp_die();
 		}
@@ -2123,8 +2307,8 @@ class Stamp {
 		$wpdb->query(
 			$wpdb->prepare(
 				'DELETE FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
-                            WHERE rgs_time < NOW() - INTERVAL %d MINUTE',
-				(int) get_option( Option::POW_TIME_WINDOW, 10 ) + 2
+                            WHERE rgs_time < %s',
+				self::sql_utc( -( ( (int) get_option( Option::POW_TIME_WINDOW, 10 ) + 2 ) * MINUTE_IN_SECONDS ) )
 			)
 		);
 
@@ -2141,6 +2325,9 @@ class Stamp {
 		// rgs_ip stays the hashed, server-resolved address: pure bookkeeping for the
 		// IP fallback in check_request() (no-JS clients, cached pages), NOT a condition
 		// on this token's validity.
+		// rgs_time is stated by PHP rather than left to the database (NOW()): this row is
+		// later compared against thresholds PHP computes, and the token's own lifetime is
+		// decided by PHP too. One clock writes it, the same clock reads it — see sql_utc().
 		$inserted = $wpdb->query(
 			$wpdb->prepare(
 				'INSERT IGNORE INTO ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs (
@@ -2148,10 +2335,11 @@ class Stamp {
                                 rgs_stamp,
                                 rgs_time
                              )
-                             VALUES(%s, %s, NOW())
+                             VALUES(%s, %s, %s)
                             ',
 				$hashed_ip,
-				$stamp
+				$stamp,
+				self::sql_utc()
 			)
 		);
 
@@ -2234,14 +2422,15 @@ class Stamp {
 	private function record_fp_status( $stamp, $stamp_length ) {
 		$salt = get_option( Option::POW_SALT );
 
-		if ( StampToken::LENGTH_V2 === $stamp_length ) {
-			$status = StampToken::fp_status( $stamp, $this->get_client_ip(), $salt );
-		} elseif ( ChainToken::LENGTH_V2 === $stamp_length ) {
-			$status = ChainToken::fp_status( $stamp, $this->get_client_ip(), $salt );
-		} else {
-			// Legacy in-flight formats carry no fingerprint.
+		// Only one format reaches this point — check_stamp() ends the request on any
+		// other length. The guard stays anyway: this method is the last thing that runs
+		// before the INSERT, and a format that ever arrives here without a fingerprint
+		// must count as "not measured" rather than silently as a match.
+		if ( StampToken::LENGTH_V2 !== $stamp_length ) {
 			return;
 		}
+
+		$status = StampToken::fp_status( $stamp, $this->get_client_ip(), $salt );
 
 		if ( StampToken::STATUS_MATCH === $status ) {
 			update_option( Option::POW_FP_MATCHED_TOTAL, (int) get_option( Option::POW_FP_MATCHED_TOTAL, 0 ) + 1, false );
@@ -2258,10 +2447,13 @@ class Stamp {
 	 * returned false, its result is only ever written to a technical detail row, and no
 	 * code path reads it back. It cannot change a verdict, in either direction.
 	 *
-	 * Deliberately queried WITHOUT the `rgs_time >= NOW() - INTERVAL …` filter the
-	 * consume queries use: "there was a row, but it was outside the window" and "there
-	 * was no row at all" are opposite findings, and a filtered query reports both as
-	 * nothing — which is exactly the ambiguity that cost two support rounds.
+	 * Deliberately queried WITHOUT the freshness filter consume_ip_row() applies: "there
+	 * was a row, but it was outside the window" and "there was no row at all" are
+	 * opposite findings, and a filtered query reports both as nothing — which is exactly
+	 * the ambiguity that cost two support rounds. The age is measured against a PHP-stated
+	 * "now" (sql_utc()), the same clock that wrote rgs_time; measuring it against the
+	 * database session's clock is what produced the impossible reading — a row older than
+	 * the token it belongs to — that exposed §12 cause 8.
 	 *
 	 * Cost: at most three SELECTs, only ever on the already-slow spam path (which has
 	 * just spent up to 2 seconds polling), never on a clean submission.
@@ -2276,10 +2468,11 @@ class Stamp {
 		if ( '' !== $token ) {
 			$token_row = $wpdb->get_row(
 				$wpdb->prepare(
-					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, NOW() ) AS age_s
+					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, %s ) AS age_s
 					   FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
 					  WHERE rgs_stamp = %s
 					  LIMIT 1',
+					self::sql_utc(),
 					$token
 				)
 			);
@@ -2305,11 +2498,12 @@ class Stamp {
 		if ( $ip_count > 0 ) {
 			$ip_row = $wpdb->get_row(
 				$wpdb->prepare(
-					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, NOW() ) AS age_s
+					'SELECT rgs_uses, TIMESTAMPDIFF( SECOND, rgs_time, %s ) AS age_s
 					   FROM ' . $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs
 					  WHERE rgs_ip = %s
 					  ORDER BY rgs_time DESC, rgs_id DESC
 					  LIMIT 1',
+					self::sql_utc(),
 					$this->hash_values( $this->get_client_ip() )
 				)
 			);

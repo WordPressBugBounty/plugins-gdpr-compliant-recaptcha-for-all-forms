@@ -85,12 +85,15 @@ final class Abilities {
 	}
 
 	/**
-	 * Whether stage 3 (submissions, protection settings) is switched on.
+	 * Whether the write/delete half of stage 3 is switched on.
+	 *
+	 * Kept as a thin alias of Agent_Access::write_enabled() because the name is used
+	 * in existing pins and reads correctly at the hook sites here.
 	 *
 	 * @return bool
 	 */
 	public static function unsafe_enabled() {
-		return (bool) get_option( Option::POW_ABILITIES_UNSAFE );
+		return Agent_Access::write_enabled();
 	}
 
 	/**
@@ -127,6 +130,138 @@ final class Abilities {
 		if ( self::write_enabled() ) {
 			$this->register_stage_two();
 		}
+
+		// Stage 3, in two independently switchable halves. Same discipline as stage 2:
+		// a disabled half is NOT registered at all, rather than registered and hidden
+		// behind meta.mcp.public — an ability that exists is an ability some other path
+		// can reach (core builds REST endpoints for abilities, and any plugin can call
+		// wp_get_ability()->execute()).
+		if ( Agent_Access::read_enabled() ) {
+			$this->register_stage_three_read();
+		}
+
+		if ( Agent_Access::write_enabled() ) {
+			$this->register_stage_three_write();
+		}
+	}
+
+	/**
+	 * Stage 3, read half. Registered only while POW_ABILITIES_READ_SUBMISSIONS is on.
+	 *
+	 * @return void
+	 */
+	private function register_stage_three_read() {
+		wp_register_ability(
+			self::ABILITY_NAMESPACE . '/list-submissions',
+			array(
+				'label'               => __( 'List stored submissions', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'description'         => __( 'Returns a page of stored submissions from the inbox or the spam folder: id, date, form action, classification reason and scoring. No field contents — use get-submission for one entry at a time. The analysis folder is not accessible.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'category'            => self::ABILITY_NAMESPACE,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'folder' => array(
+							'type'        => 'string',
+							'enum'        => array_keys( Agent_Access::list_folders() ),
+							'description' => __( 'Which folder to read.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+						'limit'  => array(
+							'type'        => 'integer',
+							'description' => __( 'Page size, at most 50.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+						'offset' => array(
+							'type'        => 'integer',
+							'description' => __( 'Rows to skip.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+					),
+					'required'   => array( 'folder' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'execute_callback'    => array( $this, 'list_submissions' ),
+				'permission_callback' => array( $this, 'can_read_submissions' ),
+				'meta'                => array( 'mcp' => array( 'public' => true ) ),
+			)
+		);
+
+		wp_register_ability(
+			self::ABILITY_NAMESPACE . '/get-submission',
+			array(
+				'label'               => __( 'Read one stored submission', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'description'         => __( 'Returns the stored fields of one submission from the inbox or the spam folder. Password fields are redacted. The analysis folder is not accessible.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'category'            => self::ABILITY_NAMESPACE,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id' => array(
+							'type'        => 'integer',
+							'description' => __( 'Submission id, as returned by list-submissions.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+					),
+					'required'   => array( 'id' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'execute_callback'    => array( $this, 'get_submission' ),
+				'permission_callback' => array( $this, 'can_read_submissions' ),
+				'meta'                => array( 'mcp' => array( 'public' => true ) ),
+			)
+		);
+	}
+
+	/**
+	 * Stage 3, write half. Registered only while POW_ABILITIES_UNSAFE is on.
+	 *
+	 * @return void
+	 */
+	private function register_stage_three_write() {
+		wp_register_ability(
+			self::ABILITY_NAMESPACE . '/delete-submission',
+			array(
+				'label'               => __( 'Delete one stored submission', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'description'         => __( 'Permanently deletes one submission and its stored fields. Cannot be undone.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'category'            => self::ABILITY_NAMESPACE,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'id' => array(
+							'type'        => 'integer',
+							'description' => __( 'Submission id.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+					),
+					'required'   => array( 'id' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'execute_callback'    => array( $this, 'delete_submission' ),
+				'permission_callback' => array( $this, 'can_change_protection' ),
+				'meta'                => array( 'mcp' => array( 'public' => true ) ),
+			)
+		);
+
+		wp_register_ability(
+			self::ABILITY_NAMESPACE . '/set-protection',
+			array(
+				'label'               => __( 'Change a protection setting', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'description'         => __( 'Changes one of three settings: the puzzle difficulty, whether spam is blocked, and whether under-attack mode is active. Nothing else can be changed this way — address trust, the monitored scope, spam simulation, spam storage, the token secret and the agent permissions themselves are all excluded.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'category'            => self::ABILITY_NAMESPACE,
+				'input_schema'        => array(
+					'type'       => 'object',
+					'properties' => array(
+						'setting' => array(
+							'type'        => 'string',
+							'enum'        => array_keys( Agent_Access::PROTECTION_SETTINGS ),
+							'description' => __( 'Which setting to change.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+						'value'   => array(
+							'description' => __( 'New value: an integer for the difficulty, true/false for the switches.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						),
+					),
+					'required'   => array( 'setting', 'value' ),
+				),
+				'output_schema'       => array( 'type' => 'object' ),
+				'execute_callback'    => array( $this, 'set_protection' ),
+				'permission_callback' => array( $this, 'can_change_protection' ),
+				'meta'                => array( 'mcp' => array( 'public' => true ) ),
+			)
+		);
 	}
 
 	/**
@@ -322,9 +457,148 @@ final class Abilities {
 		return current_user_can( 'manage_options' ) && self::write_enabled();
 	}
 
+	/**
+	 * Stage 3, read half. Same belt-and-braces option recheck as stage 2.
+	 *
+	 * @return bool
+	 */
+	public function can_read_submissions() {
+		return current_user_can( 'manage_options' ) && Agent_Access::read_enabled();
+	}
+
+	/**
+	 * Stage 3, write half.
+	 *
+	 * @return bool
+	 */
+	public function can_change_protection() {
+		return current_user_can( 'manage_options' ) && Agent_Access::write_enabled();
+	}
+
 	/* ---------------------------------------------------------------------
 	 * Execute callbacks
 	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Stage 3: one page of submission summaries.
+	 *
+	 * @param array<string,mixed> $input Ability input.
+	 * @return array<string,mixed>
+	 */
+	public function list_submissions( $input = array() ) {
+		$folder = isset( $input['folder'] ) && is_string( $input['folder'] ) ? $input['folder'] : '';
+		if ( ! isset( Agent_Access::list_folders()[ $folder ] ) ) {
+			return array(
+				'ok'      => false,
+				'reason'  => 'unknown_folder',
+				'message' => __( 'Unknown folder. Readable folders are the inbox and the spam folder; the analysis folder is deliberately not readable, because analysis mode records every POST on the site, including admin screens of other plugins.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			);
+		}
+
+		$limit  = Agent_Access::clamp_limit( isset( $input['limit'] ) ? $input['limit'] : null );
+		$offset = isset( $input['offset'] ) && is_numeric( $input['offset'] ) ? (int) $input['offset'] : 0;
+
+		return array(
+			'ok'          => true,
+			'folder'      => $folder,
+			'limit'       => $limit,
+			'offset'      => max( 0, $offset ),
+			'submissions' => Agent_Access::list_submissions( $folder, $limit, $offset ),
+		);
+	}
+
+	/**
+	 * Stage 3: the stored fields of one submission.
+	 *
+	 * @param array<string,mixed> $input Ability input.
+	 * @return array<string,mixed>
+	 */
+	public function get_submission( $input = array() ) {
+		$id = isset( $input['id'] ) && is_numeric( $input['id'] ) ? (int) $input['id'] : 0;
+
+		$submission = $id > 0 ? Agent_Access::get_submission( $id ) : null;
+		if ( null === $submission ) {
+			return array(
+				'ok'      => false,
+				'reason'  => 'not_found',
+				'message' => __( 'No readable submission with that id. Note that analysis-mode entries are not readable through this ability.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			);
+		}
+
+		return array(
+			'ok'         => true,
+			'submission' => $submission,
+		);
+	}
+
+	/**
+	 * Stage 3: delete one submission.
+	 *
+	 * @param array<string,mixed> $input Ability input.
+	 * @return array<string,mixed>
+	 */
+	public function delete_submission( $input = array() ) {
+		$id = isset( $input['id'] ) && is_numeric( $input['id'] ) ? (int) $input['id'] : 0;
+
+		if ( $id <= 0 || ! Agent_Access::delete_submission( $id ) ) {
+			return array(
+				'ok'      => false,
+				'reason'  => 'not_found',
+				'message' => __( 'No deletable submission with that id.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			);
+		}
+
+		Agent_Access::record( self::ABILITY_NAMESPACE . '/delete-submission', 'delete', array( 'id' => $id ) );
+
+		return array(
+			'ok'      => true,
+			'deleted' => $id,
+		);
+	}
+
+	/**
+	 * Stage 3: change one protection setting.
+	 *
+	 * @param array<string,mixed> $input Ability input.
+	 * @return array<string,mixed>
+	 */
+	public function set_protection( $input = array() ) {
+		$plan = Agent_Access::plan_protection_change(
+			isset( $input['setting'] ) ? $input['setting'] : null,
+			isset( $input['value'] ) ? $input['value'] : null
+		);
+
+		if ( ! $plan['ok'] ) {
+			return array(
+				'ok'      => false,
+				'reason'  => $plan['reason'],
+				'message' => Agent_Access::explain( $plan['reason'] ),
+			);
+		}
+
+		// Read the old value BEFORE writing: the audit trail records old -> new, because
+		// "was set" alone does not let an admin undo anything, and undoing is the first
+		// thing they want when they find a change they did not make.
+		$previous = get_option( $plan['setting'] );
+		update_option( $plan['setting'], $plan['value'] );
+
+		Agent_Access::record(
+			self::ABILITY_NAMESPACE . '/set-protection',
+			'set-protection',
+			array(
+				'setting' => $plan['setting'],
+				'from'    => $previous,
+				'to'      => $plan['value'],
+			)
+		);
+
+		return array(
+			'ok'      => true,
+			'setting' => $plan['setting'],
+			'from'    => $previous,
+			'to'      => $plan['value'],
+		);
+	}
 
 	/**
 	 * @param array<string,mixed> $input Ability input (unused).
@@ -352,7 +626,7 @@ final class Abilities {
 		unset( $input );
 
 		$save_spam    = (bool) get_option( Option::POW_SAVE_SPAM );
-		$no_pow_count = Option::count_no_pow_reasons_since_hours( Option::HEALTH_NO_POW_WINDOW_HOURS );
+		$no_pow_count = Option::no_pow_health_count();
 		$matched      = (int) get_option( Option::POW_FP_MATCHED_TOTAL, 0 );
 		$mismatched   = (int) get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 );
 		$share        = Option::fp_mismatch_share( $matched, $mismatched );
@@ -397,7 +671,12 @@ final class Abilities {
 		$caveats = array();
 
 		if ( ! $save_spam ) {
-			$caveats[] = __( 'Storing spam is switched off, so "no_stamp_row_24h" is always 0 and says nothing about the real amount of unprotected traffic. Do not read 0 as healthy here.', 'gdpr-compliant-recaptcha-for-all-forms' );
+			// The blind spot this used to warn about is closed since 5.3.4: the figure
+			// now also comes from a storage-independent bucket counter, so it is real
+			// even with spam storage off. What remains true is the narrower statement
+			// below — that counter only knows what happened since it started counting,
+			// so a freshly updated site reads low for up to its window.
+			$caveats[] = __( 'Storing spam is switched off. "no_stamp_row_24h" is still measured (it no longer depends on stored messages), but it only covers submissions seen since this site last updated, so a low number right after an update says little.', 'gdpr-compliant-recaptcha-for-all-forms' );
 		}
 		if ( (bool) get_option( Option::POW_SIMULATE_SPAM ) ) {
 			$caveats[] = __( 'Simulation mode is on: every submission is being treated as spam, which inflates the spam figures.', 'gdpr-compliant-recaptcha-for-all-forms' );
@@ -656,12 +935,35 @@ final class Abilities {
 	 * @return void
 	 */
 	public function render_unsafe_notice() {
-		if ( ! current_user_can( 'manage_options' ) || ! self::unsafe_enabled() ) {
+		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
 
+		$read  = Agent_Access::read_enabled();
+		$write = Agent_Access::write_enabled();
+
+		if ( ! $read && ! $write ) {
+			return;
+		}
+
+		// BOTH halves get the standing notice, and it NAMES which one is on.
+		//
+		// Splitting stage 3 in two was about giving the operator a real choice, not
+		// about declaring the reading half harmless — it ships what visitors typed into
+		// the site's forms to whatever agent is connected, which is precisely the
+		// promise this plugin otherwise makes ("no tracking, nothing leaves the site").
+		// A notice that appeared only for the writing half would read as "reading is
+		// fine", which is the wrong lesson to teach silently.
+		if ( $read && $write ) {
+			$message = __( 'Invisible Anti-Spam: AI agents can currently read stored submissions AND change protection settings.', 'gdpr-compliant-recaptcha-for-all-forms' );
+		} elseif ( $read ) {
+			$message = __( 'Invisible Anti-Spam: AI agents can currently read stored submissions, including what visitors typed into your forms.', 'gdpr-compliant-recaptcha-for-all-forms' );
+		} else {
+			$message = __( 'Invisible Anti-Spam: AI agents can currently change protection settings and delete stored submissions.', 'gdpr-compliant-recaptcha-for-all-forms' );
+		}
+
 		echo '<div class="notice notice-warning"><p>';
-		echo esc_html__( 'Invisible Anti-Spam: AI agents can currently read stored submissions and change protection settings.', 'gdpr-compliant-recaptcha-for-all-forms' );
+		echo esc_html( $message );
 		echo '</p></div>';
 	}
 }
