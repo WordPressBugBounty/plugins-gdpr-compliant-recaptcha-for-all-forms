@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.3.4
+	 * Version: 5.4.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.3.4';
+	const VERSION = '5.4.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -71,6 +71,7 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-echo-store.php';
 		require_once __DIR__ . '/includes/class-message-page.php';
 		require_once __DIR__ . '/includes/class-client-ip.php';
+		require_once __DIR__ . '/includes/class-proxy-candidate-ledger.php';
 		require_once __DIR__ . '/includes/class-rest-route.php';
 		require_once __DIR__ . '/includes/class-stamp-token.php';
 		require_once __DIR__ . '/includes/class-gibberish-detector.php';
@@ -80,6 +81,9 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-credential-suggestion-ledger.php';
 		require_once __DIR__ . '/includes/class-credential-learning.php';
 		require_once __DIR__ . '/includes/class-credential-cleanup.php';
+		require_once __DIR__ . '/includes/class-blocked-values-migration.php';
+		require_once __DIR__ . '/includes/class-pattern-matcher.php';
+		require_once __DIR__ . '/includes/class-overbroad-pattern-guard.php';
 		require_once __DIR__ . '/includes/class-stamp.php';
 		require_once __DIR__ . '/includes/class-settings-menu.php';
 		require_once __DIR__ . '/includes/class-scope-sync.php';
@@ -117,6 +121,10 @@ class RCM_Main {
 		// Same idiom: registers the credential-field proposal notice, its two
 		// one-click handlers and the message-inbox rescue ajax endpoint.
 		new Credential_Learning();
+		// Same idiom: registers the "an over-broad pattern discarded an admin save"
+		// notice and its dismiss handler. The marker it reads is written by
+		// Stamp::check_submit()'s block branch and by nothing else.
+		new Overbroad_Pattern_Guard();
 		// Same idiom: registers the Abilities API surface (core 6.9+), the Connectors
 		// card (core 7.0+) and the stage-3 warning notice. All internally guarded, so
 		// this costs nothing on older WordPress.
@@ -612,6 +620,14 @@ class RCM_Main {
 		// slice per request, and costs one cached get_option() once finished. It
 		// therefore needs no version bump to reach existing installs.
 		Credential_Cleanup::maybe_run();
+
+		// DELIBERATELY OUTSIDE the version gate too, and for the same reason plus one
+		// more: this migration has to reach installations whose gate has ALREADY
+		// fired (they would otherwise keep their blocklist mixed into the pattern
+		// option forever), and a version-gated migration cannot be exercised in a dev
+		// container at all, because its stored version is already current. Guarded by
+		// its own done flag, so a completed migration costs one cached get_option().
+		Blocked_Values_Migration::maybe_run();
 	}
 
 	/**

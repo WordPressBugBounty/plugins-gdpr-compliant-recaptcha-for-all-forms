@@ -21,7 +21,10 @@
  *                          than it was issued to (cache/proxy signature — diagnosis).
  *   simulation             POW_SIMULATE_SPAM is on — everything is "spam" by configuration.
  *   echo_lock              A core value matched an auto-recorded recent spam value.
- *   wildcard               A user-content field matched an admin-configured {"*":"…"} pattern.
+ *   wildcard               A user-content field matched a value on the operator's blocklist
+ *                          (POW_BLOCKED_VALUES). The CODE stays `wildcard`: it is stored in
+ *                          live databases and used as a corpus label, so it is never
+ *                          renamed — only its source option and its label moved.
  *   quarantine             Under-attack quarantine held an otherwise-clean submission.
  *   gibberish:letters=<n>,alnum=<n>,solo=<0|1>[,strong=1]
  *                          Gibberish detection fired; the detail carries the scoring
@@ -34,6 +37,11 @@
  * clean. Callers must therefore store null/nothing rather than inventing an "ok"
  * code — a code for cleanliness would be indistinguishable from an unlabelled
  * legacy row in the corpus.
+ *
+ * The reasons are not all equally load-bearing downstream: three of the no_pow
+ * sub-cases must NOT feed the auto-echo lock with the submission's content values,
+ * because they describe a failed handshake rather than the content — see
+ * NON_SEEDING_REASONS / seeds_echo_values().
  *
  * The one thing that invariant costs is the ability to explain a NON-block, so that
  * lives in a separate datum with its own grammar and its own storage field:
@@ -82,7 +90,7 @@ final class Classification_Reason {
 	/** Auto-echo lock: a core value matched a recently recorded spam value. */
 	const CODE_ECHO_LOCK = 'echo_lock';
 
-	/** Admin-configured wildcard value pattern matched. */
+	/** A user-content field matched an operator-configured blocked value. */
 	const CODE_WILDCARD = 'wildcard';
 
 	/** Under-attack quarantine held an otherwise-clean submission. */
@@ -140,6 +148,23 @@ final class Classification_Reason {
 	const NO_POW_TOKEN_IP_CHANGED = 'no_pow:token_ip_changed';
 
 	/**
+	 * Reasons whose submissions must NOT seed the auto-echo lock with their CONTENT
+	 * values — see seeds_echo_values(), which is the only thing that reads this.
+	 *
+	 * All three share one property: a token that VERIFIED was presented, and only the
+	 * solved-PoW row was missing. That is an infrastructure symptom (cache in front of
+	 * `get_stamp`, proxy, a database that cannot store the row, two clocks — HANDBUCH.md
+	 * §12 causes 4/7/8), not a statement about the submitted content.
+	 *
+	 * @var string[]
+	 */
+	const NON_SEEDING_REASONS = array(
+		self::NO_POW_TOKEN_NO_ROW,
+		self::NO_POW_TOKEN_IP_CHANGED,
+		self::NO_POW_CHAIN_NO_ROW,
+	);
+
+	/**
 	 * Short English UI label per CODE, keyed by the code part of a reason string.
 	 * Intentionally code-level (not detail-level): the detail is diagnostic data for
 	 * the corpus, the label answers "what kind of block was this?" at a glance.
@@ -150,7 +175,7 @@ final class Classification_Reason {
 		self::CODE_NO_POW     => 'No proof of work',
 		self::CODE_SIMULATION => 'Simulation mode',
 		self::CODE_ECHO_LOCK  => 'Known spam value',
-		self::CODE_WILDCARD   => 'Blocked value pattern',
+		self::CODE_WILDCARD   => 'Blocked value',
 		self::CODE_QUARANTINE => 'Under-attack quarantine',
 		self::CODE_GIBBERISH  => 'Gibberish content',
 	);
@@ -305,6 +330,58 @@ final class Classification_Reason {
 	}
 
 	/**
+	 * Whether a submission classified with this reason may seed the auto-echo lock with
+	 * its CONTENT values (Stamp::check_submit() → Echo_Store::record()).
+	 *
+	 * WHY THIS EXISTS. The echo lock remembers the core values of a spam submission —
+	 * sender email, payload domain, phone number, long-text hash — for 36 hours, across
+	 * every form and every address. That is the right response to "this content is spam"
+	 * and the wrong response to "the handshake failed": a `no_pow` verdict says nothing
+	 * whatsoever about what was submitted. The three NON_SEEDING_REASONS presented a
+	 * token that VERIFIED and merely lacked its solved-PoW row, which is the signature of
+	 * a broken infrastructure (cache, proxy, storage failure, clock skew) rather than of
+	 * a bot. Letting those seed turns a mass false alarm into a content blocklist that
+	 * outlives its own fix by up to 36h: the two-clocks bug fixed in 5.3.4 classified
+	 * legitimate submissions as `no_pow:token_no_row` en masse, and after the update the
+	 * very same senders kept being blocked — now as "Known spam value".
+	 *
+	 * Same reasoning the under-attack quarantine already carries as its exception #2
+	 * ("grey-zone submissions are presumed innocent and must not seed echo values that
+	 * would spam-classify legitimate senders after the wave ends"), applied to the
+	 * handshake failure.
+	 *
+	 * ERROR DIRECTION IS DELIBERATE: anything not explicitly listed — including an
+	 * unknown, empty, null or otherwise malformed value — SEEDS. A reason code added
+	 * later would otherwise silently drop out of the echo lock, and a lock that quietly
+	 * stops learning is far harder to notice than one that learns too much (the latter
+	 * has a reset button, see the Diagnostics tab). Pinned in
+	 * tests/unit/ClassificationReasonTest.php.
+	 *
+	 * TWO PRICES KNOWINGLY PAID, recorded here so the next session need not rediscover
+	 * them:
+	 *  1. A protocol-aware bot can provoke `no_pow:token_no_row` for free — fetch a token
+	 *     via `get_stamp` (stateless, costs the server nothing), never solve it, post it
+	 *     anyway — and thereby escape the echo lock permanently. Accepted: whoever can do
+	 *     that can also just PAY the proof of work (field data: d=20 in ~2 s), and a
+	 *     paying submission is classified clean and seeds nothing today either. The echo
+	 *     lock was never the barrier against that class; the proof of work is.
+	 *  2. `no_pow:invalid_token` keeps seeding although it, too, has a false-alarm shape
+	 *     (a cache layer in front of `get_stamp` hands out expired tokens to real
+	 *     visitors en masse). The cut is drawn at "a valid token was demonstrably
+	 *     presented", which is the more conservative of the two available lines: it keeps
+	 *     protocol-blind mass spam — the echo lock's main food source — feeding the
+	 *     store.
+	 *
+	 * @param mixed $reason Reason string, or null for a clean submission (any input
+	 *                      accepted defensively — stored values pass through the
+	 *                      database and may be anything).
+	 * @return bool True when the submission's values may be recorded.
+	 */
+	public static function seeds_echo_values( $reason ) {
+		return ! in_array( $reason, self::NON_SEEDING_REASONS, true );
+	}
+
+	/**
 	 * The code part of a reason string: everything before the first colon (the whole
 	 * string for codes that carry no detail).
 	 *
@@ -322,16 +399,6 @@ final class Classification_Reason {
 		return false === $colon ? $reason : (string) substr( $reason, 0, $colon );
 	}
 
-	/**
-	 * Short English UI label for a reason string. Never throws and never returns an
-	 * empty string: unknown codes, malformed strings and non-string input all yield
-	 * UNKNOWN_LABEL. A stored reason may predate (or postdate) the code that reads
-	 * it, so an unrecognised value must degrade to something printable rather than
-	 * break the message view.
-	 *
-	 * @param mixed $reason Reason string.
-	 * @return string Label.
-	 */
 	/**
 	 * The detail part of a reason string: everything after the first colon, or '' when
 	 * the reason carries no detail. Mirrors code() and is just as defensive.
@@ -369,6 +436,16 @@ final class Classification_Reason {
 		return self::detail( $reason );
 	}
 
+	/**
+	 * Short English UI label for a reason string. Never throws and never returns an
+	 * empty string: unknown codes, malformed strings and non-string input all yield
+	 * UNKNOWN_LABEL. A stored reason may predate (or postdate) the code that reads
+	 * it, so an unrecognised value must degrade to something printable rather than
+	 * break the message view.
+	 *
+	 * @param mixed $reason Reason string.
+	 * @return string Label.
+	 */
 	public static function label( $reason ) {
 		$code = self::code( $reason );
 		return isset( self::CODE_LABELS[ $code ] ) ? self::CODE_LABELS[ $code ] : self::UNKNOWN_LABEL;

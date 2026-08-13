@@ -173,6 +173,21 @@ class Option {
 	 */
 	const POW_TRUST_PRIVATE_PROXY = self::PREFIX . 'pow_trust_private_proxy';
 
+	/**
+	 * Confirmation ledger of the SUGGESTED trusted-proxy address (see
+	 * class-proxy-candidate-ledger.php). Bookkeeping, not a setting: absent from
+	 * prepare_options()/activate() seeding, written with autoload=no, read on the settings
+	 * screen only, and deleted the moment POW_TRUSTED_PROXIES is non-empty.
+	 *
+	 * Holds one candidate — always the private/loopback REMOTE_ADDR the server itself
+	 * observed, never an address out of a forwarding header — plus first/last sighting, a
+	 * counter and the NAME of the header that indicated the hop. Nothing ever moves from
+	 * here into POW_TRUSTED_PROXIES without an explicit admin click (capability + nonce).
+	 *
+	 * @var string
+	 */
+	const POW_PROXY_CANDIDATE = self::PREFIX . 'pow_proxy_candidate';
+
 	/** @var bool */
 	const POW_SAVE_CART = self::PREFIX . 'pow_save_cart';
 
@@ -199,6 +214,34 @@ class Option {
 
 	/** @var Text */
 	const POW_PARAMETER_PATTERN = self::PREFIX . 'pow_parameter_pattern';
+
+	/**
+	 * Standalone blocklist option (PLAN-BLOCKLIST-TRENNUNG.md AP2/§2): plain-text
+	 * lines, one value per line — sender address, "@sender-domain", link domain,
+	 * or exact field text. Splits the value-based spam judgment out of
+	 * POW_PARAMETER_PATTERN, which now carries only field/value MONITORING
+	 * patterns. A real settings option (Settings_Menu group "Spam Processing"),
+	 * populated going forward via Message_Page::block_value_callback() and, once,
+	 * by Blocked_Values_Migration migrating the old {"*":"value"}/{"*":"@domain"}
+	 * lines out of POW_PARAMETER_PATTERN. Read via
+	 * Echo_Values::values_from_plaintext_lines().
+	 *
+	 * @var string
+	 */
+	const POW_BLOCKED_VALUES = self::PREFIX . 'pow_blocked_values';
+
+	/**
+	 * Ledger of the one-off migration that moves legacy {"*":"value"}/
+	 * {"*":"@domain"} lines out of POW_PARAMETER_PATTERN into POW_BLOCKED_VALUES
+	 * (see class-blocked-values-migration.php, PLAN-BLOCKLIST-TRENNUNG.md §3.3).
+	 * NOT an option in the settings sense: deliberately absent from
+	 * prepare_options()/activate() seeding, same category as POW_CREDENTIAL_CLEANUP
+	 * — nothing here is a user decision, it is migration bookkeeping (a one-off
+	 * done flag).
+	 *
+	 * @var string
+	 */
+	const POW_BLOCKED_VALUES_MIGRATED = self::PREFIX . 'pow_blocked_values_migrated';
 
 	/**
 	 * Third signature class alongside actions/patterns (REST_ROUTES_PLAN.md AP3):
@@ -485,7 +528,16 @@ class Option {
 		$sql_array = array();
 		//For each pattern build a sub-seelect to check whether the conditions match
 		foreach ( $existing_patterns as $pattern ) {
-			$pattern    = self::generate_paths( json_decode( $pattern, true ), '' );
+			$decoded_pattern = json_decode( $pattern, true );
+			if ( ! is_array( $decoded_pattern ) ) {
+				// Not valid JSON (e.g. a stray textarea edit predating the save-time
+				// guard) -- skip this line rather than build a sub-select with an empty
+				// OR-list ("WHERE  GROUP BY", a SQL syntax error). generate_paths()
+				// itself now also tolerates this, but skipping here avoids the broken
+				// fragment in the first place.
+				continue;
+			}
+			$pattern    = self::generate_paths( $decoded_pattern, '' );
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
@@ -506,7 +558,12 @@ class Option {
 		$hidden_sql_array = array();
 		//For each pattern build a sub-seelect to check whether the conditions match
 		foreach ( $hidden_patterns as $pattern ) {
-			$pattern    = self::generate_paths( json_decode( $pattern, true ), '' );
+			$decoded_pattern = json_decode( $pattern, true );
+			if ( ! is_array( $decoded_pattern ) ) {
+				// See the matching guard above.
+				continue;
+			}
+			$pattern    = self::generate_paths( $decoded_pattern, '' );
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
@@ -567,30 +624,6 @@ class Option {
 		return $count;
 	}
 
-	/**Compare whether a JSON obj1 is completely inherited in a JSON object 2 */
-	public static function compare_json_objects( $obj1, $obj2, $ignore_null = false ) {
-		if ( $obj1 && count( $obj1 ) ) {
-			foreach ( $obj1 as $key => $value ) {
-				if ( isset( $obj2[ $key ] ) ) {
-					if ( $value && ( is_array( $value ) ) && is_array( $obj2[ $key ] ) ) {
-						if ( ! self::compare_json_objects( $value, $obj2[ $key ], $ignore_null ) ) {
-							return false;
-						}
-					} elseif ( ! ( $ignore_null && ( null === $value ) ) ) {
-						if ( $value !== $obj2[ $key ] ) {
-							return false;
-						}
-					}
-				} else {
-					return false;
-				}
-			}
-			return true;
-		} else {
-			return false;
-		}
-	}
-
 	/**Converts an array of nested Attribute names into a JSON-object */
 	public static function convert_to_json_object( $mysql_result, $attribute_name, $value_name ) {
 		$json_object = array();
@@ -618,6 +651,21 @@ class Option {
 	/** Transforms a nested object into a string-representation */
 	public static function generate_paths( $data, $current_path ) {
 		$values = array();
+
+		// Every caller feeds this the result of json_decode() on an admin-configured
+		// pattern line (get_rows() below, Message_Page::get_messages()) -- a line that
+		// predates a save-time guard, or was edited outside the plugin, can be anything
+		// but valid JSON, and json_decode() then returns null/scalar/bool, not an
+		// array. `foreach` on that would throw "argument must be of type array|object" --
+		// a PHP warning landing in an Ajax JSON body ahead of the real response
+		// (HANDBUCH.md §12 Ursache 1 damage class, confirmed live for this exact call
+		// under display_errors=1 before this guard existed). An empty result here also
+		// matters to the two call sites: they skip building a SQL fragment for it
+		// entirely when it comes back empty, rather than emitting one with an empty
+		// OR-list.
+		if ( ! is_array( $data ) && ! is_object( $data ) ) {
+			return $values;
+		}
 
 		foreach ( $data as $key => $value ) {
 			$path = $current_path . ( $current_path ? '->' : '' ) . $key;

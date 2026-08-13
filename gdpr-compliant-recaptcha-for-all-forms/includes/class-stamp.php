@@ -259,11 +259,13 @@ class Stamp {
 		//
 		// What still comes from the request, and why it is bounded: the two remaining
 		// terms are keyed on the URL (`is_special_case_request()`, anchored + narrowed
-		// by the request's own action/body shape) and on `POW_SITE_WHITELIST`, which is
-		// matched against `HTTP_HOST . REQUEST_URI` — and `Host` IS client-settable, so
-		// an admin-entered whitelist line can be claimed by a forged Host header
-		// (pre-existing, see ISSUES.md). Both are ADMIN-configured or fixed integration
-		// endpoints, not switches a visitor turns on; that is the line this gate holds.
+		// by the request's own action/body shape) and on `POW_SITE_WHITELIST`, whose
+		// host half no longer comes from the request at all — since 5.3.4 the lines are
+		// matched against `server_known_hosts() . REQUEST_URI`, i.e. the hosts derived
+		// from the `home`/`siteurl` options (see the block above), so a forged `Host`
+		// header can no longer claim an admin-entered whitelist line. Both are
+		// ADMIN-configured or fixed integration endpoints, not switches a visitor turns
+		// on; that is the line this gate holds.
 		if ( ! $ip_whitelisted && ! $site_whitelisted ) {
 			//Ajax-calls get a different treatment
 			if ( $ajax ) {
@@ -452,6 +454,8 @@ class Stamp {
 		$action    = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
 		$client_ip = $this->get_client_ip();
 
+		// The request shapes the analysis mode must never record: the plugin's OWN
+		// settings save. Hard-coded on purpose — this is not an admin-configurable list.
 		$excluded_patterns_for_analysis = array(
 			array(
 				'page'        => 'gdpr_pow_options',
@@ -460,10 +464,20 @@ class Stamp {
 			),
 		);
 
+		// Compared with Pattern_Matcher::matches(), i.e. the SAME field-pattern comparison
+		// the live gate uses. Until 2026-08-12 this one line called a second, similar
+		// implementation of its own (Option::compare_json_objects(), whose only caller it
+		// was). The two agreed on the hard-coded signature above — three non-empty strings,
+		// no null, no nesting, verified branch by branch including the empty-request,
+		// '0'/false/null-value and array-value edges — and diverged everywhere else
+		// (null-as-existence, stdClass nesting, count() on an object). That latent
+		// divergence is exactly the failure class Pattern_Matcher was extracted to make
+		// constructively impossible, so the second implementation was deleted rather than
+		// documented. Behaviour pinned in tests/unit/StampAnalysisExclusionTest.php.
 		$pattern_listed = false;
 		foreach ( $excluded_patterns_for_analysis as $existing_pattern ) {
 			if ( $existing_pattern ) {
-				$pattern_listed = Option::compare_json_objects( $existing_pattern, $this->whole_request_data, true );
+				$pattern_listed = Pattern_Matcher::matches( $existing_pattern, $this->whole_request_data );
 				if ( $pattern_listed ) {
 					break;
 				}
@@ -591,7 +605,7 @@ class Stamp {
 		 * returning garbage degrades to the unfiltered list instead of throwing or —
 		 * far worse for a security plugin — silently exempting everything.
 		 *
-		 * @since 5.4.0
+		 * @since 5.3.2
 		 *
 		 * @param string[] $names  Field names exempted from gibberish scoring. Matched
 		 *                         case-insensitively at any nesting level.
@@ -641,23 +655,21 @@ class Stamp {
 		if ( $existing_pattern ) {
 			$existing_lines_pattern = preg_split( "/\r\n|\n|\r/", $existing_pattern );
 
-			// Iterate through the array, convert each field to JSON, and update the array
-			foreach ( $existing_lines_pattern as &$line ) {
-				// Trim the line to remove any extra spaces or newline characters
-				$line = trim( $line );
-				// Decode the line from JSON to an array
-				$line = json_decode( $line ); // Passing true makes it return an associative array
-
-				if ( $this->check_pattern( $line, $this->whole_request_data ) ) {
+			// One line, one rule. Trimming, JSON-decoding and comparing are ALL
+			// Pattern_Matcher's job — deliberately not done here, so the settings page's
+			// save-time warning (Pattern_Matcher::overbroad_lines()) cannot drift away
+			// from what this gate actually matches. See class-pattern-matcher.php.
+			foreach ( $existing_lines_pattern as $line ) {
+				if ( Pattern_Matcher::line_matches( $line, $this->whole_request_data ) ) {
 					$pattern_found = true;
 				}
 			}
 		}
-		// Wildcard value patterns ({"*":"value"}) also make an otherwise-unmonitored
+		// A blocked value (POW_BLOCKED_VALUES) also makes an otherwise-unmonitored
 		// form monitored, so the wildcard classification in check_submit() can fire
 		// on ANY form (the whole point of "across all forms"). Evaluated over the
 		// user-content POST fields only (Echo_Values skips technical keys).
-		if ( $this->matches_wildcard_patterns( self::strip_plugin_fields( $this->request_data ) ) ) {
+		if ( $this->matches_blocked_values( self::strip_plugin_fields( $this->request_data ) ) ) {
 			$pattern_found = true;
 		}
 		return $pattern_found;
@@ -738,54 +750,162 @@ class Stamp {
 	}
 
 	/**
-	 * Whether any user-content field of $fields equals an admin-configured wildcard
-	 * value pattern ({"*":"value"}) in POW_PARAMETER_PATTERN (normalized trim +
-	 * lowercase). The pattern parsing and the field walk are the pure Echo_Values
-	 * class; this method is only the get_option() glue.
+	 * Whether any user-content field of $fields matches one of the operator's blocked
+	 * values (POW_BLOCKED_VALUES, normalized trim + lowercase). The value parsing and the
+	 * field walk are the pure Echo_Values class; this method is only the get_option() glue.
+	 *
+	 * The four match forms (exact field value, extracted email address, registrable domain
+	 * of an embedded URL, and "@sender-domain") are unchanged and live entirely in
+	 * Echo_Values::matches_wildcard_values() — only the SOURCE moved out of
+	 * POW_PARAMETER_PATTERN, where the same values used to sit as {"*":"value"} lines
+	 * (PLAN-BLOCKLIST-TRENNUNG.md). A hit still both makes the form monitored
+	 * (check_existing_patterns()) and classifies the submission as spam under the
+	 * unchanged reason code Classification_Reason::CODE_WILDCARD.
 	 *
 	 * @param mixed $fields Field map to test.
 	 * @return bool
 	 */
-	private function matches_wildcard_patterns( $fields ) {
-		$option = (string) get_option( Option::POW_PARAMETER_PATTERN );
-		if ( '' === trim( $option ) ) {
+	private function matches_blocked_values( $fields ) {
+		$blocked_values = $this->blocked_values();
+		if ( empty( $blocked_values ) ) {
 			return false;
 		}
-		$lines           = preg_split( '/\r\n|\n|\r/', $option, -1, PREG_SPLIT_NO_EMPTY );
-		$wildcard_values = Echo_Values::wildcard_values_from_lines( $lines );
-		if ( empty( $wildcard_values ) ) {
-			return false;
-		}
-		return Echo_Values::matches_wildcard_values( $fields, $wildcard_values, Echo_Store::site_domains() );
+		return Echo_Values::matches_wildcard_values( $fields, $blocked_values, Echo_Store::site_domains() );
 	}
 
-	private function check_pattern( $a, $b ) {
-		if ( ! $a || ! $b ) {
+	/**
+	 * The operator's blocked values (the plain-text lines of POW_BLOCKED_VALUES),
+	 * normalized. Pure get_option() glue around Echo_Values::values_from_plaintext_lines().
+	 *
+	 * NOT Echo_Values::wildcard_values_from_lines(): that one reads the LEGACY JSON form
+	 * ({"*":"value"} inside POW_PARAMETER_PATTERN) and exists only for the one-time
+	 * migration. Both return the same normalized value list, so nothing downstream had to
+	 * change when the source moved.
+	 *
+	 * Shared by matches_blocked_values() and is_exempt_login_submission() on purpose:
+	 * the exemption has to decide WHICH addresses caused the block, so it must look at the
+	 * exact same value set the classification looked at. Reading the option twice is free
+	 * (WordPress caches it for the request); a second parsing site would not be.
+	 *
+	 * @return string[] Normalized blocked values, empty when the option holds none.
+	 */
+	private function blocked_values() {
+		$option = (string) get_option( Option::POW_BLOCKED_VALUES );
+		if ( '' === trim( $option ) ) {
+			return array();
+		}
+		$lines = preg_split( '/\r\n|\n|\r/', $option, -1, PREG_SPLIT_NO_EMPTY );
+		return Echo_Values::values_from_plaintext_lines( $lines );
+	}
+
+	/**
+	 * Whether this submission is exempt from the WILDCARD classification because it is a
+	 * registered user signing in on the WordPress login screen.
+	 *
+	 * THE RULE, verbatim: on the login surface, the exemption applies exactly when the set
+	 * B of addresses that an ADDRESS-BASED blocklist comparison hit (exact address equality
+	 * against an entry without "@", or a sender-domain hit against an "@" entry —
+	 * Echo_Values::blocked_emails()) is NOT EMPTY and EVERY address in it belongs to a
+	 * registered user (Echo_Values::all_emails_exempt() against
+	 * Echo_Store::user_email_hashes()). An empty B — the wildcard hit came from
+	 * whole-value equality or an URL domain, not from an address — grants nothing: fail
+	 * closed.
+	 *
+	 * WHY THE EXEMPTION EXISTS. A blocked value is allowed to name a whole sender domain
+	 * ("@gmail.com"), and with POW_BLOCK_LOGIN on (the default) the login POST runs
+	 * through the same classification as any form. Without this exemption, every
+	 * registered user who signs in WITH THEIR EMAIL ADDRESS is classified as spam and
+	 * locked out — in the worst case the operator, who then cannot reach the setting
+	 * again to undo it. The auto-echo lock has had an exemption for exactly this since it
+	 * shipped (Echo_Store::user_email_hashes() as the exclude set of build_echo_set());
+	 * the blocklist did not.
+	 *
+	 * WHY IT IS CUT THIS NARROW — the expensive insight of this change, do not widen it:
+	 *
+	 * - NOT "registered addresses are exempt everywhere". On a site with open
+	 *   registration that would be a full bypass: the spammer signs up as
+	 *   spam@mailinator.com and from that moment every admin block on his address or
+	 *   domain is inert on every content form. The echo lock tolerates the broad
+	 *   exemption because it LEARNED its own values and the exemption protects it from
+	 *   self-poisoning; the blocklist is an explicit ORDER by the operator and must
+	 *   be obeyed on content forms.
+	 * - The anchor is the login SCREEN, taken from the server-set SCRIPT_FILENAME, not
+	 *   anything derived from the request body. Any "this looks like a login" signal read
+	 *   out of the submission (field names, presence of a password field) would be
+	 *   attacker-colorable — the spammer would simply name his fields log/pwd and open
+	 *   precisely the bypass rejected above. Frontend login forms of membership plugins
+	 *   are therefore knowingly OUTSIDE the exemption; that is a design limit, not an
+	 *   oversight.
+	 * - Reusing Overbroad_Pattern_Guard::screen_file() rather than re-deciding the
+	 *   question here is deliberate: there is ONE implementation of "which screen is
+	 *   this". The guard is loaded before this class (recaptcha-gdpr-compliant.php).
+	 * - $origin === 'login' is an ADDITIVE second term, for the case where
+	 *   pre_process_login() (wp_authenticate_user / password_reset) is actually reached.
+	 *   It must never be the only anchor: when the constructor's own
+	 *   check_existing_patterns() path classifies the login POST, check_submit() is
+	 *   called WITHOUT an origin, so an $origin-only exemption would be dead code.
+	 * - A registered ADDRESS is still required. A stranger trying to sign in with a
+	 *   blocked address is classified as before; a new registration with a blocked domain
+	 *   likewise stays blocked (that address is not registered yet). Username-only logins
+	 *   carry no address and can never be hit by an address rule in the first place.
+	 * - THE BLOCKED addresses must be registered — not merely SOME address in the
+	 *   submission. This is the expensive lesson of 2026-08-13 and the whole reason the
+	 *   rule is written over a SET. The first version asked "does this submission carry
+	 *   any registered address?" (the former Echo_Values::contains_exempt_email(), over
+	 *   ALL content fields). Measured against blocklist entry "@blocked.test" and the
+	 *   registered chef@site.example: `log=stranger@blocked.test` was blocked correctly,
+	 *   but the same POST plus `freeride=chef@site.example` came through — as did the same
+	 *   address parked in `pwd` or in `redirect_to=/x?u=chef@site.example`. Anyone who
+	 *   knows ONE registered address (usually the publicly findable admin address) could
+	 *   thereby buy the exemption for ARBITRARY blocked identities. He gained no
+	 *   authentication (the password is still required), but the exemption was bought, not
+	 *   earned. Now the extra address is simply not in B, so it buys nothing; and the
+	 *   ALL-quantor closes the remaining case where the attacker knows a registered
+	 *   address AT the blocked domain (B then holds both, his own is not registered).
+	 * - The fix is deliberately NOT "only look at the login fields (log/pwd)". A field-name
+	 *   coupling would re-introduce exactly the attacker-colorable, request-derived signal
+	 *   the SCREEN anchor above exists to avoid: field names are the attacker's to choose,
+	 *   so he would move his blocked address out of `log` into a field the exemption does
+	 *   not read and be exempt again. The set rule needs no request-derived signal at all —
+	 *   which is why it was preferred over that (and over restricting the exemption to
+	 *   submissions with exactly one address, which would break every login form that also
+	 *   posts a redirect URL).
+	 *
+	 * KNOWN, ACCEPTED WIDTH (measured in the acceptance review of this very fix): the
+	 * exemption lifts the WHOLE wildcard verdict for that submission, not just its address
+	 * half. So a registered user at a blocked domain may, on wp-login.php only, also carry a
+	 * value blocked by a LITERAL or URL-domain line without being classified. The price is a
+	 * missing spam row for that one POST: the request still lands in WordPress' own login
+	 * handling, still needs the password and a solved token, and nothing is stored or
+	 * published. Narrowing this further would mean classifying a login per matched value
+	 * instead of per submission — more machinery than the residue is worth.
+	 *
+	 * ORDER IS LOAD-BEARING: the cheap screen/origin test runs FIRST, then the pure,
+	 * WordPress-free computation of B, and Echo_Store::user_email_hashes() (a get_users()
+	 * query behind a transient) only behind BOTH — and the whole method only behind an
+	 * actual blocklist hit, see the caller in check_submit(). Evaluating the user list on
+	 * every unauthenticated POST would be a DoS vector on a large site.
+	 *
+	 * @param string $origin Submission path handed down to check_submit() ('login' or '').
+	 * @param mixed  $fields User-content field map (plugin fields already stripped).
+	 * @return bool
+	 */
+	private function is_exempt_login_submission( $origin, $fields ) {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set path, only reduced to a file-name shape (screen_file()) and compared against one fixed file name.
+		$script           = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
+		$is_login_surface = 'wp-login.php' === Overbroad_Pattern_Guard::screen_file( $script ) || 'login' === $origin;
+		if ( ! $is_login_surface ) {
 			return false;
 		}
-		if ( is_object( $b ) ) {
-			$b = get_object_vars( $b );
+		$blocked = Echo_Values::blocked_emails( $fields, $this->blocked_values(), Echo_Store::site_domains() );
+		if ( empty( $blocked ) ) {
+			// No address caused this block (whole-value or URL-domain hit), so no account
+			// can vouch for it — fail closed. This early return is ALSO what keeps
+			// user_email_hashes() (get_users()) off that path; all_emails_exempt() would
+			// answer false for an empty set on its own, but only after the query had run.
+			return false;
 		}
-		if ( is_object( $a ) ) {
-			$a = get_object_vars( $a );
-		}
-		foreach ( $a as $key => $value ) {
-			// Wenn der Wert in $a ein weiteres assoziatives Array ist, rekursiv überprüfen
-			if ( is_array( $value ) || is_object( $value ) ) {
-				if ( ! isset( $b[ $key ] ) || ! $this->check_pattern( $value, $b[ $key ] ) ) {
-					return false;
-				}
-			} elseif ( null !== $value ) {
-					// Wenn der Wert in $a nicht null ist, überprüfe, ob der Schlüssel-Wert-Paar in $b existiert
-				if ( ! isset( $b[ $key ] ) || $a[ $key ] !== $b[ $key ] ) {
-					return false;
-				}
-				// Wenn der Wert in $a null ist, überprüfe, ob der Schlüssel in $b existiert
-			} elseif ( ! isset( $b[ $key ] ) ) {
-				return false;
-			}
-		}
-		return true;
+		return Echo_Values::all_emails_exempt( $blocked, Echo_Store::user_email_hashes() );
 	}
 
 	/** Register the plugin's own get_stamp/check_stamp admin-ajax handlers.
@@ -1032,10 +1152,27 @@ class Stamp {
 			}
 		}
 
-		// (2) Wildcard value pattern: a user-content field equals an admin-configured
-		//     {"*":"value"} line in POW_PARAMETER_PATTERN.
-		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_wildcard_patterns( $content_fields ) ) {
-			$this->print_debug_information( 'Wildcard value match' );
+		// (2) Blocked value: a user-content field matches one of the operator's
+		//     POW_BLOCKED_VALUES lines. Reason code CODE_WILDCARD ('wildcard') is
+		//     UNCHANGED — it is stored as `_gdpr_reason` in live databases and is a
+		//     corpus label; only its source option and its UI label moved.
+		//     The trailing exemption keeps a REGISTERED user signing in on wp-login.php
+		//     out of this classification, so a sender-domain entry ("@gmail.com")
+		//     cannot lock the operator out of his own site. It applies only when EVERY
+		//     address that actually triggered the block belongs to a registered user —
+		//     appending a known registered address to an otherwise blocked login used to
+		//     buy the exemption, measured. That, why it is NOT "registered addresses are
+		//     exempt everywhere", and why the anchor is the server-set login screen rather
+		//     than anything read out of the request, is spelled out at
+		//     is_exempt_login_submission().
+		//     ORDER IS LOAD-BEARING, do not reorder these terms: the exemption stands
+		//     BEHIND matches_blocked_values() so that &&'s short-circuit keeps
+		//     Echo_Store::user_email_hashes() (a get_users() query) off every ordinary
+		//     unauthenticated POST — running it there would be a fresh DoS vector.
+		//     The echo branch (1) above deliberately carries NO such term: it is already
+		//     safe through its own exclude set, and adding one there would obscure that.
+		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_blocked_values( $content_fields ) && ! $this->is_exempt_login_submission( $origin, $content_fields ) ) {
+			$this->print_debug_information( 'Blocked value match' );
 			$this->plugin_spam           = true;
 			$this->classification_reason = Classification_Reason::CODE_WILDCARD;
 			// Feed the wave counter too — same deterministic value class as the echo
@@ -1175,15 +1312,40 @@ class Stamp {
 		}
 
 		// Auto-echo record (BACKLOG "Auto-Echo-Sperre mit TTL"): once a submission is
-		// classified as spam for ANY reason (PoW/token failure, echo, wildcard,
-		// gibberish) it will land in the spam folder — remember its core values
+		// classified as spam it will land in the spam folder — remember its core values
 		// (hashed, TTL) so the same sender/domain/text is caught on any form / any IP
 		// within the window. Never in simulation mode (everything is "spam" there,
-		// which would poison the store with legitimate submissions). The under-attack
-		// quarantine is EXCLUDED ($quarantine_only_spam, exception #2 above): its
-		// grey-zone submissions are presumed innocent and must not seed echo values
-		// that would spam-classify legitimate senders after the wave ends.
-		if ( $gdpr_fields && $this->plugin_spam && ! $quarantine_only_spam && ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+		// which would poison the store with legitimate submissions).
+		//
+		// TWO CLASSES OF VERDICT ARE EXCLUDED, for one and the same reason: the echo
+		// store holds CONTENT (sender email, payload domain, phone, long-text hash) for
+		// 36h across every form and every address, so only a verdict that actually says
+		// something about the content may fill it.
+		//  a) The under-attack quarantine ($quarantine_only_spam, exception #2 above):
+		//     its grey-zone submissions are presumed innocent and must not seed echo
+		//     values that would spam-classify legitimate senders after the wave ends.
+		//  b) The three infrastructure-shaped no_pow sub-cases
+		//     (Classification_Reason::seeds_echo_values(), false for token_no_row /
+		//     token_ip_changed / the historic chain_no_row): there a token that VERIFIED
+		//     was presented and merely its solved-PoW row was missing — cache, proxy,
+		//     storage failure, clock skew (HANDBUCH.md §12 causes 4/7/8). A `no_pow`
+		//     verdict states that the handshake failed, nothing about the content, and
+		//     "everything is flagged as spam" is the single most common support case
+		//     there is: letting those seed turns each mass false alarm into a content
+		//     blocklist that outlives its own fix by up to 36h (measured on 5.3.4 — the
+		//     two-clocks bug's victims kept being blocked after the update, now as
+		//     "Known spam value"). `no_pow:no_token` and `no_pow:invalid_token` DO keep
+		//     seeding: protocol-blind mass spam is the echo lock's main food source.
+		//     The two prices of that cut (a protocol-aware bot can provoke
+		//     token_no_row for free; invalid_token is a false-alarm class too) are
+		//     spelled out at seeds_echo_values() and deliberately accepted.
+		if (
+			$gdpr_fields
+			&& $this->plugin_spam
+			&& ! $quarantine_only_spam
+			&& Classification_Reason::seeds_echo_values( $this->classification_reason )
+			&& ! get_option( Option::POW_SIMULATE_SPAM )
+		) {
 			Echo_Store::record( self::strip_plugin_fields( $gdpr_fields ) );
 		}
 
@@ -1271,12 +1433,50 @@ class Stamp {
 			return $return_value;
 		}
 
-		// Write log for Fail2Ban — but never for a quarantine-only classification:
-		// those submissions passed every individual check and are presumed innocent;
-		// logging them would let fail2ban BAN the IPs of genuine visitors submitting
-		// during a wave — a lasting, out-of-band lockout, unlike the per-message
-		// quarantine hold (exception #3 in the quarantine block above).
-		if ( $this->plugin_spam && ! $quarantine_only_spam ) {
+		// Write log for Fail2Ban — with two exclusions, both for the SAME reason: a
+		// fail2ban line is a lasting, out-of-band lockout, and there are two situations
+		// where the address it would carry is more likely to be a person than a bot.
+		//
+		// (1) A quarantine-only classification. Those submissions passed every individual
+		//     check and are presumed innocent; logging them would let fail2ban ban the IPs
+		//     of genuine visitors submitting during a wave (exception #3 in the quarantine
+		//     block above).
+		//
+		// (2) A block that landed on a REAL wp-admin screen. An over-broad field pattern
+		//     — `{"email":null}` is the measured example — turns an administrator's own
+		//     profile save into a spam verdict, and without this term that verdict writes
+		//     the ADMINISTRATOR'S address into spam.log. An external tool then locks the
+		//     site's own administrator out, permanently and outside WordPress, over a
+		//     setting they can no longer reach to correct.
+		//
+		//     WHAT THIS IS *NOT*: it is not "backend POSTs are not evaluated anyway, so
+		//     nothing is lost". That reasoning is wrong and must not be written here. The
+		//     evaluation hangs off the CONTENT of the POST, not off the URL — a shipped
+		//     default pattern like `{"_wpcf7":null}` matches any POST carrying that field,
+		//     including one aimed at /wp-admin/profile.php. So a bot CAN point its POST at
+		//     a wp-admin URL and thereby exempt ITSELF from fail2ban logging. The attacker
+		//     chooses the URL; that steerability is real and is the price paid here
+		//     knowingly, not an oversight.
+		//
+		//     It is paid because the damage is asymmetric. Without the exclusion, the
+		//     administrator is locked out for good and out of band. With it, the bot is
+		//     still BLOCKED, still classified spam, still stored, and still counted
+		//     towards the under-attack wave — it is merely not banned. Fail2Ban is the
+		//     escalation stage here, not the protection; the protection is untouched.
+		//     (This is the difference from the quarantine exception: there the submission
+		//     itself is grey-zone and the verdict is a hold. Here the submission stays
+		//     fully spam and nothing about its handling changes — only the log line goes.)
+		//
+		// BOTH calls below are covered, the auth.log one as well as the spam.log one: a
+		// login-shaped POST aimed at a wp-admin screen is the same steering move as any
+		// other, and wp-login.php itself does not define WP_ADMIN, so the real login
+		// surface keeps its auth.log line (pinned in
+		// tests/integration/cases/fail2ban-backend-exception.mjs, arm 3).
+		//
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set path, only compared against a fixed list of file names inside is_core_admin_screen_post(); never stored, never printed.
+		$fail2ban_script    = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
+		$backend_screen_hit = Overbroad_Pattern_Guard::is_core_admin_screen_post( is_admin(), wp_doing_ajax(), $fail2ban_script );
+		if ( $this->plugin_spam && ! $quarantine_only_spam && ! $backend_screen_hit ) {
 			// Hook into failed login attempts in WordPress. The $origin leg is additive:
 			// it also catches minimal login POSTs that carry neither `wp-submit` nor the
 			// classic log/pwd pair, which the two request-data probes alone would miss.
@@ -1306,6 +1506,23 @@ class Stamp {
 		// spam folder before this gate, so false positives stay rescuable, and the
 		// error message below tells a genuine sender how to reach the site.
 		if ( get_option( Option::POW_BLOCK ) && $this->plugin_spam ) {
+			// PURE OBSERVATION, and the ONE reference to the over-broad-pattern marker in
+			// this file. It records "a wp-admin screen save was just discarded because a
+			// configured field pattern matched it" so the administrator can be told
+			// afterwards — the symptom otherwise points nowhere near its cause.
+			//
+			// Placed HERE, in the block branch itself, and NOT behind POW_SAVE_SPAM: the
+			// health counter learnt that lesson the expensive way (HANDBUCH.md §12, end) —
+			// a diagnostic hung off stored messages goes silent on exactly the sites whose
+			// operator can see nothing else. The call decides for itself whether this
+			// request was an admin screen at all, ignores its own storage result, and
+			// NOTHING in check_submit()/check_request() ever reads what it writes
+			// (source-level invariant, tests/unit/OverbroadPatternMarkerWiringTest.php).
+			Overbroad_Pattern_Guard::record_backend_block(
+				$this->whole_request_data,
+				$this->hash_values( $this->get_client_ip() )
+			);
+
 			$error_message = get_option( Option::POW_ERROR_MESSAGE );
 			if ( ! $error_message ) {
 				$error_message = __( 'Your message has been classified as spam! If you are a human, we are very sorry. Please give us notice via email.', 'gdpr-compliant-recaptcha-for-all-forms' );

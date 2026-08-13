@@ -283,6 +283,39 @@ final class ClientIp {
 	}
 
 	/**
+	 * Does a raw forwarding-header value name at least one PUBLIC address?
+	 *
+	 * The one question the proxy-candidate detection asks of a header (see
+	 * Settings_Menu::observe_proxy_candidate() and class-proxy-candidate-ledger.php): a
+	 * private peer plus a header carrying a routable address is the fingerprint of "a
+	 * reverse proxy forwarded a real visitor to us". Presence alone would not do — an
+	 * internal-only chain says nothing about the outside world.
+	 *
+	 * READ THIS AS AN INDICATOR, NEVER AS AN ADDRESS TO USE. Nothing here returns the
+	 * address it found, and that is deliberate: the value is client-settable, so it may
+	 * establish that a hop exists but must never become the thing an operator is asked to
+	 * trust. resolve() above honours HEADER_PRIORITY and nothing else.
+	 *
+	 * @param mixed $header_value Raw header value; may be a comma-separated chain.
+	 * @return bool
+	 */
+	public static function has_public_address( $header_value ) {
+		$value = is_scalar( $header_value ) ? (string) $header_value : '';
+
+		foreach ( explode( ',', $value ) as $entry ) {
+			$entry = trim( $entry );
+			if ( false === filter_var( $entry, FILTER_VALIDATE_IP ) ) {
+				continue;
+			}
+			if ( ! self::is_private( $entry ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Whether $ip is one of the configured trusted proxies. Thin wrapper over
 	 * matches_list() so the resolve() walk above keeps reading in proxy terms.
 	 *

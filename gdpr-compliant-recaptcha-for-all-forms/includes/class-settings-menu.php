@@ -21,6 +21,27 @@ class Settings_Menu {
 	/** Feld der Optionen */
 	private $options;
 
+	/**
+	 * The POW_PARAMETER_PATTERN text an over-broad-pattern warning kept out of the
+	 * database, so the value-loading loop can render it back instead of the stored value.
+	 *
+	 * REQUEST-SCOPED ON PURPOSE — no transient, no option. Leaving the page loses the
+	 * text, exactly like any other unsaved form; persisting it would create a second,
+	 * invisible source of truth for what the pattern option "is". See
+	 * Overbroad_Pattern_Guard.
+	 *
+	 * @var string|null
+	 */
+	private $pending_pattern_value = null;
+
+	/**
+	 * The over-broad lines of that same submission (line => screens it hits), for the
+	 * confirmation block inside the form.
+	 *
+	 * @var array<string, string[]>
+	 */
+	private $pending_pattern_lines = array();
+
 	/** Option based action */
 	const RCM_ACTION = Option::PREFIX . 'action';
 
@@ -46,6 +67,12 @@ class Settings_Menu {
 
 	/** Panel id of the synthetic Diagnostics tab (not derived from an option group). */
 	const TAB_DIAGNOSTICS = 'gdpr-tab-diagnostics';
+
+	/** Query argument AND nonce action of the one-click "adopt this proxy address". */
+	const ACTION_ADOPT_PROXY = 'gdpr_pow_adopt_proxy';
+
+	/** Query argument that marks the redirect after a successful adoption. */
+	const ARG_PROXY_ADOPTED = 'gdpr-proxy-adopted';
 
 	/**
 	 * Run the plugin's own handshake against this site and answer in plain language
@@ -567,7 +594,17 @@ class Settings_Menu {
                     <br>
                     <br><strong>How it works:</strong> You can insert and view parameter patterns here directly, but the easiest way is to enable <b>Analysis mode</b> 🔍, submit the form you want covered, and search the %1$sAnalytic Box%2$s for the related message.
                     Open it, choose the fields and values that identify your pattern, and add the pattern via the button at the bottom of the message.
-                    <br>Added patterns are listed here line by line, in JSON format, and can be edited directly.',
+                    <br>Added patterns are listed here line by line, in JSON format, and can be edited directly. One line is one rule, and a submission only has to match a single line to be checked. Name as few fields as possible — just enough to recognize the form.
+                    <br>
+                    <br><strong>Example:</strong>
+                    <br>
+                    <br><code>{"_wpcf7":null}</code>
+                    <br><code>{"form_id":"7"}</code>
+                    <br><code>{"my_form":null,"step":"2"}</code>
+                    <br>
+                    <br><code>null</code> as the value means <em>this field only has to be present</em>, whatever it contains — that is the usual case, and one field name is often enough for a whole form builder (every Contact Form 7 submission carries <code>_wpcf7</code>). Writing a value instead narrows it to submissions where that field holds exactly that value, e.g. one single form rather than all of them — keep the quotation marks around it even when the value is a number, as in the example above. Naming several fields in one line means all of them must match.
+                    <br>
+                    <br><strong>Matching by value, whatever the field is called:</strong> <code>{"*":"value"}</code> matches when ANY field carries this value — useful when the field name differs between submissions. Like every other line here it only makes the submission get CHECKED; to treat a value as spam outright, use <b>Blocked values</b> 🚫 instead.',
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
 					'<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_ANALYSIS . '">',
@@ -620,6 +657,36 @@ class Settings_Menu {
 				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'⛔', // Blocking
 				__( 'Blocks submissions classified as spam instead of letting them through.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_BLOCKED_VALUES             => new Option(
+				__( 'Blocked values', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::TEXT,
+				'',
+				__(
+					'<strong>What this does:</strong> a submission that matches any line here is treated as spam right away, no further check involved — regardless of which form it came through.
+                    <br>Add one value per line, in one of four forms:
+                    <br><ul>
+                        <li>A field equals this text, word for word: <code>buy cheap pills</code></li>
+                        <li>An email address found in the message equals this address: <code>spammer@example.com</code></li>
+                        <li>Domain of a link found anywhere in the message text: <code>spam-shop.tld</code></li>
+                        <li>Sender domain, everything after the @: <code>@disposable.tld</code> — matches that domain and all of its subdomains</li>
+                    </ul>
+                    <br>
+                    <br><strong>Example:</strong>
+                    <br>
+                    <br><code>spammer@example.com</code>
+                    <br><code>@disposable.tld</code>
+                    <br><code>casino-bonus.tld</code>
+                    <br><code>buy cheap pills</code>
+                    <br>
+                    <br>Values are compared after trimming spaces and ignoring upper/lower case, so <code>Spammer@Example.com</code> is the same entry. Nothing here is a pattern: a line matches the value itself, never a part of a word.
+                    <br>For the three address and domain forms you rarely need to type anything: open the message in your inbox and use its <b>Block this sender</b>, <b>Block this domain</b> or <b>Block this sender\'s domain</b> button, which writes the correct line for you.
+                    <br><strong>Careful with the sender-domain form:</strong> if <b>Apply for WordPress-Login</b> 🔒 is on (the default), it also blocks logins — entering a large provider like <code>gmail.com</code> can lock out registered users, possibly yourself with no way back in. It also blocks real visitors who write to you from such an address, so keep it to disposable and spam domains.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🚫',
+				__( 'Values that mark a submission as spam outright: sender addresses, sender domains (@domain), link domains, or exact field text — one per line.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_FLAG_SPAM                  => new Option(
 				__( 'Flag spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -1213,6 +1280,14 @@ class Settings_Menu {
 				// as off/empty although the runtime uses its code default — and saving
 				// the page would persist that wrong displayed value.
 				$raw_value = get_option( $id, $option->get_default() );
+				// A pattern value that update_settings() held back over an over-broad-line
+				// warning is rendered as SUBMITTED, not as stored — otherwise the warning
+				// would silently throw the administrator's input away, which is a worse
+				// surprise than the one it exists to prevent. Request-scoped, see the
+				// property's docblock.
+				if ( Option::POW_PARAMETER_PATTERN === $id && null !== $this->pending_pattern_value ) {
+					$raw_value = $this->pending_pattern_value;
+				}
 				if ( Option::INT === $type || Option::BOOL === $type ) {
 					$option->set_value( intval( filter_var( $raw_value, $this->get_option_filter( $type ) ) ) );
 				} else {
@@ -1235,6 +1310,13 @@ class Settings_Menu {
 		add_filter( sprintf( 'plugin_action_links_%s', plugin_basename( __FILE__ ) ), array( $this, 'get_action_links' ) );
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
 		add_action( 'admin_init', array( $this, 'prepare_options' ) );
+		// Both halves of the trusted-proxy suggestion. Both check manage_options as their
+		// first act, so the ledger is fed only by requests we can attribute to an
+		// administrator of this site — an anonymous visitor cannot influence what gets
+		// proposed at all. (wp-admin/admin.php additionally runs auth_redirect() before
+		// admin_init, but the capability check is what this relies on.)
+		add_action( 'admin_init', array( $this, 'maybe_adopt_proxy_candidate' ) );
+		add_action( 'admin_init', array( $this, 'observe_proxy_candidate' ) );
 		add_filter( 'plugin_action_links_' . GDPR_COMPLIANT_RECAPTCHA, array( $this, 'add_settings_link' ) );
 	}
 
@@ -1536,6 +1618,7 @@ class Settings_Menu {
 			</p>
 		<?php endif; ?>
 		<?php $this->render_proxy_hint(); ?>
+		<?php $this->render_proxy_adopted_notice(); ?>
 		<?php
 	}
 
@@ -1580,11 +1663,7 @@ class Settings_Menu {
 			// The operator standing in front of this hint is precisely the one who often
 			// cannot answer it: a managed host puts the proxy there and does not publish
 			// its address. Naming the fallback here rather than only in the settings row
-			// below is the difference between a hint and a dead end. Deliberately NOT a
-			// suggested address — the "detected" proxy address would come from a
-			// client-settable header, and offering it for one click is how an attacker
-			// gets an admin to trust an address of the attacker's choosing (see
-			// BACKLOG.md, "Proxy-Erkennung mit Lern-/Bestätigungsmuster").
+			// below is the difference between a hint and a dead end.
 			if ( self::is_private_peer() ) {
 				echo ' ';
 				echo esc_html__( 'This request also came from a private network address, which normally means the proxy is your own hosting infrastructure. If you cannot find out its address, the "Trust a private-network proxy" setting below is the fallback — read what it costs before enabling it.', 'gdpr-compliant-recaptcha-for-all-forms' );
@@ -1592,6 +1671,218 @@ class Settings_Menu {
 			?>
 		</p>
 		<?php
+		$this->render_proxy_suggestion();
+	}
+
+	/**
+	 * The second half of the hint above: name the address and offer to enter it.
+	 *
+	 * THE PROPOSED ADDRESS IS REMOTE_ADDR — the peer this server actually talked to —
+	 * and never an address parsed out of a forwarding header. Reason, in one line:
+	 * POW_TRUSTED_PROXIES is matched against REMOTE_ADDR and the chain hops in
+	 * ClientIp::resolve(), so the peer is structurally the value that belongs there; the
+	 * header is only the EVIDENCE that a hop exists and is displayed as such. See
+	 * class-proxy-candidate-ledger.php for the full argument, including why the counting
+	 * ledger is a stability filter and not a defence against spoofing.
+	 *
+	 * @return void
+	 */
+	private function render_proxy_suggestion() {
+		$ledger = Proxy_Candidate_Ledger::normalize( get_option( Option::POW_PROXY_CANDIDATE ) );
+		if ( ! Proxy_Candidate_Ledger::is_ripe( $ledger, time() ) ) {
+			return;
+		}
+
+		$span = Proxy_Candidate_Ledger::observed_span( $ledger );
+		$link = wp_nonce_url(
+			admin_url( 'options-general.php' . Option::PAGE_QUERY . '&' . self::ACTION_ADOPT_PROXY . '=' . rawurlencode( $ledger['ip'] ) ),
+			self::ACTION_ADOPT_PROXY
+		);
+		?>
+		<p class="gdpr-echo-reset-hint">
+			<strong><?php echo esc_html( $ledger['ip'] ); ?></strong>
+			<?php
+			echo esc_html(
+				sprintf(
+					/* translators: 1: number of observations, 2: human-readable time span, e.g. "3 hours", 3: forwarding header name */
+					_n(
+						'is the address this server saw the connection come from — observed %1$d time over %2$s, each time with a %3$s header carrying a public address. It is not taken from that header: the header only shows that a proxy is in front of you.',
+						'is the address this server saw the connection come from — observed %1$d times over %2$s, each time with a %3$s header carrying a public address. It is not taken from that header: the header only shows that a proxy is in front of you.',
+						$ledger['count'],
+						'gdpr-compliant-recaptcha-for-all-forms'
+					),
+					$ledger['count'],
+					human_time_diff( 0, $span ),
+					'' !== $ledger['header'] ? $ledger['header'] : 'X-Forwarded-For'
+				)
+			);
+			?>
+			<br>
+			<?php esc_html_e( 'Add it only if it really is your own reverse proxy or load balancer. Trusting an address means the plugin believes the X-Forwarded-For header it sends, and from then on that header decides which visitor an IP whitelist entry, a fail2ban ban and a per-IP limit apply to.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+			<br>
+			<a class="button button-secondary" href="<?php echo esc_url( $link ); ?>">
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %s: the proposed proxy IP address */
+						__( 'Add %s to trusted proxies', 'gdpr-compliant-recaptcha-for-all-forms' ),
+						$ledger['ip']
+					)
+				);
+				?>
+			</a>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Confirmation that the address was entered — shown once, after the redirect.
+	 *
+	 * Needed because the hint that carried the button disappears the moment the address
+	 * is stored (a non-empty trusted-proxy list ends render_proxy_hint() at its first
+	 * line). Without a word here, the one-click would look like it did nothing.
+	 *
+	 * @return void
+	 */
+	private function render_proxy_adopted_notice() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only: decides whether one sentence is printed; the state change happened in maybe_adopt_proxy_candidate(), which verifies capability and nonce.
+		if ( ! isset( $_GET[ self::ARG_PROXY_ADOPTED ] ) ) {
+			return;
+		}
+		?>
+		<p class="gdpr-echo-reset-hint">
+			<?php esc_html_e( 'The proxy address was added to "Trusted proxies". Visitor addresses now come from the X-Forwarded-For header that proxy sends — check the address shown above to confirm it is what you expect, and remove the entry again if it is not.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+		</p>
+		<?php
+	}
+
+	/**
+	 * Record one sighting of a likely reverse proxy in front of this site.
+	 *
+	 * The gate, all three parts required: the peer is private/loopback, a forwarding
+	 * header on the same request carries a PUBLIC address (so a real visitor was
+	 * forwarded, not just internal traffic), and POW_TRUSTED_PROXIES is still empty. The
+	 * candidate handed to the ledger is the PEER, never anything out of the header.
+	 *
+	 * Runs on admin_init, i.e. only on requests by a logged-in administrator: an
+	 * anonymous request cannot feed this at all. Writes only when the ledger says
+	 * something changed, which the slot logic bounds to one write per five minutes.
+	 *
+	 * @return void
+	 */
+	public function observe_proxy_candidate() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		$stored = get_option( Option::POW_PROXY_CANDIDATE );
+
+		// Configured: there is nothing left to propose, and keeping the address stored
+		// would be data held for no purpose.
+		if ( '' !== trim( (string) get_option( Option::POW_TRUSTED_PROXIES ) ) ) {
+			if ( false !== $stored ) {
+				delete_option( Option::POW_PROXY_CANDIDATE );
+			}
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- validated as an IP inside ClientIp/Proxy_Candidate_Ledger before any use.
+		$peer = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		if ( ! ClientIp::is_private( $peer ) ) {
+			return;
+		}
+
+		$header = self::forwarding_header_with_public_address();
+		if ( '' === $header ) {
+			return;
+		}
+
+		$result = Proxy_Candidate_Ledger::observe(
+			Proxy_Candidate_Ledger::normalize( $stored ),
+			$peer,
+			$header,
+			time()
+		);
+
+		if ( $result['changed'] ) {
+			update_option( Option::POW_PROXY_CANDIDATE, $result['ledger'], false );
+		}
+	}
+
+	/**
+	 * One-click adoption of the proposed proxy address.
+	 *
+	 * Three guards, and the third is the one that makes the URL harmless: capability,
+	 * nonce, and the requested address must be exactly the address the ledger already
+	 * holds as a ripe candidate. The parameter can therefore only CONFIRM what the server
+	 * observed — a crafted link cannot introduce an address of its own.
+	 *
+	 * @return void
+	 */
+	public function maybe_adopt_proxy_candidate() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- presence check only; check_admin_referer() below verifies the nonce before anything is written.
+		if ( ! isset( $_GET[ self::ACTION_ADOPT_PROXY ] ) || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		check_admin_referer( self::ACTION_ADOPT_PROXY );
+
+		$requested = sanitize_text_field( wp_unslash( $_GET[ self::ACTION_ADOPT_PROXY ] ) );
+		$ledger    = Proxy_Candidate_Ledger::normalize( get_option( Option::POW_PROXY_CANDIDATE ) );
+
+		if ( ! Proxy_Candidate_Ledger::is_ripe( $ledger, time() )
+			|| ! Proxy_Candidate_Ledger::matches_candidate( $ledger, $requested ) ) {
+			return;
+		}
+
+		// Append rather than replace: the list may already hold lines this admin typed,
+		// and a one-click convenience must never delete configuration.
+		$lines = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_TRUSTED_PROXIES, '' ) );
+		$lines = is_array( $lines ) ? array_values(
+			array_filter(
+				array_map( 'trim', $lines ),
+				static function ( $line ) {
+					return '' !== $line;
+				}
+			)
+		) : array();
+		if ( ! in_array( $ledger['ip'], $lines, true ) ) {
+			$lines[] = $ledger['ip'];
+		}
+
+		update_option( Option::POW_TRUSTED_PROXIES, implode( "\n", $lines ) );
+		delete_option( Option::POW_PROXY_CANDIDATE );
+
+		wp_safe_redirect(
+			admin_url( 'options-general.php' . Option::PAGE_QUERY . '&' . self::ARG_PROXY_ADOPTED . '=1' )
+		);
+		exit;
+	}
+
+	/**
+	 * Name of the first forwarding header on THIS request whose value carries a public
+	 * address — the indicator that a proxy forwarded a real visitor here.
+	 *
+	 * The value itself is read only to answer that yes/no question (ClientIp::
+	 * has_public_address()); it is never stored, printed or resolved to an address. Only
+	 * X-Forwarded-For is ever honoured for resolution, but any of the five names is
+	 * evidence that a hop exists.
+	 *
+	 * @return string Display form of the header name, or '' if none qualifies.
+	 */
+	private static function forwarding_header_with_public_address() {
+		foreach ( ClientIp::DIAGNOSTIC_HEADERS as $header_name ) {
+			if ( empty( $_SERVER[ $header_name ] ) ) {
+				continue;
+			}
+			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- only tested for the presence of a public IP; never stored, printed or resolved.
+			$value = sanitize_text_field( wp_unslash( $_SERVER[ $header_name ] ) );
+			if ( ClientIp::has_public_address( $value ) ) {
+				return str_replace( '_', '-', substr( $header_name, 5 ) );
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -1735,9 +2026,15 @@ class Settings_Menu {
 				$is_array = Option::ROLE_DROPDOWN === $type;
 
 				if ( $is_array ) {
-					// For arrays, filter as strings
+					// For arrays, filter as strings. The sanitized result MUST be
+					// assigned back — array_map() does not mutate its input, so a bare
+					// expression statement here silently threw the sanitization away
+					// and update_option() below stored the raw filter_input() array
+					// (PHPStan level 7, argument.type; found 2026-08-12, dead at the
+					// time because no Option currently uses ROLE_DROPDOWN — but the
+					// bug would reappear the moment one does).
 					$post_value = filter_input( INPUT_POST, $key, FILTER_DEFAULT, FILTER_REQUIRE_ARRAY );
-					$post_value ? array_map( 'sanitize_text_field', $post_value ) : array();
+					$post_value = $post_value ? array_map( 'sanitize_text_field', $post_value ) : array();
 				} elseif ( Option::TEXT === $type || Option::STRING === $type ) {
 					$post_value = isset( $_POST[ $key ] ) ? wp_kses_post( wp_unslash( $_POST[ $key ] ) ) : null;
 				} else {
@@ -1773,10 +2070,66 @@ class Settings_Menu {
 							sprintf(
 								/* translators: %s: the rejected route lines, comma separated */
 								__( 'These REST route lines were not saved: %s. They would also cover WordPress\' own core routes, which would block your post saves and lock you out of wp-admin. All other lines were saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-								implode( ', ', $rejected_routes )
+								// esc_html() because settings_errors() prints its message
+								// UNESCAPED — the string travels as ready-to-print HTML,
+								// and what is interpolated here is text the administrator
+								// just typed into a textarea. Same reason as
+								// Overbroad_Pattern_Guard::warning_message().
+								esc_html( implode( ', ', $rejected_routes ) )
 							),
 							'error'
 						);
+					}
+				}
+
+				// An over-broad FIELD pattern is the mirror image of the route guard above,
+				// and it is deliberately NOT treated the same way: `{"email":null}` is a
+				// plausible frontend catch-all on some sites, and the damage it does is
+				// reversible by editing this very textarea. So it is not rejected — it is
+				// held back ONCE, named, and stored on the next save if the administrator
+				// confirms it. The whole decision (which lines, the confirmation, the hash
+				// that binds it to them) lives in Overbroad_Pattern_Guard; what happens
+				// here is the `continue`, i.e. "skip update_option() for this one key".
+				// The submitted text is parked so the value-loading loop can render it
+				// back — the input must not be lost over a warning.
+				if ( Option::POW_PARAMETER_PATTERN === $key && is_string( $post_value ) ) {
+					$flagged = Pattern_Matcher::overbroad_lines( $post_value );
+
+					// Monitoring-vs-blocking notice (PLAN-BLOCKLIST-TRENNUNG.md AP3/§3.2).
+					// Deliberately placed AFTER the overbroad detection line above, so the
+					// overbroad guard's own decision — the `continue` a few lines below,
+					// untouched — is computed first and never sees or is influenced by
+					// this. It still has to run even when that guard is about to hold the
+					// save back: a line the guard parks for now gets this note too, because
+					// the note describes what the LINE MEANS (monitors, does not block),
+					// never whether it made it into the database on this particular save.
+					$new_wildcard_lines = $this->new_wildcard_monitor_lines( $post_value, (string) get_option( Option::POW_PARAMETER_PATTERN, '' ) );
+					if ( ! empty( $new_wildcard_lines ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-pattern-wildcard-monitor',
+							sprintf(
+								/* translators: %s: the new {"*":"value"} lines, comma separated */
+								__( 'These lines only monitor matching submissions, they do not block them: %s. To block a value outright, use the new "Blocked values" setting instead.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								// Unescaped by settings_errors(), admin-typed input — same
+								// reason as Overbroad_Pattern_Guard::warning_message() and
+								// the REST-route/trusted-proxy guards above.
+								esc_html( implode( ', ', $new_wildcard_lines ) )
+							),
+							'warning'
+						);
+					}
+
+					if ( ! empty( $flagged ) && ! Overbroad_Pattern_Guard::confirmed( array_keys( $flagged ) ) ) {
+						$this->pending_pattern_value = $post_value;
+						$this->pending_pattern_lines = $flagged;
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-pattern-overbroad',
+							Overbroad_Pattern_Guard::warning_message( $flagged ),
+							'error'
+						);
+						continue;
 					}
 				}
 
@@ -1796,7 +2149,9 @@ class Settings_Menu {
 							sprintf(
 								/* translators: %s: the rejected proxy lines, comma separated */
 								__( 'These trusted-proxy lines were not saved: %s. A /0 range covers every address on the internet, which would make every visitor able to choose their own apparent address — defeating the IP whitelist, fail2ban logging and per-IP limits. Enter your proxy\'s actual address or subnet instead. All other lines were saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-								implode( ', ', $rejected_ranges )
+								// Unescaped by settings_errors(), admin-typed input — see the
+								// route guard above.
+								esc_html( implode( ', ', $rejected_ranges ) )
 							),
 							'error'
 						);
@@ -1831,6 +2186,43 @@ class Settings_Menu {
 				'updated'
 			);
 		}
+	}
+
+	/**
+	 * PLAN-BLOCKLIST-TRENNUNG.md AP3/§3.2: which {"*":"value"} lines in the SUBMITTED
+	 * Apply-on-pattern textarea are NEW — present now, absent (after trimming) from
+	 * what was stored before this save. Only new lines are reported: a line that
+	 * survives from an earlier save was already accepted as a monitoring line once
+	 * and does not need repeating on every subsequent save.
+	 *
+	 * Pure line comparison — no field matching, no WordPress calls beyond none — so
+	 * this cannot affect, and is not affected by, Pattern_Matcher::overbroad_lines()
+	 * at the call site: same input, two independent readings of it.
+	 *
+	 * @param string $submitted The pattern textarea value exactly as posted.
+	 * @param string $previous  The pattern option value as stored before this save.
+	 * @return string[] Trimmed new {"*":"value"} lines, de-duplicated, in submission order.
+	 */
+	private function new_wildcard_monitor_lines( $submitted, $previous ) {
+		$previous_lines = preg_split( "/\r\n|\n|\r/", $previous );
+		$previous_lines = false === $previous_lines ? array() : array_map( 'trim', $previous_lines );
+
+		$submitted_lines = preg_split( "/\r\n|\n|\r/", $submitted );
+		$submitted_lines = false === $submitted_lines ? array() : $submitted_lines;
+
+		$new_lines = array();
+		foreach ( $submitted_lines as $raw_line ) {
+			$trimmed = trim( $raw_line );
+			if ( '' === $trimmed || in_array( $trimmed, $previous_lines, true ) ) {
+				continue;
+			}
+			$decoded = json_decode( $trimmed, true );
+			if ( is_array( $decoded ) && 1 === count( $decoded ) && array_key_exists( '*', $decoded )
+				&& is_string( $decoded['*'] ) && '' !== trim( $decoded['*'] ) ) {
+				$new_lines[] = $trimmed;
+			}
+		}
+		return array_values( array_unique( $new_lines ) );
 	}
 
 	/** Filter special chars if not int
@@ -1890,6 +2282,14 @@ class Settings_Menu {
 				<?php wp_nonce_field( 'gdpr_settings_nonce', 'gdpr_settings_nonce_field' ); // CSRF-protection add ?>
 				<input type="hidden" name="<?php echo esc_attr( self::RCM_ACTION ); ?>" value="<?php echo esc_attr( self::UPDATE ); ?>">
 				<input type="hidden" id="gdpr-settings-selection" name="gdpr-settings-selection" value="<?php echo esc_attr( $active_tab ); ?>">
+				<?php
+				// Inside the form, and above the tabs: the confirmation for an over-broad
+				// pattern this request refused to store yet. It has to sit inside the form
+				// because it carries a checkbox and a hidden field; the settings-error
+				// message that names the lines renders above the form and cannot.
+				// No-op whenever there is nothing to confirm.
+				Overbroad_Pattern_Guard::render_confirmation_block( $this->pending_pattern_lines );
+				?>
 				<?php foreach ( $groups as $group ) : ?>
 					<?php
 					$tab_id    = 'gdpr-tab-' . sanitize_title( $group );

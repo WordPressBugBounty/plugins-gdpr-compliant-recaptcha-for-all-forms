@@ -267,24 +267,29 @@ class Message_Page {
 				),
 				'i18n'        => array(
 					// NB: sprintf( __( … ), $title ) — translate the template, then fill in.
-					'confirmDeleteAll' => sprintf(
+					'confirmDeleteAll'    => sprintf(
 						/* translators: %s: inbox/spam/trash title. */
 						__( 'You are about to delete all messages from "%s". Are you sure?', 'gdpr-compliant-recaptcha-for-all-forms' ),
 						$titles[ $message_type ]
 					),
-					'moved'            => __( 'Message moved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'deleted'          => __( 'Message deleted successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'actionAdded'      => __( 'Action added successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'whitelisted'      => __( 'Whitelisting successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'patternSaved'     => __( 'Pattern saved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'choosePattern'    => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'blocked'          => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'blockFailed'      => __( 'Could not block this value.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialAsk'    => __( 'Treat this field as a password field? Its value is removed from this message and from every other saved message, and future submissions never store it. This cannot be undone for messages already received.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialSaved'  => __( 'Field is now treated as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialFailed' => __( 'Could not mark this field as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'routeMonitored'   => __( 'Now monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'monitorFailed'    => __( 'Could not start monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'moved'               => __( 'Message moved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'deleted'             => __( 'Message deleted successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'actionAdded'         => __( 'Action added successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'whitelisted'         => __( 'Whitelisting successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'patternSaved'        => __( 'Pattern saved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'choosePattern'       => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'blocked'             => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'blockFailed'         => __( 'Could not block this value.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialAsk'       => __( 'Treat this field as a password field? Its value is removed from this message and from every other saved message, and future submissions never store it. This cannot be undone for messages already received.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialSaved'     => __( 'Field is now treated as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'credentialFailed'    => __( 'Could not mark this field as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'routeMonitored'      => __( 'Now monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'monitorFailed'       => __( 'Could not start monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					// %s is a literal placeholder, replaced client-side with the actual
+					// domain (only known per table row, not at page-load time when this
+					// script is localized) — see blockValue() in recaptcha-gdpr-messages.js.
+					/* translators: %s is replaced client-side with the sender's domain, without the @, e.g. "mailinator.com". */
+					'confirmSenderDomain' => __( 'Every future submission containing a sender address at %s or its subdomains will be treated as spam. If the WordPress-Login protection is on, this can lock out registered users too, possibly yourself. It is meant for disposable or spam domains — blocking a large provider such as gmail.com will also block real visitors.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				),
 			)
 		);
@@ -498,6 +503,19 @@ class Message_Page {
 				$email = Echo_Values::extract_email( $value );
 				if ( null !== $email ) {
 					$html_details .= ' <button type="button" class="gdpr-block-btn" data-kind="sender" data-value="' . esc_attr( $email ) . '" onclick="blockValue(this)">' . esc_html__( 'Block this sender', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
+
+					// Sender-domain wildcard rule (BACKLOG "Absender-Domain-Blockliste"):
+					// offered only when the domain behind the last @ passes the SAME
+					// check the matcher and block_value_callback() apply — otherwise the
+					// button would promise a block that can never match, or lock the
+					// operator out of the site's own domain. data-value carries the full
+					// address; the server re-extracts the domain itself.
+					$at_email            = strrpos( $email, '@' );
+					$offer_sender_domain = false !== $at_email
+						&& Echo_Values::is_blockable_sender_domain( substr( $email, $at_email + 1 ), $own_domains );
+					if ( $offer_sender_domain ) {
+						$html_details .= ' <button type="button" class="gdpr-block-btn" data-kind="sender_domain" data-value="' . esc_attr( $email ) . '" title="' . esc_attr__( 'Blocks every future submission containing an address at this domain.', 'gdpr-compliant-recaptcha-for-all-forms' ) . '" onclick="blockValue(this)">' . esc_html__( 'Block this sender\'s domain', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
+					}
 				}
 				$domain_to_block = null;
 				foreach ( Echo_Values::extract_urls( $value ) as $url ) {
@@ -650,10 +668,19 @@ class Message_Page {
 	}
 
 	/**
-	 * One-click "Block this sender"/"Block this domain" (BACKLOG baustein 2): append
-	 * a wildcard value line {"*":"value"} to POW_PARAMETER_PATTERN. Capability-gated
-	 * (manage_options) + nonce. CRITICAL self-DoS guard: refuses to block a value on
-	 * the site's own registrable domain.
+	 * One-click "Block this sender"/"Block this domain"/"Block this sender's domain"
+	 * (BACKLOG bausteine 2 + "Absender-Domain-Blockliste"): append the value as a
+	 * PLAIN-TEXT line to POW_BLOCKED_VALUES, the standalone blocklist option. For
+	 * 'sender_domain' the stored value is "@domain" — Echo_Values::matches_wildcard_values()
+	 * treats a leading @ as the sender-domain match form, see handbuch/detection.md.
+	 * Capability-gated (manage_options) + nonce. CRITICAL self-DoS guard: refuses to
+	 * block a value on the site's own registrable domain.
+	 *
+	 * The three guards and the four match forms are UNCHANGED by
+	 * PLAN-BLOCKLIST-TRENNUNG.md; what changed is where the line is written and in what
+	 * shape. Until then this wrote {"*":"value"} into POW_PARAMETER_PATTERN, where the
+	 * same textarea also held monitoring patterns — one option carrying two authorities.
+	 * Dedup now compares the plain value against the blocklist's own lines.
 	 */
 	public function block_value_callback() {
 		$message_type   = filter_var( isset( $_POST['messageType'] ) ? wp_unslash( $_POST['messageType'] ) : '', FILTER_VALIDATE_INT );
@@ -683,6 +710,24 @@ class Message_Page {
 				exit;
 			}
 			$value = $email;
+		} elseif ( 'sender_domain' === $kind ) {
+			$email = Echo_Values::extract_email( $raw );
+			if ( null === $email ) {
+				wp_send_json_error( array( 'error_message' => __( 'No valid sender address found.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+			// Self-DoS guard AND input validation in one call, deliberately the SAME
+			// rule the two other sites use (the button in render_message() only appears
+			// when this passes, and matches_wildcard_values() only treats a stored
+			// "@domain" line as a sender-domain rule when it passes). A line that the
+			// three sites judged differently is the bug this shape prevents.
+			$at     = strrpos( $email, '@' );
+			$domain = false !== $at ? strtolower( trim( substr( $email, $at + 1 ) ) ) : '';
+			if ( ! Echo_Values::is_blockable_sender_domain( $domain, $own_domains ) ) {
+				wp_send_json_error( array( 'error_message' => __( 'Cannot block this sender domain (invalid, or your own domain).', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+				exit;
+			}
+			$value = '@' . $domain;
 		} elseif ( 'domain' === $kind ) {
 			// registrable_domain() returns null for the own domain(s), an IP, or a
 			// non-domain — the same self-DoS guard, plus input validation.
@@ -696,22 +741,24 @@ class Message_Page {
 			exit;
 		}
 
-		$line     = (string) wp_json_encode( array( '*' => $value ) );
-		$existing = (string) get_option( Option::POW_PARAMETER_PATTERN );
-		$lines    = '' === trim( $existing ) ? array() : preg_split( "/\r\n|\n|\r/", $existing, -1, PREG_SPLIT_NO_EMPTY );
+		// Plain text, one value per line — the format Echo_Values::values_from_plaintext_lines()
+		// reads. Dedup is done on the NORMALIZED value (trim + lowercase), because that is
+		// what the matcher compares: two lines differing only in case are one rule, and
+		// storing both would tell the operator he added something when he did not.
+		$line     = (string) $value;
+		$existing = (string) get_option( Option::POW_BLOCKED_VALUES );
+		$lines    = '' === trim( $existing ) ? array() : (array) preg_split( "/\r\n|\n|\r/", $existing, -1, PREG_SPLIT_NO_EMPTY );
 
-		foreach ( $lines as $existing_line ) {
-			if ( trim( $existing_line ) === $line ) {
-				wp_send_json_error( array( 'error_message' => __( 'This value is already blocked.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
-				exit;
-			}
+		if ( in_array( Echo_Values::normalize_wildcard( $line ), Echo_Values::values_from_plaintext_lines( $lines ), true ) ) {
+			wp_send_json_error( array( 'error_message' => __( 'This value is already blocked.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+			exit;
 		}
 
 		$lines[] = $line;
-		update_option( Option::POW_PARAMETER_PATTERN, implode( "\n", $lines ) );
+		update_option( Option::POW_BLOCKED_VALUES, implode( "\n", $lines ) );
 		wp_send_json_success(
 			array(
-				'message' => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'message' => __( 'Blocked successfully! The value was added to "Blocked values" in the plugin settings.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'value'   => $value,
 			)
 		);
@@ -1098,7 +1145,17 @@ class Message_Page {
 		$sql_array                     = array();
 		//For each pattern build a sub-select to check whether the conditions match
 		foreach ( $existing_patterns as $pattern ) {
-			$pattern    = Option::generate_paths( json_decode( $pattern, true ), '' );
+			$decoded_pattern = json_decode( $pattern, true );
+			if ( ! is_array( $decoded_pattern ) ) {
+				// Not valid JSON (e.g. a stray textarea edit predating the save-time
+				// guard) -- skip this line rather than build a sub-select with an empty
+				// OR-list ("WHERE  GROUP BY", a SQL syntax error). Same guard as
+				// Option::get_rows() above/below this call; generate_paths() itself now
+				// also tolerates a non-array/object $data, this just avoids the broken
+				// SQL fragment in the first place.
+				continue;
+			}
+			$pattern    = Option::generate_paths( $decoded_pattern, '' );
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
@@ -1119,7 +1176,12 @@ class Message_Page {
 		$hidden_sql_array = array();
 		//For each pattern build a sub-seelect to check whether the conditions match
 		foreach ( $hidden_patterns as $pattern ) {
-			$pattern    = Option::generate_paths( json_decode( $pattern, true ), '' );
+			$decoded_pattern = json_decode( $pattern, true );
+			if ( ! is_array( $decoded_pattern ) ) {
+				// See the matching guard above.
+				continue;
+			}
+			$pattern    = Option::generate_paths( $decoded_pattern, '' );
 			$conditions = array();
 			foreach ( $pattern as $param_path => $value ) {
 				if ( null === $value ) {
@@ -1321,7 +1383,16 @@ class Message_Page {
 		$raw_messages   = isset( $_POST['messages'] ) ? wp_unslash( $_POST['messages'] ) : '';
 		$array_variable = json_decode( $raw_messages );
 
-		foreach ( $array_variable as $raw_message ) {
+		// json_decode() returns null for '', invalid JSON, or the literal `null` -- guard
+		// before the loop (mirrors delete_message()'s `if ( $array_variable )` check
+		// above in this file) so an empty/garbage `messages` payload no-ops instead of a
+		// PHP `foreach() argument must be of type array|object, null given` warning
+		// landing IN this endpoint's JSON body, ahead of the real response. Same damage
+		// class as HANDBUCH.md §12 Ursache 1 (a notice before the JSON breaks the
+		// caller's response.json()), just on Message-Page-Ajax instead of the PoW hot
+		// path -- confirmed live under display_errors=1 before this fix, see
+		// tests/integration/cases/php-deprecation-audit.mjs.
+		foreach ( is_array( $array_variable ) ? $array_variable : array() as $raw_message ) {
 			parse_str( $raw_message, $message );
 			if ( ! (
 					isset( $message['moveNonce'] )

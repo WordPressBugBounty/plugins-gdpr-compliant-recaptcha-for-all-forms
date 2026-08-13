@@ -579,6 +579,16 @@ function savePattern(e, messageID, buttonId, hide = false) {
 function blockValue(button) {
 	var kind = button.getAttribute('data-kind');
 	var value = button.getAttribute('data-value');
+	// "Block this sender's domain" is broader than the other kinds — one click
+	// blocks every current and future sender address at that domain, not just this
+	// one message. Confirm before sending; the other kinds stay confirm-free.
+	if (kind === 'sender_domain') {
+		var atIndex = value.lastIndexOf('@');
+		var domain = atIndex !== -1 ? value.substring(atIndex + 1) : value;
+		if (!window.confirm(gdprMsg.i18n.confirmSenderDomain.replace('%s', domain))) {
+			return;
+		}
+	}
 	showSpinner();
 	var xhr = new XMLHttpRequest();
 	xhr.open('POST', gdprMsg.ajaxUrl, true);

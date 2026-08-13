@@ -257,12 +257,15 @@ final class Scope_Add {
 	 *
 	 * Three separate refusals, in order of how badly they end:
 	 *
-	 * 1. A wildcard value row `{"*":"value"}` is NOT monitoring. It is a
-	 *    deterministic spam classification (handbuch/gate.md) — `{"*":"gmail.com"}`
-	 *    blocks every sender on that domain site-wide. The admin UI reaches this
-	 *    through a separate one-click path that additionally refuses the site's own
-	 *    domain; letting it in here would hand an agent stage-3 power (changing what
-	 *    counts as spam) through a stage-2 door.
+	 * 1. A `*` key is the FIELD-NAME WILDCARD: `{"*":"value"}` matches on the value
+	 *    regardless of which field carries it, at any depth, on any form. That is a
+	 *    legitimate monitoring pattern for an admin who knows their site, but it is far
+	 *    too broad for an agent-driven scope addition — it would put nearly every form
+	 *    on the site under evaluation from one line. Same family of refusal as
+	 *    `too_generic` below; it keeps its own reason code because reason codes are
+	 *    stable identifiers in the agent's answer, and renaming one is itself an API
+	 *    change. Blocking a VALUE is a different setting entirely (POW_BLOCKED_VALUES)
+	 *    and has no agent path at all.
 	 * 2. A pattern naming a wp-admin field matches administrative traffic.
 	 * 3. A pattern built only from generic field names matches nearly every form,
 	 *    which is the documented cost case, just not self-inflicted this time.
@@ -347,7 +350,7 @@ final class Scope_Add {
 			'would_lock_out_admin'   => __( 'Refused: this would make the plugin evaluate WordPress\' own administration traffic, which would lock the administrator out of wp-admin.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'not_an_action_name'     => __( 'Not a valid admin-ajax action name.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'not_a_json_object'      => __( 'A recognition pattern must be a JSON object of field names.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'wildcard_value_pattern' => __( 'Refused: a wildcard value pattern does not monitor a form, it classifies submissions as spam. Add it from the message detail view instead, where the consequences are shown.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'wildcard_value_pattern' => __( 'Refused: a "*" wildcard matches on a value regardless of field name and would monitor almost every form. Name the form\'s own fields instead. Blocking a value is a site-owner decision and has no agent path.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'matches_admin_fields'   => __( 'Refused: this pattern names fields that WordPress\' own admin screens post.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'too_generic'            => __( 'Refused: this pattern is built only from generic field names and would match almost every form on the site. Include at least one field name specific to the form builder.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'unknown_domain'         => __( 'Unknown scope domain.', 'gdpr-compliant-recaptcha-for-all-forms' ),

@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.3.4
+Stable tag: 5.4.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.4.0 =
+Blocked sender values move into their own "Blocked values" setting; your existing entries are carried over automatically. If senders were still blocked as "Known spam value" after 5.3.4, that clears itself within 36 hours — or reset the echo list under Diagnostics.
 = 5.3.4 =
 Fixes every submission being flagged as spam where PHP and the database run in different time zones, and closes three security gaps around address checking. If you use the site whitelist, check that its entries name your site's real address.
 = 5.3.3 =
@@ -177,6 +179,21 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.4.0 =
+* Changed: The "Apply on pattern" help now notes that a numeric value still needs its quotation marks.
+* Changed: The help for "Apply on pattern" and "Blocked values" now shows real examples of the lines you would enter.
+* Changed: Blocked sender values moved to their own "Blocked values" setting. Existing entries move over automatically.
+* Added: {"*":"value"} in "Apply on pattern" now matches any field carrying that value — it monitors, it does not block.
+* Fixed: The notice about a discarded admin save now names whether a pattern or a blocked value was responsible.
+* Fixed: A blocked email address or domain no longer stops a registered user from logging in with it.
+* Added: A whole sender domain can be blocked with one line (@disposable.tld), including its subdomains.
+* Added: "Block this sender's domain" button in the message view; the settings help now explains blocking values.
+* Fixed: An admin-side ajax reply could carry a PHP warning ahead of its JSON on servers that display errors.
+* Fixed: A block on a wp-admin screen no longer writes a fail2ban line, so an over-broad pattern cannot ban the admin.
+* Added: A field pattern that also matches your admin screens now warns before saving, and asks you to confirm it.
+* Added: An admin notice now names the field pattern when one of your own admin page saves was discarded as spam.
+* Added: Settings now suggests the detected reverse-proxy address, with one click to add it to trusted proxies.
+* Fixed: A handshake failure caused by a cache, proxy or clock issue no longer adds the sender to the 36-hour spam list.
 = 5.3.4 =
 * Fixed: submissions are no longer all flagged as spam on servers whose database connections disagree about the time zone.
 * Fixed: the spam and health figures in the status bar and dashboard widget now count the right day on servers whose database time zone differs from the site's.

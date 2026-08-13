@@ -689,11 +689,17 @@ final class Abilities {
 	/**
 	 * The live monitored scope, and optionally a coverage answer.
 	 *
-	 * Wildcard value rows are counted but never listed. They carry values an admin
-	 * blocked by hand — real senders' email addresses and domains (handbuch/gate.md).
-	 * That is personal data about third parties, and an MCP client is typically an
-	 * external service, so listing them would quietly turn a "what do you monitor"
-	 * question into a data transfer.
+	 * Blocked values are counted but never listed. They carry values an admin blocked by
+	 * hand — real senders' email addresses and domains (handbuch/detection.md). That is
+	 * personal data about third parties, and an MCP client is typically an external
+	 * service, so listing them would quietly turn a "what do you monitor" question into a
+	 * data transfer.
+	 *
+	 * The count is the line count of POW_BLOCKED_VALUES, the option the blocklist lives in
+	 * since PLAN-BLOCKLIST-TRENNUNG.md. It used to be derived by filtering `{"*":…}` rows
+	 * out of the pattern option, which is why `patterns` needed a filter at all; now the
+	 * pattern option holds nothing but monitoring patterns and every line of it is
+	 * listable.
 	 *
 	 * @param array<string,mixed> $input Ability input.
 	 * @return array<string,mixed>
@@ -702,23 +708,13 @@ final class Abilities {
 		$actions  = Scope_Sync::parse_lines( get_option( Option::POW_EXPLICIT_ACTION, '' ) );
 		$patterns = Scope_Sync::parse_lines( get_option( Option::POW_PARAMETER_PATTERN, '' ) );
 		$routes   = Scope_Sync::parse_lines( get_option( Option::POW_REST_ROUTES, '' ) );
-
-		$listable = array();
-		$wildcard = 0;
-		foreach ( $patterns as $line ) {
-			$decoded = json_decode( $line, true );
-			if ( is_array( $decoded ) && array_key_exists( '*', $decoded ) ) {
-				++$wildcard;
-				continue;
-			}
-			$listable[] = $line;
-		}
+		$blocked  = Scope_Sync::parse_lines( get_option( Option::POW_BLOCKED_VALUES, '' ) );
 
 		$result = array(
 			'actions'                  => $actions,
-			'patterns'                 => $listable,
+			'patterns'                 => $patterns,
 			'routes'                   => $routes,
-			'blocked_values_count'     => $wildcard,
+			'blocked_values_count'     => count( $blocked ),
 			'blocked_values_withheld'  => __( 'Blocked sender values are counted but not listed: they are third parties\' email addresses and domains.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'how_requests_are_matched' => __( 'admin-ajax requests are matched by action name only. Classic form posts and REST requests are matched by field pattern or by REST route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
@@ -831,19 +827,23 @@ final class Abilities {
 	}
 
 	/**
-	 * Whether any supplied value matches a blocked-value pattern.
+	 * Whether any supplied value is on the operator's blocklist (POW_BLOCKED_VALUES).
+	 *
+	 * Reads the same option through the same parser as the live path
+	 * (Stamp::blocked_values()) — a diagnostic that judged differently from production
+	 * would be worse than none.
 	 *
 	 * @param array<string,mixed> $fields Supplied fields.
 	 * @return bool
 	 */
 	private function wildcard_hit( $fields ) {
-		$option = (string) get_option( Option::POW_PARAMETER_PATTERN );
+		$option = (string) get_option( Option::POW_BLOCKED_VALUES );
 		if ( '' === trim( $option ) ) {
 			return false;
 		}
 
 		$lines  = preg_split( '/\r\n|\n|\r/', $option, -1, PREG_SPLIT_NO_EMPTY );
-		$values = Echo_Values::wildcard_values_from_lines( is_array( $lines ) ? $lines : array() );
+		$values = Echo_Values::values_from_plaintext_lines( is_array( $lines ) ? $lines : array() );
 		if ( empty( $values ) ) {
 			return false;
 		}
