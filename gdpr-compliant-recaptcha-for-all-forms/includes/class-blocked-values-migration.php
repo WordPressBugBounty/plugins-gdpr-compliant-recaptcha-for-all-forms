@@ -32,12 +32,16 @@
  *    stored line has to keep the admin's own spelling — normalization is a
  *    property of reading (Echo_Values::values_from_plaintext_lines()), not of
  *    storage.
- *  - EVERYTHING ELSE SURVIVES BYTE FOR BYTE. split_legacy_lines() returns the
- *    non-block lines unchanged, in their original order, with their original
- *    whitespace, including lines that are not valid JSON at all (they may well be
- *    an admin's notes) and including {"*":null} / {"*":123} / {"*":""}, which were
- *    never block lines to begin with. The rewritten option is the original minus
- *    the migrated lines, nothing else.
+ *  - EVERYTHING ELSE SURVIVES LINE FOR LINE, CONTENT BYTE-EXACT. split_legacy_lines()
+ *    returns the non-block lines unchanged, in their original order, with their
+ *    original whitespace, including lines that are not valid JSON at all (they may
+ *    well be an admin's notes) and including {"*":null} / {"*":123} / {"*":""},
+ *    which were never block lines to begin with. The one thing that does NOT
+ *    survive is the SPELLING OF THE LINE TERMINATORS: lines are split with the
+ *    same expression every reader in this plugin uses and re-joined with "\n", so
+ *    a CRLF- or CR-stored option comes out LF-terminated. Why that trade is
+ *    deliberate — and why the alternative silently lost configured blocks — is
+ *    spelled out at split_legacy_lines().
  *
  * The partitioning is a pure static function on purpose, so both properties are
  * directly unit-testable without WordPress — including the no-op proof for the
@@ -112,10 +116,28 @@ final class Blocked_Values_Migration {
 	 * migrate and the lines that stay behind.
 	 *
 	 * Pure — no options, no WordPress — and therefore the part that is directly
-	 * unit-tested. Splitting on "\n" (and never re-joining anything but the
-	 * untouched pieces) is what makes the "byte for byte" promise of the head
-	 * docblock hold, CRLF included: a "\r" belongs to the line it terminates and
-	 * travels with it into `remaining`.
+	 * unit-tested.
+	 *
+	 * SPLIT EXACTLY LIKE THE READER THIS REPLACES: `/\r\n|\n|\r/`, the expression every
+	 * line-based option in this plugin is read with (Stamp, Settings_Menu, the guards).
+	 * An earlier revision split on "\n" alone, which agrees with that reader on LF and
+	 * CRLF but not on a lone CR: there, two block lines would collapse into one
+	 * unparsable line, stay behind in the pattern option — where they no longer block
+	 * anything — and the done-flag would still be set, so no later run would ever pick
+	 * them up again. Silent, permanent loss of a block the operator configured. No
+	 * writer inside this plugin produces CR-only line endings, so the case was not
+	 * reachable through the UI; an option written by WP-CLI, a direct database edit or
+	 * another plugin is not covered by that assumption, and this migration must not
+	 * depend on it.
+	 *
+	 * The head docblock's preservation promise holds for what it was ever about — line
+	 * CONTENT, order, whitespace, unparsable lines: a "\r\n" or "\r" terminates its line
+	 * and is not part of it. The terminator spelling itself is normalised: `remaining`
+	 * is re-joined with "\n", the join every writer INSIDE this plugin uses. (The
+	 * settings page stores a textarea as posted — a browser sends CRLF and it stays
+	 * CRLF — so a hand-edited pattern option commonly carries "\r\n". Every reader
+	 * accepts all three spellings, which is exactly what makes normalising them here
+	 * harmless.)
 	 *
 	 * @param string $option_value Raw option value.
 	 * @return array{blocked: string[], remaining: string[]} Migrated values (trimmed,
@@ -127,7 +149,8 @@ final class Blocked_Values_Migration {
 		$seen      = array();
 		$remaining = array();
 
-		foreach ( explode( "\n", $option_value ) as $line ) {
+		$lines = preg_split( '/\r\n|\n|\r/', $option_value );
+		foreach ( ( false === $lines ? array() : $lines ) as $line ) {
 			$value = self::blocked_value_of_line( $line );
 			if ( null === $value ) {
 				$remaining[] = $line;

@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.4.0
+Stable tag: 5.5.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.5.0 =
+Maintenance release — see the changelog for details.
 = 5.4.0 =
 Blocked sender values move into their own "Blocked values" setting; your existing entries are carried over automatically. If senders were still blocked as "Known spam value" after 5.3.4, that clears itself within 36 hours — or reset the echo list under Diagnostics.
 = 5.3.4 =
@@ -179,6 +181,14 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.5.0 =
+* Added: submissions blocked as "Known spam value" now link directly to the setting that releases them.
+* Fixed: submissions were incorrectly flagged as spam on sites using Cloudflare Turnstile.
+* Added: the WordPress comment form is now protected by default; comment spam previously passed unchecked.
+* Added: blocked-value rules that can never match are now labelled on save instead of appearing active.
+* Added: a "Blocked values" entry can now be a rule that binds a value to a single field or form.
+* Added: blocked-value rules that would discard an entire form are held back until you confirm them.
+* Fixed: the one-time migration of blocked values now also handles pattern lists with classic Mac line endings.
 = 5.4.0 =
 * Changed: The "Apply on pattern" help now notes that a numeric value still needs its quotation marks.
 * Changed: The help for "Apply on pattern" and "Blocked values" now shows real examples of the lines you would enter.
@@ -186,7 +196,7 @@ Major release: proof-of-work is now bound to single-use signed tokens (much stro
 * Added: {"*":"value"} in "Apply on pattern" now matches any field carrying that value — it monitors, it does not block.
 * Fixed: The notice about a discarded admin save now names whether a pattern or a blocked value was responsible.
 * Fixed: A blocked email address or domain no longer stops a registered user from logging in with it.
-* Added: A whole sender domain can be blocked with one line (@disposable.tld), including its subdomains.
+* Added: A whole sender domain can be blocked in "Blocked values" with one line (@disposable.tld), subdomains included.
 * Added: "Block this sender's domain" button in the message view; the settings help now explains blocking values.
 * Fixed: An admin-side ajax reply could carry a PHP warning ahead of its JSON on servers that display errors.
 * Fixed: A block on a wp-admin screen no longer writes a fail2ban line, so an over-broad pattern cannot ban the admin.

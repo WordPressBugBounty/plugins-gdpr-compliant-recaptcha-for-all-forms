@@ -168,14 +168,42 @@ class Analysis {
 		exit;
 	}
 
+	/** Enqueue the direct-analysis overlay.
+	 *
+	 * The overlay ships as FIVE files (Dateigroessen-Welle 3, PLAN-DATEIGROESSE.md — it
+	 * used to be one 1625-line script). There is no bundler in this plugin and none is
+	 * being introduced, so the load order is carried by the `$deps` argument below: each
+	 * module names its predecessor, which makes the chain linear and total —
+	 *
+	 *   …-analysis (declares the object)  ->  …-model  ->  …-ui  ->  …-guide  ->  …-capture
+	 *
+	 * Every module beyond the first extends the SAME global object via Object.assign(),
+	 * so there is exactly one namespace and no call site changed. The last link is the
+	 * capture module on purpose: it registers the window 'load' listener that starts the
+	 * overlay, and that must not happen before every other half of the object is attached.
+	 *
+	 * `wp_localize_script()` stays on the FIRST handle: it prints `gdprAnalysis` right
+	 * before that script, hence before every module that reads it.
+	 */
 	public function add_javascript() {
-		wp_enqueue_script(
-			'gdpr-recaptcha-analysis',
-			plugins_url( '/scripts/recaptcha-gdpr-analysis.js', __DIR__ ),
-			array(),
-			RCM_Main::VERSION,
-			true
+		$modules  = array(
+			'gdpr-recaptcha-analysis'         => 'recaptcha-gdpr-analysis.js',
+			'gdpr-recaptcha-analysis-model'   => 'recaptcha-gdpr-analysis-model.js',
+			'gdpr-recaptcha-analysis-ui'      => 'recaptcha-gdpr-analysis-ui.js',
+			'gdpr-recaptcha-analysis-guide'   => 'recaptcha-gdpr-analysis-guide.js',
+			'gdpr-recaptcha-analysis-capture' => 'recaptcha-gdpr-analysis-capture.js',
 		);
+		$previous = array();
+		foreach ( $modules as $handle => $file ) {
+			wp_enqueue_script(
+				$handle,
+				plugins_url( '/scripts/' . $file, __DIR__ ),
+				$previous,
+				RCM_Main::VERSION,
+				true
+			);
+			$previous = array( $handle );
+		}
 		wp_localize_script(
 			'gdpr-recaptcha-analysis',
 			'gdprAnalysis',

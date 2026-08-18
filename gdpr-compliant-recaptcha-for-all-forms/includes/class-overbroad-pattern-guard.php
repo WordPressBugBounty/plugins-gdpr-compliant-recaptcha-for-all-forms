@@ -77,7 +77,15 @@
  *
  * WHAT "OVER-BROAD" COVERS HERE — two SOURCES, not one. The save-time warning is about
  * FIELD patterns (`{"email":null}` in POW_PARAMETER_PATTERN), because those are what the
- * core-screen signature catalog can be compared against. The notice afterwards has to
+ * core-screen signature catalog can be compared against — and, since blocklist lines may
+ * be written as RULES, about those too: a rule that names only a form and pins no value on
+ * a field people fill in (`{"_wpcf7":null}`) discards everything that form sends, while the
+ * IDENTICAL line in the pattern box merely watches it. Same syntax, two boxes, opposite
+ * consequences, so that one gets its own round trip (blocklist_warning_message(),
+ * render_blocklist_confirmation_block(), and its OWN checkbox — see ACK_VALUE_FIELD).
+ * Plain blocklist VALUES stay out of the save-time warning: a bare address cannot be
+ * judged against a forward-looking catalog, which is what the notice below is for.
+ * The notice afterwards has to
  * cover the BLOCKED VALUES as well (`@gmail.com` in POW_BLOCKED_VALUES, what the one-click
  * "block this address/domain" button writes): such an entry matches on VALUES anywhere in
  * the submission, so it discards a profile save carrying that address, a comment
@@ -88,6 +96,13 @@
  * the right box: the two settings now live in different groups, and "check your patterns"
  * for a line that is not in the pattern box at all is a diagnosis that costs more than it
  * gives.
+ *
+ * SCHNITTLINIE (Welle 4, PLAN-DATEIGROESSE.md): the save round trip described above lives
+ * in trait-overbroad-save-warning.php, the blame calculation in trait-overbroad-blame.php
+ * — both composed back into this class, so every caller and every source-level pin is
+ * unchanged. What deliberately did NOT move is the marker's one writer, one reader and
+ * one dismisser; they stay here together, because that is what
+ * OverbroadPatternMarkerWiringTest counts. Reasons in trait-overbroad-blame.php's header.
  *
  * The pure halves (is_core_admin_screen_post(), confirmation_hash(), blaming_lines(),
  * screen_file()) carry no WordPress at all and are unit-tested directly:
@@ -110,6 +125,15 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * Save-time warning and after-the-fact notice for over-broad field patterns.
  */
 final class Overbroad_Pattern_Guard {
+
+	/**
+	 * The two halves that were moved out of this file in Welle 4 (PLAN-DATEIGROESSE.md).
+	 * Traits, so every caller keeps writing Overbroad_Pattern_Guard::… and every
+	 * source-level pin keeps meaning what it meant. Seam documented in
+	 * trait-overbroad-blame.php.
+	 */
+	use Overbroad_Blame;
+	use Overbroad_Save_Warning;
 
 	/**
 	 * Transient holding the ONE marker: "an over-broad pattern discarded a wp-admin save".
@@ -143,6 +167,22 @@ final class Overbroad_Pattern_Guard {
 
 	/** POST field of the hash binding that confirmation to the lines it was shown for. */
 	const ACK_HASH_FIELD = 'gdpr_pow_pattern_ack_hash';
+
+	/**
+	 * The same pair again, for the BLOCKED VALUES box — deliberately its OWN field names
+	 * rather than a second use of the two above.
+	 *
+	 * One save carries both textareas. Sharing the checkbox would mean that confirming an
+	 * over-broad monitoring pattern also confirms an over-broad BLOCK rule in the same
+	 * submission, i.e. the more dangerous of the two would be waved through by a click that
+	 * was about the harmless one. The hash alone would not save it either: it is computed
+	 * per line set, so a single ticked box plus the right hash for one box is exactly the
+	 * situation this separation prevents.
+	 */
+	const ACK_VALUE_FIELD = 'gdpr_pow_blocked_ack';
+
+	/** @see ACK_VALUE_FIELD */
+	const ACK_VALUE_HASH_FIELD = 'gdpr_pow_blocked_ack_hash';
 
 	/** Query argument AND nonce action of the notice's dismiss link. */
 	const DISMISS_ARG = 'gdpr_pow_pattern_notice_dismiss';
@@ -227,132 +267,6 @@ final class Overbroad_Pattern_Guard {
 	}
 
 	/**
-	 * Which configured pattern lines match this request — i.e. which of them is to blame
-	 * for the verdict that just discarded a backend save.
-	 *
-	 * Deliberately NOT filtered through Pattern_Matcher::overbroad_lines() first: that one
-	 * answers "would this line hit a WordPress CORE screen", and the case this marker is
-	 * for explicitly includes a third-party plugin's admin form that carries a generic
-	 * field. Blame is therefore decided against the request that actually happened, using
-	 * the same line interpretation the live gate uses.
-	 *
-	 * BOTH SOURCES, because the gate has two. A field pattern (`{"email":null}`, from
-	 * POW_PARAMETER_PATTERN) is answered by Pattern_Matcher::line_matches(); a BLOCKED
-	 * VALUE (`@gmail.com`, from POW_BLOCKED_VALUES) is not, and cannot be — it is not a
-	 * pattern at all. Asking only the field matcher left this half of the configuration
-	 * invisible here: a profile save that a blocked sender domain really discards returned
-	 * an EMPTY result, so no marker was written and the notice stayed silent on precisely
-	 * the kind of entry a one-click "block this domain" writes. Measured before the fix.
-	 *
-	 * The value half is answered by asking Echo_Values — the SAME functions that classify
-	 * live (values_from_plaintext_lines() to read the line, matches_wildcard_values() to
-	 * judge it) — never by a second rendering of the rule here. That is the construction
-	 * principle spelled out in the Pattern_Matcher class docblock: a diagnosis built on a
-	 * lookalike implementation is worse than none, because it eventually names the wrong
-	 * line, and nothing exercises the two side by side.
-	 *
-	 * THE RESULT SAYS WHICH SOURCE, not just which text. Since the blocklist moved into
-	 * its own option and its own settings group (PLAN-BLOCKLIST-TRENNUNG.md), "a pattern
-	 * you configured" would be the wrong sentence for half the cases and would send the
-	 * operator to a box that does not contain the named line.
-	 *
-	 * PURE DIAGNOSIS. This decides who is NAMED, never what is blocked — the cap, the
-	 * de-duplication and the option order are unchanged, and no caller may turn the result
-	 * into an input of the spam decision (pinned in OverbroadPatternMarkerWiringTest).
-	 *
-	 * @param string   $option_value   POW_PARAMETER_PATTERN, exactly as stored.
-	 * @param mixed    $request        The field map the gate matched against.
-	 * @param string[] $own_domains    Registrable domains of the site itself, as the live
-	 *                                 matcher receives them. OPTIONAL ONLY so existing
-	 *                                 callers keep working: left out, a blocked value on
-	 *                                 the site's OWN domain is judged differently here than
-	 *                                 by the live matcher (which excludes own domains from
-	 *                                 URL extraction and from the sender-domain rule, see
-	 *                                 Echo_Values::is_blockable_sender_domain()), so blame
-	 *                                 can name an entry the gate did not act on. Callers
-	 *                                 should pass it.
-	 * @param string   $blocked_values POW_BLOCKED_VALUES, exactly as stored. Its own
-	 *                                 parameter rather than a second reading of
-	 *                                 $option_value: they are two different options with
-	 *                                 two different formats, and one string cannot carry
-	 *                                 both without the ambiguity this whole change removed.
-	 * @return array<string, string> Trimmed offending line => BLAME_PATTERN|BLAME_VALUE,
-	 *                               pattern lines first, each in its own option's order,
-	 *                               capped at MARKER_MAX_LINES in total.
-	 */
-	public static function blaming_lines( string $option_value, $request, array $own_domains = array(), string $blocked_values = '' ): array {
-		$blamed = array();
-
-		foreach ( self::split_lines( $option_value ) as $line ) {
-			if ( count( $blamed ) >= self::MARKER_MAX_LINES ) {
-				return $blamed;
-			}
-			if ( isset( $blamed[ $line ] ) ) {
-				continue;
-			}
-			if ( Pattern_Matcher::line_matches( $line, $request ) ) {
-				$blamed[ $line ] = self::BLAME_PATTERN;
-			}
-		}
-
-		foreach ( self::split_lines( $blocked_values ) as $line ) {
-			if ( count( $blamed ) >= self::MARKER_MAX_LINES ) {
-				return $blamed;
-			}
-			if ( isset( $blamed[ $line ] ) ) {
-				continue;
-			}
-			if ( self::blocked_value_matches( $line, $request, $own_domains ) ) {
-				$blamed[ $line ] = self::BLAME_VALUE;
-			}
-		}
-
-		return $blamed;
-	}
-
-	/**
-	 * One option value into its trimmed, non-empty lines.
-	 *
-	 * @param string $option_value Raw option value.
-	 * @return string[]
-	 */
-	private static function split_lines( string $option_value ): array {
-		$lines = preg_split( "/\r\n|\n|\r/", $option_value );
-		if ( false === $lines ) {
-			return array();
-		}
-		$out = array();
-		foreach ( $lines as $raw_line ) {
-			$line = trim( $raw_line );
-			if ( '' !== $line ) {
-				$out[] = $line;
-			}
-		}
-		return $out;
-	}
-
-	/**
-	 * Does this ONE blocklist entry match the request?
-	 *
-	 * Both halves are borrowed whole from Echo_Values, so there is exactly one place in
-	 * the plugin that knows what a blocked value means and when it hits. An empty result
-	 * from values_from_plaintext_lines() is the answer "this line carries no value at
-	 * all" — the only thing decided here.
-	 *
-	 * @param string   $line        One trimmed blocklist line.
-	 * @param mixed    $request     The field map the gate matched against.
-	 * @param string[] $own_domains Registrable domains of the site itself.
-	 * @return bool
-	 */
-	private static function blocked_value_matches( string $line, $request, array $own_domains ): bool {
-		$values = Echo_Values::values_from_plaintext_lines( array( $line ) );
-		if ( empty( $values ) ) {
-			return false;
-		}
-		return (bool) Echo_Values::matches_wildcard_values( $request, $values, $own_domains );
-	}
-
-	/**
 	 * The confirmation hash: sha256 over the canonicalised offending lines.
 	 *
 	 * Canonical = trimmed, empty dropped, de-duplicated, sorted — so re-ordering the
@@ -377,110 +291,6 @@ final class Overbroad_Pattern_Guard {
 		$canonical = array_values( array_unique( $canonical ) );
 		sort( $canonical, SORT_STRING );
 		return hash( 'sha256', implode( "\n", $canonical ) );
-	}
-
-	/*
-	 * ---------------------------------------------------------------------------------
-	 * Settings-page half: warn on save, keep the input, take the confirmation
-	 * ---------------------------------------------------------------------------------
-	 */
-
-	/**
-	 * Has the administrator confirmed EXACTLY these over-broad lines in this submission?
-	 *
-	 * Both halves are required: the box has to be ticked and the hidden hash has to match
-	 * the lines being submitted NOW. The caller (Settings_Menu::update_settings()) has
-	 * already verified the settings nonce and manage_options before anything here runs.
-	 *
-	 * @param string[] $flagged_lines Over-broad lines of the CURRENT submission.
-	 * @return bool
-	 */
-	public static function confirmed( array $flagged_lines ): bool {
-		// phpcs:disable WordPress.Security.NonceVerification.Missing -- reached only from Settings_Menu::update_settings(), which verifies gdpr_settings_nonce and manage_options before calling; this pair carries no privilege of its own (see confirmation_hash()).
-		if ( ! isset( $_POST[ self::ACK_FIELD ] ) || ! isset( $_POST[ self::ACK_HASH_FIELD ] ) ) {
-			return false;
-		}
-		$submitted = sanitize_text_field( wp_unslash( $_POST[ self::ACK_HASH_FIELD ] ) );
-		// phpcs:enable WordPress.Security.NonceVerification.Missing
-		$expected = self::confirmation_hash( $flagged_lines );
-		if ( '' === $expected || '' === $submitted ) {
-			return false;
-		}
-		return hash_equals( $expected, $submitted );
-	}
-
-	/**
-	 * The message add_settings_error() shows: every offending line, with the core screens
-	 * it hits, plus what happens next.
-	 *
-	 * The line is esc_html()'d HERE because settings_errors() prints its message
-	 * UNESCAPED — the string travels as ready-to-print HTML, and it carries text the
-	 * administrator typed into a textarea (`{"email":"<img onerror=…>"}` is a perfectly
-	 * well-formed pattern line).
-	 *
-	 * @param array<string, string[]> $flagged Pattern_Matcher::overbroad_lines() result.
-	 * @return string
-	 */
-	public static function warning_message( array $flagged ): string {
-		$labels = self::screen_labels();
-		$parts  = array();
-		foreach ( $flagged as $line => $screens ) {
-			$named = array();
-			foreach ( $screens as $screen ) {
-				$named[] = isset( $labels[ $screen ] ) ? $labels[ $screen ] : $screen;
-			}
-			$parts[] = sprintf(
-				/* translators: 1: the pattern line as entered, 2: comma-separated admin screen names */
-				__( '%1$s (matches: %2$s)', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				esc_html( (string) $line ),
-				implode( ', ', $named )
-			);
-		}
-
-		return sprintf(
-			/* translators: %s: the offending pattern lines with the screens they match */
-			__( 'These field patterns were NOT saved yet, because they also match WordPress\' own admin screens: %s. While such a pattern is active, saving one of those screens is treated as spam and discarded — and wp-admin never gets a puzzle to solve, so you could not work around it. Either make the pattern specific to your form (add a field only that form sends), or tick "Save these patterns anyway" below and save again. Everything else on this page was saved.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			implode( '; ', $parts )
-		);
-	}
-
-	/**
-	 * The confirmation block, rendered INSIDE the settings form (that is why it does not
-	 * live in the add_settings_error() message: those render above the form, where a
-	 * checkbox would never be submitted).
-	 *
-	 * THE `inline` CLASS IS LOAD-BEARING, not styling. wp-admin/js/common.js relocates
-	 * every `div.notice` that is not `.inline` to just after the first heading in `.wrap`
-	 * — which is OUTSIDE this form. Without it, the checkbox and the hidden hash would be
-	 * moved out of the form by JavaScript and never submitted, and no HTML-scraping test
-	 * could see it: the markup is identical either way, only a real browser moves it.
-	 *
-	 * @param array<string, string[]> $flagged Pattern_Matcher::overbroad_lines() result.
-	 * @return void
-	 */
-	public static function render_confirmation_block( array $flagged ) {
-		if ( empty( $flagged ) ) {
-			return;
-		}
-		$hash = self::confirmation_hash( array_keys( $flagged ) );
-		?>
-		<div class="notice notice-warning inline gdpr-overbroad-warning" id="gdpr-overbroad-warning">
-			<p><strong><?php esc_html_e( 'These field patterns also match WordPress\' own admin screens:', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></strong></p>
-			<ul>
-				<?php foreach ( array_keys( $flagged ) as $line ) : ?>
-					<li><code><?php echo esc_html( $line ); ?></code></li>
-				<?php endforeach; ?>
-			</ul>
-			<p><?php esc_html_e( 'They were kept out of the saved value for now; the text box below still holds what you typed. Make the pattern specific to your form, or confirm that you want it as it is.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
-			<p>
-				<label>
-					<input type="checkbox" name="<?php echo esc_attr( self::ACK_FIELD ); ?>" value="1" />
-					<?php esc_html_e( 'Save these patterns anyway', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
-				</label>
-				<input type="hidden" name="<?php echo esc_attr( self::ACK_HASH_FIELD ); ?>" value="<?php echo esc_attr( $hash ); ?>" />
-			</p>
-		</div>
-		<?php
 	}
 
 	/*

@@ -234,9 +234,10 @@
 	border-radius: 4px;
 }
 
-/* Link from a "No proof of work" verdict to the settings-page self-test. Quiet, but it
- * is the one actionable step from this screen — see Message_Page::render_message(). */
-.gdpr-reason-selftest {
+/* Link from a verdict to the one control that answers it: "No proof of work" → the
+ * self-test, "Known spam value" → releasing the repeat-sender lock. Quiet, but it is the
+ * only actionable step from this screen — see Message_Page::render_message(). */
+.gdpr-reason-action {
 	margin: -4px 0 10px 0;
 	font-size: 12px;
 	line-height: 1.5;

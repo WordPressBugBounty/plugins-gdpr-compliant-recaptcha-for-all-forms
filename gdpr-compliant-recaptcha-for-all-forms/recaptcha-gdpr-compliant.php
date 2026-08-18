@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.4.0
+	 * Version: 5.5.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.4.0';
+	const VERSION = '5.5.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -65,10 +65,19 @@ class RCM_Main {
 	 *
 	 */
 	public static function get_instance() {
+		// Die ausgelagerte Zaehl-Haelfte von Option (Welle 4, PLAN-DATEIGROESSE.md).
+		require_once __DIR__ . '/includes/trait-option-counters.php';
 		require_once __DIR__ . '/includes/class-option.php';
 		require_once __DIR__ . '/includes/class-proof-of-work.php';
+		// Die ausgelagerte Blocklisten-Haelfte von Echo_Values (Welle 4, s.u.).
+		require_once __DIR__ . '/includes/trait-blocklist-values.php';
 		require_once __DIR__ . '/includes/class-echo-values.php';
 		require_once __DIR__ . '/includes/class-echo-store.php';
+		// Die zwei ausgelagerten Haelften von Message_Page (Welle 3, PLAN-DATEIGROESSE.md).
+		// GILT FUER JEDE trait-*.php-Zeile hier: Traits werden zur Kompilierzeit in die
+		// Klasse kopiert, muessen also VOR ihrer Klassendatei stehen — sonst Fatal Error.
+		require_once __DIR__ . '/includes/trait-message-actions.php';
+		require_once __DIR__ . '/includes/trait-message-list.php';
 		require_once __DIR__ . '/includes/class-message-page.php';
 		require_once __DIR__ . '/includes/class-client-ip.php';
 		require_once __DIR__ . '/includes/class-proxy-candidate-ledger.php';
@@ -83,13 +92,27 @@ class RCM_Main {
 		require_once __DIR__ . '/includes/class-credential-cleanup.php';
 		require_once __DIR__ . '/includes/class-blocked-values-migration.php';
 		require_once __DIR__ . '/includes/class-pattern-matcher.php';
+		// Die zwei ausgelagerten Haelften von Overbroad_Pattern_Guard (Welle 4).
+		require_once __DIR__ . '/includes/trait-overbroad-blame.php';
+		require_once __DIR__ . '/includes/trait-overbroad-save-warning.php';
 		require_once __DIR__ . '/includes/class-overbroad-pattern-guard.php';
+		// Die ausgelagerte Persistenz-Haelfte von Stamp (Welle 5b, PLAN-DATEIGROESSE.md).
+		require_once __DIR__ . '/includes/trait-stamp-persistence.php';
 		require_once __DIR__ . '/includes/class-stamp.php';
+		// Die sechs ausgelagerten Sektionen von Settings_Menu (Welle 3, PLAN-DATEIGROESSE.md).
+		require_once __DIR__ . '/includes/trait-settings-defaults.php';
+		require_once __DIR__ . '/includes/trait-settings-options.php';
+		require_once __DIR__ . '/includes/trait-settings-options-storage.php';
+		require_once __DIR__ . '/includes/trait-settings-status.php';
+		require_once __DIR__ . '/includes/trait-settings-save.php';
+		require_once __DIR__ . '/includes/trait-settings-page.php';
 		require_once __DIR__ . '/includes/class-settings-menu.php';
 		require_once __DIR__ . '/includes/class-scope-sync.php';
 		require_once __DIR__ . '/includes/class-scope-add.php';
 		require_once __DIR__ . '/includes/class-agent-access.php';
 		require_once __DIR__ . '/includes/class-ability-probe.php';
+		// Die ausgelagerten Execute-Callbacks von Abilities (Welle 4, PLAN-DATEIGROESSE.md).
+		require_once __DIR__ . '/includes/trait-ability-actions.php';
 		require_once __DIR__ . '/includes/class-abilities.php';
 		require_once __DIR__ . '/includes/class-dashboard-widget.php';
 		require_once __DIR__ . '/includes/class-analysis.php';

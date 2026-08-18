@@ -185,9 +185,22 @@ final class Gibberish_Detector {
 	 * ~zero: a field named "captcha" carries a technical value by definition, and a
 	 * bot writing junk into a foreign captcha field fails that captcha anyway.
 	 *
+	 * `turnstile` was added 2026-08-18 for the same kind of vector (wp.org support case
+	 * vczp): Cloudflare Turnstile posts its response as `cf-turnstile-response`, and
+	 * Cloudflare's branding deliberately avoids the word "captcha" — which makes it the
+	 * ONE widespread provider this list did not already cover, since
+	 * `g-recaptcha-response`, `h-captcha-response` and `frc-captcha-solution` all match
+	 * `captcha`. Measured on an ordinary Contact Form 7 enquiry: the hidden field ALONE
+	 * carried the message over MESSAGE_GIBBERISH_THRESHOLD while the visitor's own text
+	 * scored nothing, and because a gibberish verdict seeds the echo lock
+	 * (Classification_Reason::seeds_echo_values()), the same sender came back as "Known
+	 * spam value" afterwards. The entry is the generic word rather than `cf-turnstile`:
+	 * integrations rename the field (`turnstile_response`), and an exemption only skips
+	 * content scoring for that one field.
+	 *
 	 * @var string[]
 	 */
-	const EXEMPT_FIELD_NAME_SUBSTRINGS = array( 'pass', 'pwd', 'token', 'code', 'coupon', 'captcha' );
+	const EXEMPT_FIELD_NAME_SUBSTRINGS = array( 'pass', 'pwd', 'token', 'code', 'coupon', 'captcha', 'turnstile' );
 
 	/**
 	 * Count "inner" case changes in a token: the number of positions (starting

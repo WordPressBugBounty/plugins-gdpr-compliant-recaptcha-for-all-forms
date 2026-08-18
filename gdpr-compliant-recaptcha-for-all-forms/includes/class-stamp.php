@@ -7,7 +7,10 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 // Detail-Doku (Methodenebene) — als einzige Klasse ueber drei Bereiche verteilt:
 //   handbuch/pow.md        Token-Ausgabe, check_stamp, check_request, get_client_ip
 //   handbuch/gate.md       Konstruktor-Gate, run(), Login-Pfad, Signatur-Matcher
-//   handbuch/detection.md  check_submit(), save_message(), Fail2Ban
+//   handbuch/detection.md  check_submit() samt seiner sechs Klassifikationsstufen
+// Die PERSISTENZ-Haelfte von detection.md (save_message(), save_for_analysis(),
+// Fail2Ban) steht seit Welle 5b in trait-stamp-persistence.php — dieselbe Klasse,
+// zweite Datei; die Begruendung des Schnitts steht in deren Kopf-Docblock.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -17,6 +20,14 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  *
  */
 class Stamp {
+
+	// Die PERSISTENZ-Haelfte dieser Klasse steht seit Dateigroessen-Welle 5b
+	// (PLAN-DATEIGROESSE.md) in trait-stamp-persistence.php: save_for_analysis(),
+	// save_message() samt Feldbaum-Abflachung, die Analyse-Urteil-Upserts und
+	// log_fail2ban_event(). Dort steht auch, warum ein Trait und keine zweite Klasse.
+	// Ein Trait wird zur Kompilierzeit hineinkopiert — $this->save_message() & Co.
+	// bleiben unveraendert Methoden von Stamp, mit denselben Eigenschaften.
+	use Stamp_Persistence;
 
 	/**
 	 * Maximum submissions a single solved PoW token may pay for (AP3 submission-
@@ -449,54 +460,6 @@ class Stamp {
 		return false;
 	}
 
-	private function save_for_analysis() {
-		$ajax      = defined( 'DOING_AJAX' ) && DOING_AJAX;
-		$action    = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
-		$client_ip = $this->get_client_ip();
-
-		// The request shapes the analysis mode must never record: the plugin's OWN
-		// settings save. Hard-coded on purpose — this is not an admin-configurable list.
-		$excluded_patterns_for_analysis = array(
-			array(
-				'page'        => 'gdpr_pow_options',
-				'action'      => 'update',
-				'option_page' => 'gdpr_pow_header_section',
-			),
-		);
-
-		// Compared with Pattern_Matcher::matches(), i.e. the SAME field-pattern comparison
-		// the live gate uses. Until 2026-08-12 this one line called a second, similar
-		// implementation of its own (Option::compare_json_objects(), whose only caller it
-		// was). The two agreed on the hard-coded signature above — three non-empty strings,
-		// no null, no nesting, verified branch by branch including the empty-request,
-		// '0'/false/null-value and array-value edges — and diverged everywhere else
-		// (null-as-existence, stdClass nesting, count() on an object). That latent
-		// divergence is exactly the failure class Pattern_Matcher was extracted to make
-		// constructively impossible, so the second implementation was deleted rather than
-		// documented. Behaviour pinned in tests/unit/StampAnalysisExclusionTest.php.
-		$pattern_listed = false;
-		foreach ( $excluded_patterns_for_analysis as $existing_pattern ) {
-			if ( $existing_pattern ) {
-				$pattern_listed = Pattern_Matcher::matches( $existing_pattern, $this->whole_request_data );
-				if ( $pattern_listed ) {
-					break;
-				}
-			}
-		}
-
-		$excluded_actions_for_analysis = array( 'render_messages', 'render_message', 'delete_message', 'heartbeat', 'save_pattern', 'check_stamp', 'save_list_parameter', 'change_message_type' );
-		if ( isset( $_SERVER['REQUEST_METHOD'] )
-			&& 'POST' === $_SERVER['REQUEST_METHOD']
-			&& get_option( Option::POW_ANALYSIS_MODE )
-			&& (
-					( ! $ajax && ! $pattern_listed )
-					|| ( $ajax && ! in_array( $action, $excluded_actions_for_analysis, true ) )
-			)
-		) {
-			$this->analysis_row_id = $this->save_message( $this->whole_request_data, $action, $ajax, 4, $this->hash_values( $client_ip ) );
-		}
-	}
-
 	/**
 	 * Remove the plugin's own injected fields (PLUGIN_FIELDS) from a captured
 	 * submission. Pure and static — unit-tested in tests/unit/StampStripPluginFieldsTest.php.
@@ -750,27 +713,62 @@ class Stamp {
 	}
 
 	/**
-	 * Whether any user-content field of $fields matches one of the operator's blocked
-	 * values (POW_BLOCKED_VALUES, normalized trim + lowercase). The value parsing and the
-	 * field walk are the pure Echo_Values class; this method is only the get_option() glue.
-	 *
-	 * The four match forms (exact field value, extracted email address, registrable domain
-	 * of an embedded URL, and "@sender-domain") are unchanged and live entirely in
-	 * Echo_Values::matches_wildcard_values() — only the SOURCE moved out of
-	 * POW_PARAMETER_PATTERN, where the same values used to sit as {"*":"value"} lines
-	 * (PLAN-BLOCKLIST-TRENNUNG.md). A hit still both makes the form monitored
-	 * (check_existing_patterns()) and classifies the submission as spam under the
-	 * unchanged reason code Classification_Reason::CODE_WILDCARD.
+	 * Whether any part of $fields matches the operator's blocklist (POW_BLOCKED_VALUES) —
+	 * the instance-side name the two call sites in this class use. The evaluation itself is
+	 * blocklist_matches() below, shared with the diagnosis path; the four match forms
+	 * (exact field value, extracted email address, registrable domain of an embedded URL,
+	 * "@sender-domain") live entirely in the pure Echo_Values class and are not restated
+	 * anywhere.
 	 *
 	 * @param mixed $fields Field map to test.
 	 * @return bool
 	 */
 	private function matches_blocked_values( $fields ) {
-		$blocked_values = $this->blocked_values();
-		if ( empty( $blocked_values ) ) {
+		return self::blocklist_matches( $fields );
+	}
+
+	/**
+	 * THE blocklist evaluation — "does POW_BLOCKED_VALUES hit this submission?" — in one
+	 * place, for the live classification AND for the agent-facing diagnosis
+	 * (Abilities::wildcard_hit()). Its own docblock states the requirement: a diagnostic
+	 * that judged differently from production would be worse than none. Sharing the
+	 * function is how that stops being a matter of discipline.
+	 *
+	 * Two line shapes, one option, both read by Echo_Values::partition_blocklist_lines():
+	 * - PLAIN VALUES (the short form, and the folded {"*":"value"} spelling) go through
+	 *   Echo_Values::matches_wildcard_values() exactly as they always have.
+	 * - RULES (a line written as a JSON object, e.g. {"_wpcf7":"123","your-email":
+	 *   "@gmail.com"}) go through Pattern_Matcher::line_matches_blocked(), i.e. through the
+	 *   plugin's ONE field traversal with the four blocked-value comparisons at its value
+	 *   positions. Unreadable lines match nothing; the settings page names them at save
+	 *   time.
+	 *
+	 * A hit still both makes the form monitored (check_existing_patterns()) and classifies
+	 * the submission as spam under the unchanged reason code
+	 * Classification_Reason::CODE_WILDCARD.
+	 *
+	 * @param mixed $fields Field map to test.
+	 * @return bool
+	 */
+	public static function blocklist_matches( $fields ) {
+		$option = (string) get_option( Option::POW_BLOCKED_VALUES );
+		if ( '' === trim( $option ) ) {
 			return false;
 		}
-		return Echo_Values::matches_wildcard_values( $fields, $blocked_values, Echo_Store::site_domains() );
+		$lines     = preg_split( '/\r\n|\n|\r/', $option, -1, PREG_SPLIT_NO_EMPTY );
+		$partition = Echo_Values::partition_blocklist_lines( is_array( $lines ) ? $lines : array() );
+
+		$own_domains = Echo_Store::site_domains();
+		if ( ! empty( $partition['values'] )
+			&& Echo_Values::matches_wildcard_values( $fields, $partition['values'], $own_domains ) ) {
+			return true;
+		}
+		foreach ( $partition['rules'] as $rule ) {
+			if ( Pattern_Matcher::line_matches_blocked( $rule, $fields, $own_domains ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -782,10 +780,14 @@ class Stamp {
 	 * migration. Both return the same normalized value list, so nothing downstream had to
 	 * change when the source moved.
 	 *
-	 * Shared by matches_blocked_values() and is_exempt_login_submission() on purpose:
-	 * the exemption has to decide WHICH addresses caused the block, so it must look at the
-	 * exact same value set the classification looked at. Reading the option twice is free
-	 * (WordPress caches it for the request); a second parsing site would not be.
+	 * PLAIN VALUES ONLY, and that is a decision rather than a leftover. The login exemption
+	 * (is_exempt_login_submission()) is the one caller, and it asks which ADDRESSES caused a
+	 * block; a field-bound RULE has no place in that question, so a rule-caused block on the
+	 * login screen is never exempted — fail CLOSED, like everything else on that path. The
+	 * long spelling {"*":"value"} is folded into the values by
+	 * Echo_Values::partition_blocklist_lines(), so it is exempted exactly like the short
+	 * form it is a spelling of; only genuinely field- or form-bound rules fall outside, and
+	 * those reach a login POST only if the operator bound them to login fields on purpose.
 	 *
 	 * @return string[] Normalized blocked values, empty when the option holds none.
 	 */
@@ -1022,30 +1024,6 @@ class Stamp {
 		return $this->check_submit( null, $gdpr_fields, 'hook' );
 	}
 
-	/** Resolves a '->'-separated path into a nested array/object and returns a reference to the target value
-	 *
-	 */
-	private function &access_object_or_array( &$obj, $path ) {
-		$path_segments  = explode( '->', $path );
-		$current_object = &$obj;
-		foreach ( $path_segments as $segment ) {
-			// If the segment is a numeric key, convert it to an integer
-			$segment = is_numeric( $segment ) ? (int) $segment : $segment;
-
-			if ( is_array( $current_object ) && array_key_exists( $segment, $current_object ) ) {
-				// If the segment is a valid key in the array, move to the next level
-				$current_object = &$current_object[ $segment ];
-			} elseif ( is_object( $current_object ) && property_exists( $current_object, $segment ) ) {
-				// If the segment is a valid property in the object, move to the next level
-				$current_object = &$current_object->$segment;
-			} else {
-				return null;
-			}
-		}
-		// Modify the value by adding the prefix
-		return $current_object;
-	}
-
 	/** Check whether a valid stamp and nonce are given
 	 *
 	 * $origin names the path this submission came in on; only pre_process_login()
@@ -1072,222 +1050,29 @@ class Stamp {
 		$this->clean_scoring         = null;
 		$this->pow_probe             = null;
 
-		// Process the spam check
-		if ( ! ( $this->check_request() ) ) {
-			$this->print_debug_information( 'Classified as spam' );
-			$this->plugin_spam = true;
-			// Promote the NO_POW_* reason check_request() recorded for the path it took.
-			// It only counts as the classification reason once check_request() actually
-			// returned false — a failing path whose IP fallback still succeeded never
-			// gets here. This is the first check in the function, so it always wins.
-			$this->classification_reason = $this->pow_fail_reason;
-			// …and record WHAT THE TABLE HELD while deciding that. The reason names the
-			// path that failed; this names the evidence. Only here, i.e. only on an
-			// actually-failed check, so the healthy path never runs these queries.
-			$this->pow_probe = $this->measure_pow_probe( $this->pow_token );
-			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
-			// genuine PoW/token failures, never for the simulation mode below.
-			$this->increment_spam_counter();
-			// Health counter for the #1 support case ("everything is spam"), counted
-			// HERE and not where check_request() sets pow_fail_reason: that method
-			// records a reason on every failing path it takes, including ones whose IP
-			// fallback then succeeds — those requests came through, and counting them
-			// would inflate the number that is supposed to mean "submissions that found
-			// no stamp row". This line is the promotion point, so it counts exactly the
-			// submissions that were actually classified no_pow.
-			//
-			// WHY A SECOND COUNTER AT ALL. The existing one
-			// (Option::count_no_pow_reasons_since_hours()) reads `_gdpr_reason` detail
-			// rows, which only exist when save_message() ran — and for spam that is
-			// gated by POW_SAVE_SPAM. On a site with spam storage off it therefore
-			// reads 0 forever, and 0 reads like "healthy" precisely where the operator
-			// can see nothing else either. This one is storage-independent.
-			Option::increment_no_pow_health_counter();
-		}
-
-		// Process the spam simulation
-		if ( get_option( Option::POW_SIMULATE_SPAM ) && 'wp_authenticate_user' !== $hook_name ) {
-			$this->print_debug_information( 'Spam simulated' );
-			$this->plugin_spam = true;
-			// Unlike every check below, this block has NO ! $this->plugin_spam guard —
-			// deliberately, so simulation also catches requests check_request() passed.
-			// The REASON must still follow first-cause-wins, hence the explicit null
-			// check here: a submission that failed PoW AND runs in simulation mode keeps
-			// its no_pow:* reason.
-			if ( null === $this->classification_reason ) {
-				$this->classification_reason = Classification_Reason::CODE_SIMULATION;
-			}
-		}
+		// The classification chain. Its ORDER IS THE SEMANTICS ("first cause wins"): each
+		// stage below records a reason only if no earlier one did, so moving a stage would
+		// change the recorded reason without changing the verdict — which no behavioural
+		// test can see. Pinned in tests/unit/StampClassificationOrderTest.php.
+		$this->classify_missing_proof_of_work();
+		$this->classify_simulated_spam( $hook_name );
 
 		// Value-based deterministic spam signals (BACKLOG "Wertbasierte Spam-Pattern
 		// über alle Formulare"), evaluated BEFORE gibberish so they take precedence
 		// as the more deliberate, value-based classification. Both run only on
 		// an otherwise-clean submission and only over user-content fields (Echo_Values
 		// skips technical keys — invariant 1).
-		//
-		// (1) Auto-echo lock: an incoming submission whose core values (sender email,
-		//     payload domain, phone, long-text hash) match a value auto-recorded from
-		//     a recent spam-folder message — catches the same sender/domain on ANY
-		//     form / ANY IP within the TTL window (would have caught field datum #2).
-		//     Cheap: one get_transient() + hash lookups.
 		// strip_plugin_fields() first: gdpr_pow_token (92 chars → always a text hash)
 		// and hashPWFields (constant per form → would self-match every submission)
 		// are the plugin's OWN fields, not user content, and must never seed or match
 		// an echo/wildcard value (they are not caught by Echo_Values' technical-key
 		// rule, which only knows generic key patterns).
 		$content_fields = self::strip_plugin_fields( $gdpr_fields );
-		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields ) ) {
-			$this->print_debug_information( 'Echo value match' );
-			$this->plugin_spam           = true;
-			$this->classification_reason = Classification_Reason::CODE_ECHO_LOCK;
-			// Additively feed the under-attack wave counter (same bucket as PoW/token
-			// fails and gibberish), never in simulation mode. This does NOT change that
-			// echo/wildcard act from the first attempt on their own (POW_BLOCK applies,
-			// single message sorted immediately) — the feed only widens the wave-
-			// detection signal so a determined echo/wildcard spammer also trips
-			// is_under_attack(). Wildcard hits are the same deterministic value-based
-			// class as echo, so both feed the counter.
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
-				$this->increment_spam_counter();
-			}
-		}
+		$this->classify_echo_lock( $gdpr_fields, $content_fields );
+		$this->classify_blocked_value( $gdpr_fields, $content_fields, $origin );
 
-		// (2) Blocked value: a user-content field matches one of the operator's
-		//     POW_BLOCKED_VALUES lines. Reason code CODE_WILDCARD ('wildcard') is
-		//     UNCHANGED — it is stored as `_gdpr_reason` in live databases and is a
-		//     corpus label; only its source option and its UI label moved.
-		//     The trailing exemption keeps a REGISTERED user signing in on wp-login.php
-		//     out of this classification, so a sender-domain entry ("@gmail.com")
-		//     cannot lock the operator out of his own site. It applies only when EVERY
-		//     address that actually triggered the block belongs to a registered user —
-		//     appending a known registered address to an otherwise blocked login used to
-		//     buy the exemption, measured. That, why it is NOT "registered addresses are
-		//     exempt everywhere", and why the anchor is the server-set login screen rather
-		//     than anything read out of the request, is spelled out at
-		//     is_exempt_login_submission().
-		//     ORDER IS LOAD-BEARING, do not reorder these terms: the exemption stands
-		//     BEHIND matches_blocked_values() so that &&'s short-circuit keeps
-		//     Echo_Store::user_email_hashes() (a get_users() query) off every ordinary
-		//     unauthenticated POST — running it there would be a fresh DoS vector.
-		//     The echo branch (1) above deliberately carries NO such term: it is already
-		//     safe through its own exclude set, and adding one there would obscure that.
-		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_blocked_values( $content_fields ) && ! $this->is_exempt_login_submission( $origin, $content_fields ) ) {
-			$this->print_debug_information( 'Blocked value match' );
-			$this->plugin_spam           = true;
-			$this->classification_reason = Classification_Reason::CODE_WILDCARD;
-			// Feed the wave counter too — same deterministic value class as the echo
-			// hit above (see that comment). Additive only; not in simulation mode.
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
-				$this->increment_spam_counter();
-			}
-		}
-
-		// Gibberish detection (BACKLOG "Gibberish-Erkennung: Binnen-Case-Wechsel-Regel"):
-		// only evaluated when the submission passed every check above and would
-		// otherwise be clean ($this->plugin_spam still false here) — a genuine
-		// PoW/token failure or the simulation above already routed the message
-		// through $this->plugin_spam. A hit is treated EXACTLY like any other spam
-		// classification from here on (same rgm_type-2 save gated by POW_SAVE_SPAM/
-		// POW_FLAG_SAVE, same POW_FLAG_SPAM field-flagging, same Fail2Ban log line,
-		// same POW_BLOCK gate — reusing $this->plugin_spam instead of a parallel
-		// one-off save call also avoids double-saving the message when
-		// POW_SAVE_CLEAN is on). An earlier revision exempted gibberish-only hits
-		// from POW_BLOCK ("sort, never block"); dropped by user decision
-		// 2026-07-17: a spam classification must always interrupt delivery to the
-		// original target — the spam folder is an analysis/rescue archive, not a
-		// delivery path, and the saved copy (written before the block gate) keeps
-		// false positives rescuable while the block's error message tells a
-		// genuine sender how to reach the site instead.
-		//
-		// $quarantine_only_spam marks the under-attack quarantine below, which —
-		// unlike every other classification — is neither counter-fed nor
-		// echo-recorded nor fail2ban-logged (see the quarantine block below and the
-		// guards on Echo_Store::record() and the fail2ban block).
-		//
-		// analyze_message() rather than its is_gibberish_message() wrapper: the verdict
-		// is identical (the wrapper just returns ['gibberish']), but the same single
-		// scan also yields the scoring components for the reason string — calling both
-		// would score every submission twice.
-		$quarantine_only_spam = false;
-		$analysis             = array(
-			'gibberish' => false,
-			'letters'   => 0,
-			'alnum'     => 0,
-			'solo'      => false,
-			'strong'    => false,
-			'scoreable' => 0,
-		);
-		if ( $gdpr_fields && ! $this->plugin_spam ) {
-			$analysis = Gibberish_Detector::analyze_message(
-				self::strip_plugin_fields( $gdpr_fields ),
-				self::gibberish_exempt_field_names( $gdpr_fields )
-			);
-		}
-		if ( $analysis['gibberish'] ) {
-			$this->print_debug_information( 'Gibberish detected' );
-			$this->plugin_spam           = true;
-			$this->classification_reason = Classification_Reason::gibberish(
-				$analysis['letters'],
-				$analysis['alnum'],
-				$analysis['solo'],
-				$analysis['strong']
-			);
-			// Feed the same under-attack wave counter as a real PoW/token failure —
-			// but only in the real (non-simulated) mode, matching the existing
-			// increment_spam_counter() call above. (POW_SIMULATE_SPAM can be on while
-			// $this->plugin_spam is still false here for the wp_authenticate_user hook
-			// the simulation branch above deliberately excludes, so this check is not
-			// redundant with the "still false" guard above.)
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
-				$this->increment_spam_counter();
-			}
-		}
-
-		// Under-attack quarantine (BACKLOG "Under-Attack-Eskalationsstufe"): opt-in
-		// second stage of the under-attack response, evaluated LAST so it only ever
-		// fires on a submission that passed every individual check above
-		// ($this->plugin_spam still false). While a spam wave is in progress, such
-		// grey-zone submissions are treated like any other spam classification — the
-		// NORMAL spam path applies, including POW_BLOCK ("under-attack mode with
-		// teeth": during the wave, grey-zone messages are held for review instead of
-		// being delivered as clean; a sort-only copy would leave delivery untouched
-		// and give the mode no teeth at all). Deterministic and lossless: nothing is
-		// discarded, the message lands in the spam folder and the admin rehabilitates
-		// genuine ones from there.
-		//
-		// The gate uses the quarantine's OWN opt-in (POW_UNDER_ATTACK_QUARANTINE) plus
-		// the raw wave DETECTION (is_under_attack()). It deliberately does NOT also
-		// require POW_UNDER_ATTACK_MODE: that option only gates the difficulty *boost*
-		// in get_stamp(); the wave-detection primitive is independent, and the
-		// quarantine's dedicated opt-in is already the admin's explicit choice — an
-		// admin wanting quarantine without the boost (or vice versa) must be able to
-		// have either.
-		//
-		// THREE hard exceptions vs. every other classification (critical, all via
-		// $quarantine_only_spam):
-		//  1. NO increment_spam_counter() — a grey-zone submission counted as spam
-		//     during the wave would keep the wave alive by itself (every clean
-		//     submission would re-trip is_under_attack() → self-reinforcing endless
-		//     escalation). Simply never calling it here IS exception #1.
-		//  2. NO Echo_Store::record() — grey-zone submissions are presumed innocent;
-		//     echoing their core values would deterministically spam-classify a
-		//     legitimate sender for the full 36h TTL, even AFTER the wave ends
-		//     (cascading false positive). Enforced via the Echo_Store::record() guard
-		//     below.
-		//  3. NO fail2ban logging — a genuine visitor submitting during a wave must
-		//     not have their IP fed to an out-of-band ban tool (see the fail2ban
-		//     guard below).
-		if ( $gdpr_fields && self::should_quarantine(
-			(bool) get_option( Option::POW_UNDER_ATTACK_QUARANTINE ),
-			self::is_under_attack(),
-			$this->plugin_spam,
-			(bool) get_option( Option::POW_SIMULATE_SPAM )
-		) ) {
-			$this->print_debug_information( 'Under-attack quarantine' );
-			$this->plugin_spam           = true;
-			$quarantine_only_spam        = true;
-			$this->classification_reason = Classification_Reason::CODE_QUARANTINE;
-		}
+		$analysis             = $this->classify_gibberish( $gdpr_fields );
+		$quarantine_only_spam = $this->classify_under_attack_quarantine( $gdpr_fields );
 
 		// WHY this submission was NOT flagged — the counterpart of the reason above, and
 		// the one question the reason taxonomy cannot answer (absence of a reason means
@@ -1544,442 +1329,295 @@ class Stamp {
 		return $wp;
 	}
 
-	/** Transforms an array into a string-representation */
-
-	private function log_fail2ban_event( $message, $is_login_attempt = false ) {
-		// Get the configured log directory path
-		$log_path = get_option( Option::POW_FAIL_2_BAN_PATH );
-
-		// If no path is provided, simply do nothing (no error logging)
-		if ( empty( $log_path ) ) {
-			return;
-		}
-
-		// Check if the directory exists; if not, attempt to create it
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- fail2ban log dir on an admin-configured path; direct mkdir is intended, WP_Filesystem adds nothing here.
-		if ( ! is_dir( $log_path ) && ! mkdir( $log_path, 0755, true ) ) {
-			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional operator-facing diagnostic when the fail2ban path is misconfigured.
-			error_log( 'Fail2Ban Log Path does not exist and could not be created: ' . $log_path );
-			return;
-		}
-
-		// Ensure the directory is writable before proceeding
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- writability probe on the admin-configured fail2ban log path; direct check is intended.
-		if ( ! is_writable( $log_path ) ) {
-			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional operator-facing diagnostic when the fail2ban path is misconfigured.
-			error_log( 'Fail2Ban Log Path is not writable: ' . $log_path );
-			return;
-		}
-
-		// Define log file paths
-		$log_files = array(
-			'spam' => $log_path . '/spam.log',
-			'auth' => $log_path . '/auth.log',
-		);
-
-		// Generate timestamp in ISO 8601 format (UTC)
-		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date -- fail2ban log timestamp; behaviour deliberately preserved (existing logs/filters parse this exact server-local format), so no gmdate() switch.
-		$timestamp     = date( 'Y-m-d\TH:i:s\Z' );
-		$hostname      = isset( $_SERVER['SERVER_NAME'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_NAME'] ) ) : 'unknown_host'; // Get the server hostname
-		$priority_spam = '<42>'; // Priority for spam logs
-		$priority_auth = '<34>'; // Priority for authentication logs
-
-		// Defence in depth: fail2ban parses one event per line, so nothing interpolated
-		// into a line may carry CR/LF or other control characters (log-injection → forged
-		// ban lines). Callers already sanitise the username, but normalise here as well,
-		// and restrict the hostname (Host header on a misconfigured vhost) to safe chars.
-		$message  = preg_replace( '/[\x00-\x1F\x7F]+/', ' ', (string) $message );
-		$hostname = preg_replace( '/[^A-Za-z0-9.\-:_]/', '', $hostname );
-		if ( '' === (string) $hostname ) {
-			$hostname = 'unknown_host';
-		}
-
-		// Create the spam log entry (always logged)
-		$spam_log_entry = sprintf( "%s%s %s spam: %s\n", $priority_spam, $timestamp, $hostname, $message );
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- fail2ban needs an atomic append (FILE_APPEND | LOCK_EX) to a plain log file; WP_Filesystem has no append+lock equivalent.
-		file_put_contents( $log_files['spam'], $spam_log_entry, FILE_APPEND | LOCK_EX );
-
-		// If the request is a WordPress login attempt, also write to the authentication log
-		if ( $is_login_attempt ) {
-			$auth_log_entry = sprintf( "%s%s %s auth: %s\n", $priority_auth, $timestamp, $hostname, $message );
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- fail2ban needs an atomic append (FILE_APPEND | LOCK_EX) to a plain log file; WP_Filesystem has no append+lock equivalent.
-			file_put_contents( $log_files['auth'], $auth_log_entry, FILE_APPEND | LOCK_EX );
-		}
-	}
-
-	/** Transforms an array into a string-representation
+	/**
+	 * Stage 1 of the classification chain — promotes a failed check_request() to the
+	 * spam verdict. Deliberately the FIRST stage, so its no_pow:* reason always wins.
 	 *
-	 * Returns array( $values, $query, $title, $first ). The marker-driven credential
-	 * handling that used to be threaded through here (three extra parameters and a
-	 * fifth return element) is gone: save_message() redacts credential values up
-	 * front, so nothing has to be dropped while flattening. The POW_SKIP_FIELDS
-	 * logic ($pre_forbidden_fields) is unrelated and unchanged — it is an explicit
-	 * admin choice to not store a field at all.
+	 * Mutates $this->plugin_spam, $this->classification_reason and $this->pow_probe, and
+	 * feeds both counters (wave counter plus the storage-independent health counter).
+	 *
+	 * @phpstan-impure
+	 * @return void
 	 */
-	private function generate_paths( $my_id, $data, $current_path, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title ) {
-		$values = array();
-
-		foreach ( $data as $key => $value ) {
-			$path = $current_path . ( $current_path ? '->' : '' ) . $key;
-			if ( is_array( $value ) || is_object( $value ) ) {
-				// Recurse into nested arrays/objects
-				$nested_values = $this->generate_paths( $my_id, $value, $path, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title );
-				// Merge the nested values with the current values array
-				$values = array_merge( $values, $nested_values[0] );
-				$query  = $nested_values[1];
-				$title  = $nested_values[2];
-				$first  = $nested_values[3];
-			} else {
-				$skipped_field = false;
-				if ( count( $pre_forbidden_fields ) ) {
-					$skipped_field = $this->check_skipped_fields( $pre_forbidden_fields, $path, $referrer_without_protocol );
-				}
-				if ( ! $skipped_field ) {
-					if ( $first ) {
-						$first = false;
-					} else {
-						$query .= ',';
-					}
-					$query .= '(%d, %s, %s, %d)';
-					if ( isset( $custom_titles[ htmlentities( $path ) ] ) ) {
-						$title .= $value . ' | ';
-					}
-					// Add the path and the corresponding value to the values array alternately.
-					// rgm_posted stays false for a redacted value: it would otherwise become a
-					// clickable pattern-/block-candidate on the replacement literal, and such
-					// a pattern would match every future message carrying a redacted field.
-					$values[] = $my_id;
-					$values[] = $path;
-					$values[] = $value;
-					$values[] = Credential_Fields::REDACTED_VALUE !== $value;
-				}
-			}
+	private function classify_missing_proof_of_work() {
+		// Process the spam check
+		if ( ! ( $this->check_request() ) ) {
+			$this->print_debug_information( 'Classified as spam' );
+			$this->plugin_spam = true;
+			// Promote the NO_POW_* reason check_request() recorded for the path it took.
+			// It only counts as the classification reason once check_request() actually
+			// returned false — a failing path whose IP fallback still succeeded never
+			// gets here. This is the first check in the function, so it always wins.
+			$this->classification_reason = $this->pow_fail_reason;
+			// …and record WHAT THE TABLE HELD while deciding that. The reason names the
+			// path that failed; this names the evidence. Only here, i.e. only on an
+			// actually-failed check, so the healthy path never runs these queries.
+			$this->pow_probe = $this->measure_pow_probe( $this->pow_token );
+			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
+			// genuine PoW/token failures, never for the simulation mode below.
+			$this->increment_spam_counter();
+			// Health counter for the #1 support case ("everything is spam"), counted
+			// HERE and not where check_request() sets pow_fail_reason: that method
+			// records a reason on every failing path it takes, including ones whose IP
+			// fallback then succeeds — those requests came through, and counting them
+			// would inflate the number that is supposed to mean "submissions that found
+			// no stamp row". This line is the promotion point, so it counts exactly the
+			// submissions that were actually classified no_pow.
+			//
+			// WHY A SECOND COUNTER AT ALL. The existing one
+			// (Option::count_no_pow_reasons_since_hours()) reads `_gdpr_reason` detail
+			// rows, which only exist when save_message() ran — and for spam that is
+			// gated by POW_SAVE_SPAM. On a site with spam storage off it therefore
+			// reads 0 forever, and 0 reads like "healthy" precisely where the operator
+			// can see nothing else either. This one is storage-independent.
+			Option::increment_no_pow_health_counter();
 		}
-
-		return array( $values, $query, $title, $first );
 	}
 
-	/** Check whether a fields shall be skipped */
-	private function check_skipped_fields( $pre_forbidden_fields, $field, $referrer_without_protocol ) {
-		if ( count( $pre_forbidden_fields ) ) {
-			foreach ( $pre_forbidden_fields as $key => $value ) {
-				if ( strpos( $referrer_without_protocol, $value['site'] ) && htmlentities( $field ) === $value['field'] ) {
-					return true;
-				}
+	/**
+	 * Stage 2 — the simulation switch (POW_SIMULATE_SPAM). The ONE stage without a
+	 * `! $this->plugin_spam` guard, so it also catches requests check_request() passed.
+	 *
+	 * Mutates $this->plugin_spam unconditionally, and $this->classification_reason only
+	 * while no earlier stage set one. Feeds no counter.
+	 *
+	 * @phpstan-impure
+	 * @param string $hook_name Current filter, so the login hook stays excluded.
+	 * @return void
+	 */
+	private function classify_simulated_spam( $hook_name ) {
+		// Process the spam simulation
+		if ( get_option( Option::POW_SIMULATE_SPAM ) && 'wp_authenticate_user' !== $hook_name ) {
+			$this->print_debug_information( 'Spam simulated' );
+			$this->plugin_spam = true;
+			// Unlike every check below, this block has NO ! $this->plugin_spam guard —
+			// deliberately, so simulation also catches requests check_request() passed.
+			// The REASON must still follow first-cause-wins, hence the explicit null
+			// check here: a submission that failed PoW AND runs in simulation mode keeps
+			// its no_pow:* reason.
+			if ( null === $this->classification_reason ) {
+				$this->classification_reason = Classification_Reason::CODE_SIMULATION;
 			}
 		}
+	}
+
+	/**
+	 * Stage 3 — auto-echo lock: does this submission repeat a core value remembered from
+	 * a recent spam message? First of the two value-based signals, behind both
+	 * unconditional stages and ahead of the blocked-value check.
+	 *
+	 * Mutates $this->plugin_spam, $this->classification_reason and the wave counter.
+	 *
+	 * @phpstan-impure
+	 * @param mixed $gdpr_fields    Submitted fields, raw.
+	 * @param mixed $content_fields The same fields minus the plugin's own.
+	 * @return void
+	 */
+	private function classify_echo_lock( $gdpr_fields, $content_fields ) {
+		// (1) Auto-echo lock: an incoming submission whose core values (sender email,
+		//     payload domain, phone, long-text hash) match a value auto-recorded from
+		//     a recent spam-folder message — catches the same sender/domain on ANY
+		//     form / ANY IP within the TTL window (would have caught field datum #2).
+		//     Cheap: one get_transient() + hash lookups.
+		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields ) ) {
+			$this->print_debug_information( 'Echo value match' );
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::CODE_ECHO_LOCK;
+			// Additively feed the under-attack wave counter (same bucket as PoW/token
+			// fails and gibberish), never in simulation mode. This does NOT change that
+			// echo/wildcard act from the first attempt on their own (POW_BLOCK applies,
+			// single message sorted immediately) — the feed only widens the wave-
+			// detection signal so a determined echo/wildcard spammer also trips
+			// is_under_attack(). Wildcard hits are the same deterministic value-based
+			// class as echo, so both feed the counter.
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+	}
+
+	/**
+	 * Stage 4 — blocked value: does a user-content field match one of the operator's
+	 * POW_BLOCKED_VALUES lines? Second value-based signal, still ahead of gibberish.
+	 *
+	 * Mutates $this->plugin_spam, $this->classification_reason and the wave counter.
+	 *
+	 * @phpstan-impure
+	 * @param mixed  $gdpr_fields    Submitted fields, raw.
+	 * @param mixed  $content_fields The same fields minus the plugin's own.
+	 * @param string $origin         Submission path, 'login' only from pre_process_login().
+	 * @return void
+	 */
+	private function classify_blocked_value( $gdpr_fields, $content_fields, $origin ) {
+		// (2) Blocked value: a user-content field matches one of the operator's
+		//     POW_BLOCKED_VALUES lines. Reason code CODE_WILDCARD ('wildcard') is
+		//     UNCHANGED — it is stored as `_gdpr_reason` in live databases and is a
+		//     corpus label; only its source option and its UI label moved.
+		//     The trailing exemption keeps a REGISTERED user signing in on wp-login.php
+		//     out of this classification, so a sender-domain entry ("@gmail.com")
+		//     cannot lock the operator out of his own site. It applies only when EVERY
+		//     address that actually triggered the block belongs to a registered user —
+		//     appending a known registered address to an otherwise blocked login used to
+		//     buy the exemption, measured. That, why it is NOT "registered addresses are
+		//     exempt everywhere", and why the anchor is the server-set login screen rather
+		//     than anything read out of the request, is spelled out at
+		//     is_exempt_login_submission().
+		//     ORDER IS LOAD-BEARING, do not reorder these terms: the exemption stands
+		//     BEHIND matches_blocked_values() so that &&'s short-circuit keeps
+		//     Echo_Store::user_email_hashes() (a get_users() query) off every ordinary
+		//     unauthenticated POST — running it there would be a fresh DoS vector.
+		//     The echo branch (1) above deliberately carries NO such term: it is already
+		//     safe through its own exclude set, and adding one there would obscure that.
+		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_blocked_values( $content_fields ) && ! $this->is_exempt_login_submission( $origin, $content_fields ) ) {
+			$this->print_debug_information( 'Blocked value match' );
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::CODE_WILDCARD;
+			// Feed the wave counter too — same deterministic value class as the echo
+			// hit above (see that comment). Additive only; not in simulation mode.
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+	}
+
+	/**
+	 * Stage 5 — gibberish detection, the content heuristic. Runs behind both value-based
+	 * signals so their more deliberate verdict takes precedence.
+	 *
+	 * Mutates $this->plugin_spam, $this->classification_reason and the wave counter, and
+	 * RETURNS the single scan result — the clean-scoring line is built from the very same
+	 * components, and handing them back is what keeps it at one scan per submission.
+	 *
+	 * @phpstan-impure
+	 * @param mixed $gdpr_fields Submitted fields, raw.
+	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool, strong: bool,
+	 *         scoreable: int} The one scan result, for the clean-scoring line.
+	 */
+	private function classify_gibberish( $gdpr_fields ) {
+		// Gibberish detection (BACKLOG "Gibberish-Erkennung: Binnen-Case-Wechsel-Regel"):
+		// only evaluated when the submission passed every check above and would
+		// otherwise be clean ($this->plugin_spam still false here) — a genuine
+		// PoW/token failure or the simulation above already routed the message
+		// through $this->plugin_spam. A hit is treated EXACTLY like any other spam
+		// classification from here on (same rgm_type-2 save gated by POW_SAVE_SPAM/
+		// POW_FLAG_SAVE, same POW_FLAG_SPAM field-flagging, same Fail2Ban log line,
+		// same POW_BLOCK gate — reusing $this->plugin_spam instead of a parallel
+		// one-off save call also avoids double-saving the message when
+		// POW_SAVE_CLEAN is on). An earlier revision exempted gibberish-only hits
+		// from POW_BLOCK ("sort, never block"); dropped by user decision
+		// 2026-07-17: a spam classification must always interrupt delivery to the
+		// original target — the spam folder is an analysis/rescue archive, not a
+		// delivery path, and the saved copy (written before the block gate) keeps
+		// false positives rescuable while the block's error message tells a
+		// genuine sender how to reach the site instead.
+		//
+		// $quarantine_only_spam marks the under-attack quarantine below, which —
+		// unlike every other classification — is neither counter-fed nor
+		// echo-recorded nor fail2ban-logged (see the quarantine block below and the
+		// guards on Echo_Store::record() and the fail2ban block).
+		//
+		// analyze_message() rather than its is_gibberish_message() wrapper: the verdict
+		// is identical (the wrapper just returns ['gibberish']), but the same single
+		// scan also yields the scoring components for the reason string — calling both
+		// would score every submission twice.
+		$analysis = array(
+			'gibberish' => false,
+			'letters'   => 0,
+			'alnum'     => 0,
+			'solo'      => false,
+			'strong'    => false,
+			'scoreable' => 0,
+		);
+		if ( $gdpr_fields && ! $this->plugin_spam ) {
+			$analysis = Gibberish_Detector::analyze_message(
+				self::strip_plugin_fields( $gdpr_fields ),
+				self::gibberish_exempt_field_names( $gdpr_fields )
+			);
+		}
+		if ( $analysis['gibberish'] ) {
+			$this->print_debug_information( 'Gibberish detected' );
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::gibberish(
+				$analysis['letters'],
+				$analysis['alnum'],
+				$analysis['solo'],
+				$analysis['strong']
+			);
+			// Feed the same under-attack wave counter as a real PoW/token failure —
+			// but only in the real (non-simulated) mode, matching the existing
+			// increment_spam_counter() call above. (POW_SIMULATE_SPAM can be on while
+			// $this->plugin_spam is still false here for the wp_authenticate_user hook
+			// the simulation branch above deliberately excludes, so this check is not
+			// redundant with the "still false" guard above.)
+			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+				$this->increment_spam_counter();
+			}
+		}
+
+		return $analysis;
+	}
+
+	/**
+	 * Stage 6 — the under-attack quarantine, evaluated LAST so it only ever sees a
+	 * submission that passed every individual check above.
+	 *
+	 * Mutates $this->plugin_spam and $this->classification_reason and — alone among the
+	 * stages — feeds NO counter (exception #1). Returns whether it fired, so the caller's
+	 * $quarantine_only_spam can carry exceptions #2/#3 to the guards that enforce them.
+	 *
+	 * @phpstan-impure
+	 * @param mixed $gdpr_fields Submitted fields, raw.
+	 * @return bool Whether the quarantine fired (caller's $quarantine_only_spam).
+	 */
+	private function classify_under_attack_quarantine( $gdpr_fields ) {
+		// Under-attack quarantine (BACKLOG "Under-Attack-Eskalationsstufe"): opt-in
+		// second stage of the under-attack response, evaluated LAST so it only ever
+		// fires on a submission that passed every individual check above
+		// ($this->plugin_spam still false). While a spam wave is in progress, such
+		// grey-zone submissions are treated like any other spam classification — the
+		// NORMAL spam path applies, including POW_BLOCK ("under-attack mode with
+		// teeth": during the wave, grey-zone messages are held for review instead of
+		// being delivered as clean; a sort-only copy would leave delivery untouched
+		// and give the mode no teeth at all). Deterministic and lossless: nothing is
+		// discarded, the message lands in the spam folder and the admin rehabilitates
+		// genuine ones from there.
+		//
+		// The gate uses the quarantine's OWN opt-in (POW_UNDER_ATTACK_QUARANTINE) plus
+		// the raw wave DETECTION (is_under_attack()). It deliberately does NOT also
+		// require POW_UNDER_ATTACK_MODE: that option only gates the difficulty *boost*
+		// in get_stamp(); the wave-detection primitive is independent, and the
+		// quarantine's dedicated opt-in is already the admin's explicit choice — an
+		// admin wanting quarantine without the boost (or vice versa) must be able to
+		// have either.
+		//
+		// THREE hard exceptions vs. every other classification (critical, all via
+		// $quarantine_only_spam):
+		//  1. NO increment_spam_counter() — a grey-zone submission counted as spam
+		//     during the wave would keep the wave alive by itself (every clean
+		//     submission would re-trip is_under_attack() → self-reinforcing endless
+		//     escalation). Simply never calling it here IS exception #1.
+		//  2. NO Echo_Store::record() — grey-zone submissions are presumed innocent;
+		//     echoing their core values would deterministically spam-classify a
+		//     legitimate sender for the full 36h TTL, even AFTER the wave ends
+		//     (cascading false positive). Enforced via the Echo_Store::record() guard
+		//     below.
+		//  3. NO fail2ban logging — a genuine visitor submitting during a wave must
+		//     not have their IP fed to an out-of-band ban tool (see the fail2ban
+		//     guard below).
+		if ( $gdpr_fields && self::should_quarantine(
+			(bool) get_option( Option::POW_UNDER_ATTACK_QUARANTINE ),
+			self::is_under_attack(),
+			$this->plugin_spam,
+			(bool) get_option( Option::POW_SIMULATE_SPAM )
+		) ) {
+			$this->print_debug_information( 'Under-attack quarantine' );
+			$this->plugin_spam           = true;
+			$this->classification_reason = Classification_Reason::CODE_QUARANTINE;
+
+			return true;
+		}
+
 		return false;
-	}
-
-	/** Save a message
-	 *
-	 * $origin is the submission path handed down from check_submit(); only
-	 * pre_process_login() sets it ('login'). It replaces the former reconstruction of
-	 * "this was a login" from hashPWFields + wp-submit, which silently failed whenever
-	 * the client JS had not run or the POST was minimal.
-	 */
-	/**
-	 * Write `_gdpr_reason` / `_gdpr_scoring` onto the type-4 analysis row of THIS
-	 * request, after check_submit() has decided.
-	 *
-	 * Same upsert convention as Analysis::upsert_route_row(): existence is asked
-	 * EXPLICITLY rather than inferred from $wpdb->update()'s return value, because
-	 * MySQL reports 0 affected rows both for "no such row" and for "row exists, value
-	 * unchanged" — treating that 0 as "insert one" duplicates the row on every repeat.
-	 *
-	 * A null value REMOVES the row rather than leaving a stale one. On this path that
-	 * matters for `_gdpr_scoring`: a message that is clean carries a scoring line and a
-	 * message that is spam does not, so a row left over from a different verdict would
-	 * describe a judgment that was not made.
-	 *
-	 * Costs nothing when analysis mode is off: $analysis_row_id is null and this
-	 * returns immediately, before touching the database.
-	 *
-	 * @return void
-	 */
-	private function update_analysis_verdict() {
-		if ( null === $this->analysis_row_id ) {
-			return;
-		}
-
-		$this->upsert_analysis_detail( '_gdpr_reason', $this->classification_reason );
-		$this->upsert_analysis_detail( '_gdpr_scoring', $this->clean_scoring );
-	}
-
-	/**
-	 * Insert, update or delete one technical detail row of the analysis entry.
-	 *
-	 * @param string      $attribute Technical attribute name (leading underscore).
-	 * @param string|null $value     Value, or null to remove the row.
-	 * @return void
-	 */
-	private function upsert_analysis_detail( $attribute, $value ) {
-		global $wpdb;
-
-		$table = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';
-		$where = array(
-			'rgm_id'        => (int) $this->analysis_row_id,
-			'rgd_attribute' => $attribute,
-		);
-
-		if ( null === $value || '' === $value ) {
-			$wpdb->delete( $table, $where, array( '%d', '%s' ) );
-			return;
-		}
-
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->prefix, values via prepare()
-		$exists = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT rgd_id FROM $table WHERE rgm_id = %d AND rgd_attribute = %s LIMIT 1",
-				(int) $this->analysis_row_id,
-				$attribute
-			)
-		);
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-		if ( $exists ) {
-			$wpdb->update( $table, array( 'rgd_value' => $value ), $where, array( '%s' ), array( '%d', '%s' ) );
-			return;
-		}
-
-		$wpdb->insert(
-			$table,
-			array(
-				'rgm_id'        => (int) $this->analysis_row_id,
-				'rgd_attribute' => $attribute,
-				'rgd_value'     => $value,
-				'rgm_posted'    => 0,
-			),
-			array( '%d', '%s', '%s', '%d' )
-		);
-	}
-
-	public function save_message( $fields, $action, $ajax, $message_type, $ip, $origin = '' ) {
-		if (
-			// Check whether the message stems from a login and shall be saved
-			! ( ! get_option( Option::POW_SAVE_LOGIN ) && 'login' === $origin )
-			&& ( //Check for WooCommerce shopping carts and whether they shall be saved
-				get_option( Option::POW_SAVE_CART )
-				|| ! (
-					isset( $fields['add-to-cart'] )
-					|| (
-						isset( $fields['update_cart'] )
-						&& isset( $fields['woocommerce-cart-nonce'] )
-					)
-				)
-			)
-		) {
-			$posted_site = null;
-			if ( array_key_exists( 'REQUEST_URI', $_SERVER ) && array_key_exists( 'HTTP_HOST', $_SERVER ) ) {
-				$posted_site = $_SERVER['HTTP_HOST'] . preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['REQUEST_URI'] );
-			}
-			// Decode the client-injected hashPWFields marker into credential field
-			// paths. marker_paths_from_raw() is total and takes the unauthenticated
-			// request value as-is (non-string, broken base64, non-JSON → empty list),
-			// so no guards are needed here any more.
-			$marker_paths = Credential_Fields::marker_paths_from_raw( isset( $fields['hashPWFields'] ) ? $fields['hashPWFields'] : null );
-
-			// The admin-confirmed credential field names — the third line next to the
-			// name heuristic and the marker, and the only one that covers a password
-			// field with an inconspicuous name posted WITHOUT the plugin's JS.
-			$learned_names = Credential_Learning::learned_names();
-
-			// Learn from THIS submission for the later ones: a marker path that no
-			// rule recognises becomes a proposal (the field NAME only, never a
-			// value). Records nothing else and adds nothing by itself — confirming a
-			// proposal is an explicit, capability-gated admin click, because the
-			// marker comes from unauthenticated request data.
-			Credential_Learning::observe( $marker_paths, $learned_names );
-
-			// Credential redaction pre-pass — the ONE place credential values are
-			// removed, and deliberately in the persistence path only (check_submit()
-			// keeps working on raw values, see its docblock). It runs BEFORE
-			// strip_plugin_fields(), before the title build and before both write
-			// loops, so everything downstream — including generate_paths(), which
-			// flattens exactly this structure — only ever sees redacted values.
-			// The name heuristic inside redact() is the primary line and covers
-			// submissions the plugin's JS never touched (no-JS logins, hand-built
-			// bodies); the marker is an additional signal on top.
-			$fields = Credential_Fields::redact( $fields, $marker_paths, $learned_names );
-
-			// Only AFTER hashPWFields has been consumed for the credential paths
-			// above: drop the plugin's own injected fields so they never become
-			// persisted detail rows (and thus never candidates for a recognition
-			// pattern built from a saved message). Must not run before this point —
-			// stripping hashPWFields earlier would throw away the marker signal
-			// before it could be used.
-			$fields               = self::strip_plugin_fields( $fields );
-			$lines                = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_SKIP_FIELDS ), -1, PREG_SPLIT_NO_EMPTY );
-			$pre_forbidden_fields = array();
-			if ( count( $lines ) > 0 ) {
-				foreach ( $lines as $key => $value ) {
-					$args = explode( ':', $value );
-					if ( 2 === count( $args ) ) {
-						$pre_forbidden_fields[ $key ]['site']  = trim( $args[0] );
-						$pre_forbidden_fields[ $key ]['field'] = trim( $args[1] );
-					}
-				}
-			}
-			global $wpdb;
-			$wpdb->query( 'START TRANSACTION' );
-			if ( ! $message_type ) {
-				if ( $this->plugin_spam ) {
-					$message_type = 2;
-				} else {
-					$message_type = 1;
-				}
-			}
-
-			//Set the customizable title for the message headers on the message page
-			$custom_titles = null;
-			$lines         = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_MESSAGE_HEADS ), -1, PREG_SPLIT_NO_EMPTY );
-			if ( count( $lines ) > 0 ) {
-				foreach ( $lines as $line ) {
-					$value                   = wp_kses_post( $line );
-					$custom_titles[ $value ] = $value;
-				}
-			}
-			$table  = $wpdb->prefix . 'recaptcha_gdpr_message_rgm';
-			$data   = array(
-				'rgm_type'   => $message_type,
-				'rgm_date'   => current_time( 'mysql' ),
-				'rgm_ajax'   => $ajax,
-				'rgm_action' => $action,
-				'rgm_ip'     => $ip,
-				'rgm_site'   => $posted_site,
-			);
-			$format = array( '%d', '%s', '%d', '%s', '%s', '%s' );
-			$wpdb->insert( $table, $data, $format );
-			$my_id = $wpdb->insert_id;
-
-			$query            = 'INSERT INTO ' . $wpdb->prefix . 'recaptcha_gdpr_details_rgd (
-                                                            rgm_id,
-                                                            rgd_attribute,
-                                                            rgd_value,
-                                                            rgm_posted
-                                                            )
-                    VALUES 
-                    ';
-			$technical_fields = array();
-			$values           = array();
-			$title            = '';
-			$first            = true;
-			// Remove the protocol (http:// or https://) from the referring URL
-			$referrer_without_protocol = null;
-			if ( array_key_exists( 'HTTP_REFERER', $_SERVER ) ) {
-				$referrer_without_protocol = preg_replace( '/^(https?:\/\/)/i', '', $_SERVER['HTTP_REFERER'] );
-			}
-			$technical_fields['from_site']    = $referrer_without_protocol;
-			$technical_fields['post_on_site'] = $posted_site;
-			$technical_fields['is_ajax']      = $ajax ? __( 'true', 'gdpr-compliant-recaptcha-for-all-forms' ) : __( 'false', 'gdpr-compliant-recaptcha-for-all-forms' );
-			if ( $action ) {
-				$technical_fields['action'] = $action;
-			}
-			if ( get_option( Option::POW_SAVE_IP ) ) {
-				$technical_fields['IP adress'] = $this->get_client_ip();
-			}
-			// WHY this submission was classified as spam (null = clean → no row at all,
-			// see Classification_Reason). Additive technical field, written like the
-			// ones above with rgm_posted = false, so it never shows up as a "block this
-			// pattern" candidate in the message UI. The leading underscore matters:
-			// Echo_Values::is_technical_key() treats any `_`-prefixed key as technical,
-			// so the reason can never itself seed or match an echo/wildcard value.
-			if ( null !== $this->classification_reason ) {
-				$technical_fields['_gdpr_reason'] = $this->classification_reason;
-			}
-
-			// WHAT THE STAMP TABLE HELD while the "no proof of work" verdict was made
-			// (measure_pow_probe(); null on every other classification → no row at all).
-			// The reason above names the path that failed, this names the evidence: a
-			// row for the token that was too old, one that was spent, or none anywhere.
-			// Same conventions as _gdpr_reason in every respect, including the leading
-			// underscore that keeps Echo_Values::is_technical_key() from ever letting it
-			// seed or match a value.
-			if ( null !== $this->pow_probe ) {
-				$technical_fields['_gdpr_pow_probe'] = $this->pow_probe;
-			}
-
-			// WHY this submission was NOT classified as spam (null = it was → no row at
-			// all; the two are mutually exclusive, see $clean_scoring). Same conventions
-			// as _gdpr_reason above in every respect: additive, rgm_posted = false, and
-			// the leading underscore that makes Echo_Values::is_technical_key() treat it
-			// as technical, so the scoring string can never itself seed or match an
-			// echo/wildcard value.
-			if ( null !== $this->clean_scoring ) {
-				$technical_fields['_gdpr_scoring'] = $this->clean_scoring;
-			}
-
-			// WHICH REST route this submission targeted (REST_ROUTES_PLAN.md AP5), or no
-			// row at all on a non-REST request — same convention as _gdpr_reason above:
-			// additive, rgm_posted = false, leading underscore (Echo_Values::is_technical_key()
-			// skips `_`-prefixed keys, so this can never itself seed or match an echo/
-			// wildcard value), no schema change. Recorded for BOTH type-4 analysis rows
-			// AND normally classified messages — analysis mode is precisely how an admin
-			// discovers a REST route worth monitoring (Message_Page::render_message()'s
-			// "Monitor this route" button reads this row).
-			if ( null !== $this->get_rest_route() ) {
-				$technical_fields['_gdpr_route'] = $this->get_rest_route();
-			}
-
-			foreach ( $fields as $key => $value ) {
-				if ( is_array( $value ) || is_object( $value ) ) {
-					$nested_values = $this->generate_paths( $my_id, $value, $key, $pre_forbidden_fields, $referrer_without_protocol, $query, $first, $custom_titles, $title );
-					$values        = array_merge( $values, $nested_values[0] );
-					$query         = $nested_values[1];
-					$title         = $nested_values[2];
-					$first         = $nested_values[3];
-				} else {
-					$skipped_field = false;
-					if ( count( $pre_forbidden_fields ) ) {
-						$skipped_field = $this->check_skipped_fields( $pre_forbidden_fields, $key, $referrer_without_protocol );
-					}
-					if ( ! $skipped_field ) {
-						// rgm_posted false for a redacted value — see generate_paths().
-						$values[] = $my_id;
-						$values[] = $key;
-						$values[] = $value;
-						$values[] = Credential_Fields::REDACTED_VALUE !== $value;
-						if ( isset( $custom_titles[ $key ] ) ) {
-							$title .= $value . ' | ';
-						}
-						if ( $first ) {
-							$first = false;
-						} else {
-							$query .= ',';
-						}
-						$query .= '(%d, %s, %s, %d)';
-					}
-				}
-			}
-
-			foreach ( $technical_fields as $key => $value ) {
-				$values[] = $my_id;
-				$values[] = $key;
-				$values[] = $value;
-				$values[] = false;
-				if ( $first ) {
-					$first = false;
-				} else {
-					$query .= ',';
-				}
-				$query .= '(%d, %s, %s, %d)';
-			}
-
-			if ( '' !== $title ) {
-				$title = substr( $title, 0, -3 );
-			}
-			$wpdb->update( $table, array( 'rgm_title' => $title ), array( 'rgm_id' => $my_id ) );
-
-			$wpdb->query(
-				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $query is an internally-built INSERT with only (%d,%s,%s,%d) placeholder tuples (never request data); it is passed through $wpdb->prepare() with $values here, i.e. de-facto prepared.
-				$wpdb->prepare( $query, $values )
-			);
-			$wpdb->query( 'COMMIT' );
-
-			return $my_id;
-		}
-
-		return null;
 	}
 
 	/** Function to get a stamp that can be invoked via ajax
