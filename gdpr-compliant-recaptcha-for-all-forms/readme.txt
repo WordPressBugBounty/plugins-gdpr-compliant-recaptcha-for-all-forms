@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.5.0
+Stable tag: 5.6.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -152,6 +152,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 5.6.0 =
+Recommended if you use Ninja Forms: every submission was blocked regardless of what was written. Also restores detection for Jetpack, WP User Frontend and Formidable Forms.
 = 5.5.0 =
 Maintenance release — see the changelog for details.
 = 5.4.0 =
@@ -181,6 +183,20 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 5.6.0 =
+* Fixed: Ninja Forms submissions were always blocked as "Gibberish content".
+* Added: Builders posting their whole form as JSON in one field now expose their single fields to rules.
+* Changed: A "Known spam value" block no longer extends the 36-hour lock, so a false alarm cannot renew itself.
+* Fixed: Jetpack Forms are watched again; the shipped action name was one Jetpack never registered.
+* Fixed: WP User Frontend forms are watched again; both the detection path and the signature were wrong.
+* Added: Formidable Forms is detected again - its classic and its AJAX submit are both watched out of the box.
+* Fixed: An over-broad field pattern no longer discards your own wp-admin saves.
+* Changed: Admin screens skip the spam check when the logged-in user can edit posts.
+* Added: a Diagnostics button now produces a copyable status report that is safe to post in a public support forum.
+* Fixed: "Save WooCommerce shopping carts" now also covers cart requests carrying `add-to-cart` in the URL query.
+* Fixed: The "Thrive Comments detected" notice now names the recognition pattern actually added.
+* Changed: removed 21 shipped recognition patterns that named form fields no product ever sends; coverage is unchanged.
+* Changed: Jotform, Typeform and Zoho Forms are no longer listed as detected; their forms submit to their own servers.
 = 5.5.0 =
 * Added: submissions blocked as "Known spam value" now link directly to the setting that releases them.
 * Fixed: submissions were incorrectly flagged as spam on sites using Cloudflare Turnstile.

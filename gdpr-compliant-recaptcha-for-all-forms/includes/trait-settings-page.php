@@ -18,7 +18,9 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * 2592 Zeilen. Sie ist entlang ihrer Sektionen aufgeteilt:
  *   - class-settings-menu.php             — Konstruktion, Hooks, Menue, Selbsttest,
  *                                           prepare_options() und der Proxy-Vorschlag.
- *   - trait-settings-defaults.php         — die drei get_default_*()-Seeds (handbuch/gate.md).
+ *   - trait-settings-default-actions.php  — get_default_ajax_actions() (handbuch/gate.md).
+ *   - trait-settings-default-patterns.php — get_default_recognition_patterns() (handbuch/gate.md).
+ *   - trait-settings-default-routes.php   — get_default_rest_routes() (handbuch/gate.md).
  *   - trait-settings-options.php          — Options-Matrix, Teil 1 (Reiter "Most relevant",
  *                                           "Spam Processing").
  *   - trait-settings-options-storage.php  — Options-Matrix, Teil 2 (Reiter "Saving Messages",
@@ -87,6 +89,15 @@ trait Settings_Page {
 
 	/** Allowlist shared by the header message and the per-option help popovers.
 	 *
+	 * The `<a>`/`<span>` attributes beyond href/title/class exist for exactly ONE
+	 * consumer: the header line's inline "copy a report first" action
+	 * (render_header_message()) — target/rel for a safely-opened new tab, id/
+	 * data-nonce/data-copied/data-copy-failed for recaptcha-gdpr-settings.js to wire
+	 * and for the aria-live status span to hold its two messages. wp_kses() silently
+	 * DROPS any attribute not listed here, so a name typo in either this list or the
+	 * markup below fails closed (the attribute just vanishes, no error) — verified in
+	 * the rendered HTML, not just the source, by SupportReportWiringTest.
+	 *
 	 * @return array<string, array<string, array<int, string>>>
 	 */
 	private function get_allowed_html() {
@@ -100,25 +111,59 @@ trait Settings_Page {
 			'u'      => array(),
 			'em'     => array(),
 			'code'   => array(),
-			'span'   => array( 'class' => array() ),
+			'span'   => array(
+				'class'            => array(),
+				'id'               => array(),
+				'aria-live'        => array(),
+				'data-copied'      => array(),
+				'data-copy-failed' => array(),
+			),
 			'a'      => array(
-				'href'  => array(),
-				'title' => array(),
+				'href'       => array(),
+				'title'      => array(),
+				'class'      => array(),
+				'id'         => array(),
+				'target'     => array(),
+				'rel'        => array(),
+				'data-nonce' => array(),
 			),
 		);
 	}
 
-	/** Renders the review/FAQ header line, escaped via wp_kses with a tight allowlist. */
+	/**
+	 * Renders the review/FAQ header line, escaped via wp_kses with a tight allowlist.
+	 *
+	 * Owner request (2026-08-19): a second, quieter action sits inline right after the
+	 * plain forum link, separated by a middle dot — NOT a third line, NOT its own row.
+	 * The plain link is untouched (same text, same target, no copy, no new tab); the
+	 * new one fetches the report (own nonce — Diagnostics may never have been opened,
+	 * so there is no guarantee the textarea already holds it), copies it, confirms
+	 * INLINE in this same line (aria-live, no `<br>`), and opens a NEW tab. New tab on
+	 * purpose: a confirmation shown at the moment of navigation is never read. Copying
+	 * is best effort and never blocks opening — same construction as the Diagnostics
+	 * result bar's forum link (plain `<a target="_blank">`, no preventDefault()).
+	 */
 	private function render_header_message() {
-		$review_link = sprintf(
+		$review_link   = sprintf(
 			'<a href="%s">%s</a>',
 			esc_url( 'https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/reviews/#new-post' ),
 			esc_html__( 'Help us and rate it', 'gdpr-compliant-recaptcha-for-all-forms' )
 		);
-		$faq_link    = sprintf(
+		$faq_link      = sprintf(
 			'<a href="%s">%s</a>',
-			esc_url( 'https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/' ),
+			esc_url( self::SUPPORT_FORUM_URL ),
 			esc_html__( 'Get help in the support forum', 'gdpr-compliant-recaptcha-for-all-forms' )
+		);
+		$report_link   = sprintf(
+			'<a href="%1$s" id="gdpr-header-support-report-link" class="gdpr-header-report-link" target="_blank" rel="noopener noreferrer" data-nonce="%2$s">%3$s</a>',
+			esc_url( self::SUPPORT_FORUM_URL . '#new-post' ),
+			esc_attr( wp_create_nonce( self::AJAX_SUPPORT_REPORT ) ),
+			esc_html__( 'copy a report first ↗', 'gdpr-compliant-recaptcha-for-all-forms' )
+		);
+		$report_status = sprintf(
+			'<span class="gdpr-header-report-status" id="gdpr-header-report-status" aria-live="polite" data-copied="%1$s" data-copy-failed="%2$s"></span>',
+			esc_attr__( '✓ Report copied — paste it into your post.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			esc_attr__( 'Could not copy — find the report under Diagnostics and copy it from there.', 'gdpr-compliant-recaptcha-for-all-forms' )
 		);
 
 		$message1 = sprintf(
@@ -129,14 +174,16 @@ trait Settings_Page {
 			'<br>'
 		);
 		$message2 = sprintf(
-			/* translators: 1: smiley icon, 2: review link, 3,4: line breaks, 5: thinking-smiley icon, 6: FAQ link */
-			__( '%1$s Happy with the plugin? %2$s %3$s%4$s %5$s Problems, questions, hints, improvements? %6$s', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			/* translators: 1: smiley icon, 2: review link, 3,4: line breaks, 5: thinking-smiley icon, 6: FAQ link, 7: report-and-forum link, 8: inline copy-status placeholder */
+			__( '%1$s Happy with the plugin? %2$s %3$s%4$s %5$s Problems, questions, hints, improvements? %6$s · or %7$s%8$s', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'<span class="large-smiley">&#128578;</span>',
 			$review_link,
 			'<br>',
 			'<br>',
 			'<span class="large-smiley">&#129300;</span>',
-			$faq_link
+			$faq_link,
+			$report_link,
+			$report_status
 		);
 
 		echo wp_kses( $message1 . $message2, $this->get_allowed_html() );
@@ -408,6 +455,43 @@ trait Settings_Page {
 					</div>
 				</div>
 				<div class="gdpr-action-result" hidden></div>
+			</div>
+
+			<?php // Text assembly lives entirely in Support_Report — this row only wires the button/nonce/result markup, to keep this file under its 600-line cap (see class-support-report.php). ?>
+			<div class="gdpr-option-row gdpr-action-row" id="gdpr-support-report">
+				<div class="gdpr-option-main">
+					<span class="gdpr-option-label"><?php esc_html_e( 'Support report', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></span>
+					<p class="gdpr-option-short"><?php esc_html_e( 'A copyable status block, safe to post in the public support forum.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
+				</div>
+				<div class="gdpr-option-control">
+					<button type="button" class="button button-secondary" id="gdpr-support-report-btn"
+						data-nonce="<?php echo esc_attr( wp_create_nonce( self::AJAX_SUPPORT_REPORT ) ); ?>"
+						data-running="<?php esc_attr_e( 'Generating…', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+						data-failed="<?php esc_attr_e( 'Could not generate the report. Reload the page and try again.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>">
+						<?php esc_html_e( 'Generate report', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</button>
+					<button type="button" class="gdpr-help-toggle" aria-expanded="false" aria-controls="help_gdpr_support_report">?</button>
+					<div class="gdpr-help-popover" id="help_gdpr_support_report" hidden>
+						<?php esc_html_e( 'Puts together a short, plain-text status block: versions, difficulty, the on/off switches and a few counters. No addresses, no list contents (whitelists, blocked values, scope, learned fields), no secrets — safe to paste into a public forum post when asking for support. "Copy & open support forum" copies the block again — so the clipboard is guaranteed to hold it — and opens a new topic in the forum, where you paste it.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+					</div>
+				</div>
+				<div class="gdpr-action-result gdpr-support-report-result" id="gdpr-support-report-result" hidden>
+					<textarea id="gdpr-support-report-text" class="gdpr-support-report-text" rows="8" readonly></textarea>
+					<div class="gdpr-support-report-bar">
+						<button type="button" class="button button-primary" id="gdpr-support-report-copy"
+							data-copied="<?php esc_attr_e( 'Copied!', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+							data-copy-failed="<?php esc_attr_e( 'Copy failed — select the text and copy it manually.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>">
+							<?php esc_html_e( 'Copy', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+						</button>
+						<span class="gdpr-support-report-status" id="gdpr-support-report-status" aria-live="polite"
+							data-copied="<?php esc_attr_e( '✓ Copied — paste it into your forum post.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
+							data-copy-failed="<?php esc_attr_e( 'Copy failed — select the text above and copy it manually.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"></span>
+						<a href="<?php echo esc_url( self::SUPPORT_FORUM_URL . '#new-post' ); ?>" target="_blank" rel="noopener noreferrer"
+							class="gdpr-support-report-forum-link" id="gdpr-support-report-forum-link">
+							<?php esc_html_e( 'Copy & open support forum ↗', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+						</a>
+					</div>
+				</div>
 			</div>
 
 		</div>

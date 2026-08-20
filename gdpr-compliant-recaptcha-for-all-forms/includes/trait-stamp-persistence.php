@@ -8,11 +8,11 @@
  * lines, i.e. over the 2853 cap its ledger entry froze it at. Its own head docblock
  * already named the seam — the class spans three area files — so the cut follows that
  * text rather than inventing one:
- *   - class-stamp.php               — the GATE half (constructor triage, run(), the
- *                                     login path, handbuch/gate.md), the POW half
- *                                     (get_stamp(), check_stamp(), check_request(),
- *                                     consume_*, handbuch/pow.md) and check_submit()
- *                                     with its six classification stages.
+ *   - class-stamp.php               — the GATE half (constructor, run(), login path,
+ *                                     handbuch/gate.md; the triage block itself moved
+ *                                     on later, to trait-stamp-triage.php), the POW
+ *                                     half (get_stamp(), check_stamp(), check_request(),
+ *                                     consume_*) and check_submit() with its stages.
  *   - trait-stamp-persistence.php   — THIS file: the persistence half of
  *                                     handbuch/detection.md. save_for_analysis(),
  *                                     save_message() with its field-tree flattening
@@ -340,19 +340,48 @@ trait Stamp_Persistence {
 		);
 	}
 
+	/**
+	 * Is THIS REQUEST WooCommerce shopping-cart activity? Decides the POW_SAVE_CART
+	 * exemption in save_message() — and asks $_REQUEST ($this->whole_request_data), not
+	 * the $fields the caller handed in.
+	 *
+	 * WHY THE REQUEST AND NOT $fields. On the live path $fields is request_data = $_POST,
+	 * while the pattern that makes a cart request MONITORED matches whole_request_data =
+	 * $_REQUEST (capture_request_data(), class-stamp.php). On `GET /?add-to-cart=123` the
+	 * pattern therefore fired and this exemption did not: switching "Save WooCommerce
+	 * shopping carts" OFF still left those messages coming — a broken promise (measured
+	 * 2026-08-19). Three reasons the exemption is the side that moves:
+	 *   - WooCommerce itself defines cart activity over `$_REQUEST['add-to-cart']`
+	 *     (class-wc-form-handler.php), so the key in the QUERY *is* a cart request.
+	 *   - save_for_analysis() already passes whole_request_data to save_message(), so the
+	 *     analysis path has always read $_REQUEST here. The live path was the outlier;
+	 *     this unifies the two rather than adding a third behaviour.
+	 *   - The monitored SCOPE stays as it is, because the MATCHER is not touched here.
+	 *     Narrowing that one to $_POST would be a coverage decision, not a fix — owner's
+	 *     call, own BACKLOG item ("Methoden-Gate für Muster- und Action-Abgleich").
+	 *
+	 * THE SIDE EFFECT, named rather than hidden: with the option OFF, a spam POST that
+	 * carries `add-to-cart` only in its query string is no longer stored either. The
+	 * VERDICT does not change — save_message() governs persistence, never block/no-block.
+	 * WARNING for whoever adds WooCommerce's default ajax path (`wc-ajax=add_to_cart`)
+	 * to the monitored scope: it would run PAST this exemption, carrying neither
+	 * `add-to-cart` nor `update_cart`. That shape has to be learnt here at the same time.
+	 *
+	 * @return bool True if this request is WooCommerce cart activity.
+	 */
+	private function is_shopping_cart_request() {
+		$request = is_array( $this->whole_request_data ) ? $this->whole_request_data : array();
+		return isset( $request['add-to-cart'] )
+			|| ( isset( $request['update_cart'] ) && isset( $request['woocommerce-cart-nonce'] ) );
+	}
+
 	public function save_message( $fields, $action, $ajax, $message_type, $ip, $origin = '' ) {
 		if (
 			// Check whether the message stems from a login and shall be saved
 			! ( ! get_option( Option::POW_SAVE_LOGIN ) && 'login' === $origin )
 			&& ( //Check for WooCommerce shopping carts and whether they shall be saved
 				get_option( Option::POW_SAVE_CART )
-				|| ! (
-					isset( $fields['add-to-cart'] )
-					|| (
-						isset( $fields['update_cart'] )
-						&& isset( $fields['woocommerce-cart-nonce'] )
-					)
-				)
+				|| ! $this->is_shopping_cart_request()
 			)
 		) {
 			$posted_site = null;

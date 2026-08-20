@@ -244,6 +244,187 @@
 			});
 		}
 
+		// --- Support report ------------------------------------------------------------
+		//
+		// "Generate report" fetches the plain-text block from Support_Report and drops it
+		// into a readonly textarea. Below it, a small bar: "Copy" (the primary action),
+		// an aria-live status line, and a link straight to a new support-forum topic. The
+		// SAME report is also reachable one click from the page header (render_header_
+		// message() in trait-settings-page.php) — see "Header line" below, which shares
+		// every function in this section rather than re-implementing any of it.
+		var reportButton = document.getElementById('gdpr-support-report-btn');
+		var reportResult = document.getElementById('gdpr-support-report-result');
+		var reportText = document.getElementById('gdpr-support-report-text');
+		var reportCopy = document.getElementById('gdpr-support-report-copy');
+		var reportStatus = document.getElementById('gdpr-support-report-status');
+		var reportForumLink = document.getElementById('gdpr-support-report-forum-link');
+
+		if (reportButton && reportResult && reportText) {
+			reportButton.addEventListener('click', function () {
+				var label = reportButton.textContent;
+				reportButton.disabled = true;
+				reportButton.textContent = reportButton.getAttribute('data-running') || 'Generating…';
+
+				post({ action: 'gdpr_pow_support_report', security_nonce: reportButton.getAttribute('data-nonce') || '' })
+					.then(function (json) {
+						var payload = (json && json.data) ? json.data : {};
+						reportResult.hidden = false;
+						reportText.value = (json && json.success === true && typeof payload.report === 'string')
+							? payload.report
+							: (payload.message || reportButton.getAttribute('data-failed') || 'Could not generate the report.');
+					})
+					.catch(function () {
+						reportResult.hidden = false;
+						reportText.value = reportButton.getAttribute('data-failed') || 'The request failed. Reload the page and try again.';
+					})
+					.then(function () {
+						reportButton.disabled = false;
+						reportButton.textContent = label;
+					});
+			});
+		}
+
+		// Copies an arbitrary STRING to the clipboard — clipboard API first, a
+		// temporary offscreen textarea + execCommand as the fallback. Deliberately NOT
+		// tied to the (possibly still-hidden) Diagnostics textarea: the header action
+		// below needs to copy text that may never have been rendered into a visible
+		// element. `done(ok)` always fires, synchronously or once the promise settles.
+		function copyTextToClipboard(value, done) {
+			function fallbackCopy() {
+				var temp = document.createElement('textarea');
+				temp.value = value;
+				temp.setAttribute('readonly', '');
+				temp.style.position = 'fixed';
+				temp.style.top = '-1000px';
+				document.body.appendChild(temp);
+				try {
+					temp.focus();
+					temp.select();
+					done(document.execCommand('copy'));
+				} catch (e) {
+					done(false);
+				} finally {
+					document.body.removeChild(temp);
+				}
+			}
+			if (navigator.clipboard && navigator.clipboard.writeText) {
+				navigator.clipboard.writeText(value).then(function () {
+					done(true);
+				}).catch(fallbackCopy);
+			} else {
+				fallbackCopy();
+			}
+		}
+
+		// Ensures the report TEXT exists — reuses it from the Diagnostics textarea if a
+		// "Generate report" click already loaded it there, otherwise fetches it via
+		// Ajax with the given nonce (the header action carries its OWN nonce, since
+		// Diagnostics may never have been opened in this page view). Also caches a
+		// freshly-fetched report into the shared textarea, so opening Diagnostics
+		// afterwards shows it without a second fetch. `done(ok, text)`.
+		function ensureReportText(nonce, done) {
+			if (reportText && reportText.value) {
+				done(true, reportText.value);
+				return;
+			}
+			post({ action: 'gdpr_pow_support_report', security_nonce: nonce || '' })
+				.then(function (json) {
+					var payload = (json && json.data) ? json.data : {};
+					if (json && json.success === true && typeof payload.report === 'string') {
+						if (reportText) {
+							reportText.value = payload.report;
+						}
+						done(true, payload.report);
+					} else {
+						done(false, null);
+					}
+				})
+				.catch(function () {
+					done(false, null);
+				});
+		}
+
+		// The ONE copy path every trigger on this page uses (Diagnostics' Copy button,
+		// its forum link, and the header line's combined action): ensure the text, then
+		// copy it. `done(ok)` always fires.
+		function copyReport(nonce, done) {
+			ensureReportText(nonce, function (ok, text) {
+				if (!ok) {
+					done(false);
+					return;
+				}
+				copyTextToClipboard(text, done);
+			});
+		}
+
+		// Writes an aria-live status element's text from its own data-copied/
+		// data-copy-failed attributes, and — where a forum link is passed — promotes it
+		// via a class swap only (no size/padding change, so nothing shifts). Shared by
+		// the Diagnostics bar and the header line, each with its own status element.
+		function announceCopyResult(statusEl, ok, forumLinkEl) {
+			if (statusEl) {
+				statusEl.textContent = ok
+					? (statusEl.getAttribute('data-copied') || 'Copied.')
+					: (statusEl.getAttribute('data-copy-failed') || 'Copy failed — select the text and copy it manually.');
+			}
+			if (forumLinkEl) {
+				forumLinkEl.classList.toggle('gdpr-support-report-forum-link--ready', !!ok);
+			}
+		}
+
+		if (reportCopy && reportText) {
+			reportCopy.addEventListener('click', function () {
+				var label = reportCopy.textContent;
+				var nonce = reportButton ? reportButton.getAttribute('data-nonce') : '';
+				copyReport(nonce, function (ok) {
+					reportCopy.textContent = ok
+						? (reportCopy.getAttribute('data-copied') || 'Copied!')
+						: (reportCopy.getAttribute('data-copy-failed') || 'Copy failed');
+					announceCopyResult(reportStatus, ok, reportForumLink);
+					setTimeout(function () {
+						reportCopy.textContent = label;
+					}, 2000);
+				});
+			});
+		}
+
+		// The smart part: clicking the forum link copies the report ONE MORE TIME first
+		// (best effort) — the operator may have copied something else since generating
+		// it, and this guarantees the clipboard holds the report at the moment they
+		// paste. Copying must NEVER hold up opening the forum: no preventDefault
+		// anywhere here, so the anchor's own default navigation (a NEW browser tab,
+		// target="_blank") proceeds exactly as it would without this handler, whether
+		// the copy succeeds, fails, or is still pending — copyReport() only ever
+		// updates the status line and the link's own promoted class, both harmless
+		// after the tab has already changed.
+		if (reportForumLink && reportText) {
+			reportForumLink.addEventListener('click', function () {
+				var nonce = reportButton ? reportButton.getAttribute('data-nonce') : '';
+				copyReport(nonce, function (ok) {
+					announceCopyResult(reportStatus, ok, reportForumLink);
+				});
+			});
+		}
+
+		// --- Header line ("copy a report first ↗") -------------------------------------
+		//
+		// Same construction as the Diagnostics forum link above (plain
+		// target="_blank" anchor, copy-then-let-navigation-proceed, no preventDefault),
+		// but reached from the page header, BEFORE Diagnostics may ever have been
+		// opened — so it carries its own nonce and goes through ensureReportText()'s
+		// fetch branch the first time. The plain "Get help in the support forum" link
+		// right next to it is untouched: no listener, no copy, no new tab.
+		var headerReportLink = document.getElementById('gdpr-header-support-report-link');
+		var headerReportStatus = document.getElementById('gdpr-header-report-status');
+		if (headerReportLink) {
+			headerReportLink.addEventListener('click', function () {
+				var nonce = headerReportLink.getAttribute('data-nonce') || '';
+				copyReport(nonce, function (ok) {
+					announceCopyResult(headerReportStatus, ok, null);
+				});
+			});
+		}
+
 		// --- The two resets, one of them two-step -------------------------------------
 		//
 		// Releasing the repeat-sender lock frees every held value at once. That does not

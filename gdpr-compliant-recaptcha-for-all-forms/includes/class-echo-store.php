@@ -159,14 +159,17 @@ final class Echo_Store {
 	/**
 	 * Record the core values of a (spam-classified) submission for TTL_SECONDS.
 	 *
-	 * @param mixed $fields The submission's field map.
+	 * @param mixed    $fields        The submission's field map.
+	 * @param string[] $no_text_roots Top-level names whose subtree contributes no
+	 *                                long-text hash — the unpacked envelopes of a form
+	 *                                builder, see Echo_Values::build_echo_set().
 	 * @return void
 	 */
-	public static function record( $fields ) {
+	public static function record( $fields, $no_text_roots = array() ) {
 		if ( ! self::is_enabled() ) {
 			return;
 		}
-		$hashes = Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes() );
+		$hashes = Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes(), $no_text_roots );
 		if ( empty( $hashes ) ) {
 			return;
 		}
@@ -187,10 +190,14 @@ final class Echo_Store {
 	 * Whether the submission matches any currently-active echo value. Cheap: one
 	 * get_transient() (short-circuited when the store is empty) plus hash lookups.
 	 *
-	 * @param mixed $fields The submission's field map.
+	 * @param mixed    $fields        The submission's field map.
+	 * @param string[] $no_text_roots Top-level names whose subtree contributes no
+	 *                                long-text hash — the SAME list record() was given,
+	 *                                because a value that cannot be seeded must not be
+	 *                                matchable either.
 	 * @return bool
 	 */
-	public static function matches( $fields ) {
+	public static function matches( $fields, $no_text_roots = array() ) {
 		if ( ! self::is_enabled() ) {
 			return false;
 		}
@@ -198,7 +205,7 @@ final class Echo_Store {
 		if ( empty( $map ) ) {
 			return false;
 		}
-		foreach ( Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes() ) as $hash ) {
+		foreach ( Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes(), $no_text_roots ) as $hash ) {
 			if ( isset( $map[ $hash ] ) ) { // load_map() already dropped expired entries.
 				return true;
 			}

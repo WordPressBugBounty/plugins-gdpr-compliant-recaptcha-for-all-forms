@@ -18,7 +18,9 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * 2592 Zeilen. Sie ist entlang ihrer Sektionen aufgeteilt:
  *   - class-settings-menu.php             — Konstruktion, Hooks, Menue, Selbsttest,
  *                                           prepare_options() und der Proxy-Vorschlag.
- *   - trait-settings-defaults.php         — die drei get_default_*()-Seeds (handbuch/gate.md).
+ *   - trait-settings-default-actions.php  — get_default_ajax_actions() (handbuch/gate.md).
+ *   - trait-settings-default-patterns.php — get_default_recognition_patterns() (handbuch/gate.md).
+ *   - trait-settings-default-routes.php   — get_default_rest_routes() (handbuch/gate.md).
  *   - trait-settings-options.php          — Options-Matrix, Teil 1 (Reiter "Most relevant",
  *                                           "Spam Processing").
  *   - trait-settings-options-storage.php  — Options-Matrix, Teil 2 (Reiter "Saving Messages",

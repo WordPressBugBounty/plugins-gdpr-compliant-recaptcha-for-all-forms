@@ -251,7 +251,7 @@ trait Message_List {
 		) {
 
 			$review_link     = '<a href="https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/reviews/#new-post">Help us and rate it</a>';
-			$faq_link        = '<a href="https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/">Get help in the support forum</a>';
+			$faq_link        = '<a href="' . Settings_Menu::SUPPORT_FORUM_URL . '">Get help in the support forum</a>';
 			$line_break      = '<br>';
 			$smiley          = '<span class="large-smiley">&#128578;</span>';
 			$thinking_smiley = '<span class="large-smiley">&#129300;</span>';

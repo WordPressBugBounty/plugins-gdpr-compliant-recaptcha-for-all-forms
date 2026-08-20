@@ -231,14 +231,42 @@ trait Blocklist_Values {
 	 * @param string[] $own_domains     Registrable domains of the site itself,
 	 *                                  excluded from URL-domain extraction and from
 	 *                                  the sender-domain blocklist.
+	 * @param string[] $extra_strings   Additional raw strings tested by the SAME four
+	 *                                  comparisons, on top of the field map's own
+	 *                                  content strings. Exactly one caller fills it:
+	 *                                  Stamp hands over the ORIGINAL text of every field
+	 *                                  Field_Envelopes::unpack() replaced by a structure.
+	 *
+	 *                                  WHY, precisely: until 5.5.0 an envelope field was
+	 *                                  ONE long string, so comparisons 2–4 saw every
+	 *                                  address and URL inside it — including those sitting
+	 *                                  in a JSON KEY. Unpacking turns keys into keys, and
+	 *                                  no comparison here looks at keys, so an operator's
+	 *                                  explicit block would have stopped working through
+	 *                                  our own update. Feeding the untouched bytes back in
+	 *                                  restores exactly that coverage: same strings, same
+	 *                                  comparisons, no new semantics. It costs no new
+	 *                                  false-positive surface either, because these are
+	 *                                  the very strings that were being compared before.
+	 *
+	 *                                  BLOCKLIST ONLY. The echo lock must NOT receive
+	 *                                  them (it SEEDS from what it is given, and a
+	 *                                  builder's configuration text is constant per form
+	 *                                  — see Echo_Values::build_echo_set()'s
+	 *                                  $no_text_roots), and neither must the gibberish
+	 *                                  scan (that is the Ninja Forms misclassification
+	 *                                  rebuilt, see Field_Envelopes). The blocklist is the
+	 *                                  safe consumer because it only ever MATCHES, never
+	 *                                  records.
 	 * @return bool
 	 */
-	public static function matches_wildcard_values( $fields, $wildcard_values, $own_domains = array() ) {
+	public static function matches_wildcard_values( $fields, $wildcard_values, $own_domains = array(), $extra_strings = array() ) {
 		if ( empty( $wildcard_values ) ) {
 			return false;
 		}
 		list( $set, $sender_domains ) = self::split_wildcard_values( $wildcard_values, $own_domains );
-		foreach ( self::collect_content_strings( $fields ) as $string ) {
+		$strings                      = array_merge( self::collect_content_strings( $fields ), array_values( (array) $extra_strings ) );
+		foreach ( $strings as $string ) {
 			if ( self::string_hits( $string, $set, $sender_domains, $own_domains ) ) {
 				return true;
 			}

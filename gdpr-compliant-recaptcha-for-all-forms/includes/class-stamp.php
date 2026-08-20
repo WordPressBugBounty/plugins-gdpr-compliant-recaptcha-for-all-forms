@@ -11,6 +11,8 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 // Die PERSISTENZ-Haelfte von detection.md (save_message(), save_for_analysis(),
 // Fail2Ban) steht seit Welle 5b in trait-stamp-persistence.php — dieselbe Klasse,
 // zweite Datei; die Begruendung des Schnitts steht in deren Kopf-Docblock.
+// Ebenso steht die TRIAGE-Haelfte von gate.md (Whitelists, Sonderfaelle, das Gate-`if`)
+// in trait-stamp-triage.php — auch dort steht die Begruendung im Kopf-Docblock.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -28,6 +30,19 @@ class Stamp {
 	// Ein Trait wird zur Kompilierzeit hineinkopiert — $this->save_message() & Co.
 	// bleiben unveraendert Methoden von Stamp, mit denselben Eigenschaften.
 	use Stamp_Persistence;
+
+	// Die TRIAGE-Haelfte — Whitelists, Sonderfaelle und das Gate-`if`, das ueberhaupt
+	// erst entscheidet, ob dieser Request bewertet wird — steht in
+	// trait-stamp-triage.php (Dateigroessen-Schnitt, PLAN-DATEIGROESSE.md). Dort steht
+	// auch, warum is_special_case_request() bewusst HIER geblieben ist, und dort steht
+	// evaluate_admin_screen_post(): die auf `init` 0 verschobene Capability-Frage fuer
+	// wp-admin-Screen-POSTs, die der Konstruktor unten registriert.
+	use Stamp_Triage;
+
+	// Die CAPTURE-Haelfte — capture_request_data() samt dem Auspacken von
+	// JSON-Envelope-Feldern (Field_Envelopes) und den zwei Zugriffen auf das, was das
+	// Auspacken hinterlaesst — steht in trait-stamp-capture.php.
+	use Stamp_Capture;
 
 	/**
 	 * Maximum submissions a single solved PoW token may pay for (AP3 submission-
@@ -173,6 +188,21 @@ class Stamp {
 	private $request_data;
 	private $whole_request_data;
 
+	/**
+	 * Whether this request targets one of the monitored REST routes, as computed once
+	 * by check_rest_routes() in the constructor.
+	 *
+	 * A PROPERTY rather than a local, because the two halves no longer share a stack
+	 * frame: the constructor computes it (it has to run before save_for_analysis(), see
+	 * there), triage_request() in trait-stamp-triage.php reads it. Calling
+	 * check_rest_routes() a second time over there instead would be the obvious-looking
+	 * mistake and is forbidden — tests/unit/StampRouteOrderingTest.php pins the single
+	 * call site, and a second one is the sign the reuse was undone.
+	 *
+	 * @var bool
+	 */
+	private $route_found = false;
+
 	/** Constructor of the class
 	 */
 	public function __construct() {
@@ -190,131 +220,93 @@ class Stamp {
 		// update/delete in THIS request drops the cached hash set. Cheap — add_action
 		// only, the actual rebuild is lazy on the next echo record()/matches().
 		Echo_Store::register_cache_hooks();
-		// Check whether the IP is whitelisted.
-		//
-		// Compared through ClientIp::matches_list() — THE address-list comparison of
-		// this plugin — not with `===` as it was until 5.3.4. The string compare meant
-		// the notation decided: ClientIp::resolve() hands back the candidate verbatim,
-		// exactly as the proxy wrote it, so an operator who noted their office IPv6
-		// differently than their proxy sends it (or whose visitors arrive as
-		// ::ffff:203.0.113.5) silently had no whitelist at all, without any feedback.
-		// Subnets could not be entered either. Two consequences of the change, both
-		// intended: notations that denote the same address now compare equal, and a
-		// CIDR line works. A `/0` line does NOT (see ClientIp::ip_in_cidr) — otherwise
-		// "whitelist everything" would be a one-liner.
-		$ip_whitelisted = ClientIp::matches_list(
-			$this->get_client_ip(),
-			preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_IP_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY )
-		);
-
-		// Check whether the site is whitelisted.
-		//
-		// THE HOST COMES FROM THE SERVER, NEVER FROM THE REQUEST. Until 5.3.4 this
-		// matched against HTTP_HOST . REQUEST_URI, and HTTP_HOST is set by the client —
-		// so anyone who knew a configured line could claim the whitelist with a single
-		// forged header and pass unevaluated (measured, ISSUES.md). It was the last
-		// remnant of the header-decides-the-gate class that the referer terms belonged
-		// to. Host AND port are taken from the `home` option (the port matters: an
-		// install reachable on :8080 has entries written that way), plus `siteurl` as a
-		// second admissible host for setups whose wp-admin lives on another domain.
-		//
-		// Semantics of existing entries are preserved as long as they name the site's
-		// REAL host. Entries naming an alias (www. vs. bare, a mapped second domain)
-		// stop matching — fail-safe (the whitelist only ever gets narrower, never
-		// wider), but a real behaviour change, hence documented in handbuch/gate.md.
-		$site_whitelisted = false;
-		$lines            = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_SITE_WHITELIST ), -1, PREG_SPLIT_NO_EMPTY );
-		if ( count( $lines ) > 0 && array_key_exists( 'REQUEST_URI', $_SERVER ) ) {
-			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared, never output or stored; sanitizing would alter the path being compared.
-			$request_uri = preg_replace( '/^(https?:\/\/)/i', '', (string) wp_unslash( $_SERVER['REQUEST_URI'] ) );
-			foreach ( self::server_known_hosts() as $host ) {
-				foreach ( $lines as $line ) {
-					$line = trim( $line );
-					if ( '' !== $line && strpos( $host . $request_uri, $line ) === 0 ) {
-						$site_whitelisted = true;
-					}
-				}
-			}
-		}
-		$ajax   = defined( 'DOING_AJAX' ) && DOING_AJAX;
-		$action = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
-
-		if ( $this->is_special_case_request( $action ) ) {
-			$site_whitelisted = true;
-		}
-
 		// Computed HERE, BEFORE save_for_analysis() — not down in the non-ajax gate
-		// below, where it used to live. save_for_analysis() persists a type-4 row from
-		// THIS call, and REST_ROUTES_PLAN.md AP5 needs $this->rest_route (read via
-		// get_rest_route() in save_message()) already set for that row. check_rest_routes()
-		// is pure request inspection (only $_SERVER/$_GET/$_POST + the option, see its
-		// docblock) — computing it here changes no other behavior, and the boolean is
-		// reused below instead of calling the method a second time.
-		$route_found = $this->check_rest_routes();
+		// in triage_request(), where it used to live. save_for_analysis() persists a
+		// type-4 row from THIS call, and REST_ROUTES_PLAN.md AP5 needs $this->rest_route
+		// (read via get_rest_route() in save_message()) already set for that row.
+		// check_rest_routes() is pure request inspection (only $_SERVER/$_GET/$_POST +
+		// the option, see its docblock) — computing it here changes no other behavior,
+		// and the boolean is reused in triage_request() instead of calling the method a
+		// second time.
+		$this->route_found = $this->check_rest_routes();
 
 		$this->save_for_analysis();
 
-		// If the client or the site is whitelisted, stop the further processing.
+		// Is this request aimed at a real wp-admin SCREEN — as opposed to a dispatch
+		// endpoint that merely happens to define WP_ADMIN? Answered HERE, at include
+		// time, because all three inputs are already available and all three are SERVER
+		// truth: WP_ADMIN is defined by wp-admin/admin.php BEFORE wp-load.php runs, the
+		// ajax constant likewise, and SCRIPT_FILENAME is the file the web server chose
+		// to execute. None of them is a header or a path fragment the sender picks —
+		// that distinction is the whole difference to the `/wp-admin/` REFERER term that
+		// was removed in 5.3.0 and must never come back (see triage_request()).
 		//
-		// NO REQUEST HEADER MAY EVER DECIDE THIS AGAIN. Until 5.3.0 this condition also
-		// carried two referer-based exemptions — a `?rest_route=` prefix (gated by the
-		// removed "Apply on REST-API" option) and "the referer contains /wp-admin/".
-		// Both were skipping the ENTIRE spam check, including the login check, on a
-		// single header the sender picks freely; the second one also worked from a
-		// foreign host and as a query-string substring. They are gone. Legitimate
-		// backend traffic does not need them: what is evaluated behind this gate is
-		// only what matches a field pattern or a monitored ajax action, and backend
-		// POSTs (post.php, options.php, the block editor's REST save, admin-ajax,
-		// builder settings screens) match neither — measured with a real logged-in
-		// session in tests/integration/cases/backend-posts.mjs.
+		// A hit does NOT exempt anything by itself. It only says: this request may
+		// deserve the capability question, and that question cannot be asked here —
+		// current_user_can() needs pluggable.php, which wp-settings.php loads AFTER the
+		// plugin include, so calling it now would be a fatal. Hence the deferral to
+		// `init` priority 0, where the answer is given in evaluate_admin_screen_post().
 		//
-		// What still comes from the request, and why it is bounded: the two remaining
-		// terms are keyed on the URL (`is_special_case_request()`, anchored + narrowed
-		// by the request's own action/body shape) and on `POW_SITE_WHITELIST`, whose
-		// host half no longer comes from the request at all — since 5.3.4 the lines are
-		// matched against `server_known_hosts() . REQUEST_URI`, i.e. the hosts derived
-		// from the `home`/`siteurl` options (see the block above), so a forged `Host`
-		// header can no longer claim an admin-entered whitelist line. Both are
-		// ADMIN-configured or fixed integration endpoints, not switches a visitor turns
-		// on; that is the line this gate holds.
-		if ( ! $ip_whitelisted && ! $site_whitelisted ) {
-			//Ajax-calls get a different treatment
-			if ( $ajax ) {
-				//Post-requests from the plugin
-				if ( ! in_array( $action, array( 'get_stamp', 'check_stamp' ), true ) ) {
-					if ( $this->check_explicit_actions() ) {
-						// Only explicitly listed actions shall be allowed that are listed on the explicit actions list
-						add_action( 'init', array( $this, 'run' ) );
-						$this->check_submit( null, $this->request_data, 'ajax-call', $action, $ajax );
-						return;
-					}
-				} else {
-					add_action( 'init', array( $this, 'run' ) );
-				}
-			} elseif ( ! ( ! get_option( Option::POW_BLOCK_LOGIN ) && isset( $this->whole_request_data ['wp-submit'] ) ) ) {
-				//Do not apply if login shall not be blocked and it is a login
-				//Do not apply if the request is a wordfence_syncAttackData-Request from Wordfence
-				if ( ! ( isset( $this->request_data['wordfence_syncAttackData'] ) && count( $this->request_data ) === 1 ) ) {
-					add_action( 'init', array( $this, 'run' ) );
-					$pattern_found = $this->check_existing_patterns();
-					$action_found  = $this->check_explicit_actions();
-					// $route_found: computed earlier, before save_for_analysis() — see there.
-					//WooCommerce
-					if ( (
-							isset( $this->request_data['update_cart'] ) && isset( $this->request_data['cart'] ) && isset( $this->request_data['woocommerce-cart-nonce'] )
-						) || (
-							isset( $this->whole_request_data ['wc-ajax'] ) && 'checkout' === $this->whole_request_data ['wc-ajax']
-						)
-						|| $pattern_found
-						|| $action_found
-						|| $route_found
-					) {
-						$this->check_submit( null, $this->request_data, 'specific call' );
-						return;
-					}
-				}
+		// NO wp_unslash() HERE, and that is measured, not stylistic. On the normal path
+		// this runs at include time, i.e. BEFORE wp_magic_quotes(), so the value is raw —
+		// and stripslashes() would eat the single backslashes of a Windows path
+		// (C:\www\wp-admin\admin-post.php) before is_core_admin_screen_post() gets to
+		// normalise \ to /. The path would collapse into ONE segment, admin-post.php
+		// would no longer be recognised, and a dispatch endpoint that serves anonymous
+		// senders would be treated as an admin SCREEN — the exact opposite of what the
+		// NON_SCREEN_ENDPOINTS list is for. The late path (see the did_action() belt
+		// below) does see magic-quoted input, but doubled backslashes are harmless: the
+		// check is segment-wise, and admin-post.php stays its own segment either way.
+		// Pinned in tests/unit/OverbroadPatternGuardTest.php for both spellings.
+		//
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set path, only compared against a fixed list of file names inside is_core_admin_screen_post(); never stored, never printed.
+		$screen_script = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
+		$screen_hit    = Overbroad_Pattern_Guard::is_core_admin_screen_post(
+			is_admin(),
+			// The CONSTANT, deliberately not wp_doing_ajax(). That function applies the
+			// `wp_doing_ajax` filter, and at plugin-include time no plugin has registered
+			// a filter yet — so the function can only ever be slower here, never more
+			// correct, and a filter added later would silently move this decision into
+			// third-party hands. The gate below uses the same constant form for the same
+			// reason; check_submit() may use wp_doing_ajax() because it runs late. Do not
+			// "unify" these two.
+			defined( 'DOING_AJAX' ) && DOING_AJAX,
+			$screen_script
+		);
+
+		if ( $screen_hit ) {
+			// BELT, and it is fail-CLOSED. Normally this constructor runs long before
+			// `init`, so the deferral below is what happens. But Stamp is constructed at
+			// plugin-INCLUDE time, and there is a request shape where that include
+			// happens after `init` has already fired: the activation request on
+			// plugins.php includes the plugin file mid-request to catch fatals. That is
+			// an admin screen, so it is a screen hit — and an add_action( 'init', … )
+			// registered after `init` is over never fires again, which would leave this
+			// request evaluated by nobody at all: permanently fail-open, silently, and
+			// only on the one request nobody re-runs. So when `init` is already gone,
+			// the capability question is asked right now instead of being queued.
+			if ( did_action( 'init' ) ) {
+				$this->evaluate_admin_screen_post();
+				return;
 			}
+			add_action( 'init', array( $this, 'evaluate_admin_screen_post' ), 0 );
+			// The `return` is load-bearing, not tidiness: without it the triage would
+			// run here AND again from the deferred callback — every screen POST
+			// evaluated twice, with two verdicts, two counters and two log lines.
+			return;
 		}
+
+		// …and only now the question this plugin exists for: is this request evaluated
+		// at all? The whole block — whitelists, special cases, the gate `if` with its
+		// ajax branch, the login and Wordfence exclusions, the run() registrations and
+		// the check_submit() calls — lives in trait-stamp-triage.php since the file-size
+		// cut (PLAN-DATEIGROESSE.md). SYNCHRONOUS: for every request that is not an
+		// admin-screen POST — which is all normal traffic, frontend, ajax, REST and
+		// wp-login.php alike — the call sits here, at the end of the constructor,
+		// exactly where the block itself used to sit. Anything that would defer or skip
+		// it BEYOND the screen branch above is a change to the security boundary, not a
+		// refactoring.
+		$this->triage_request();
 	}
 
 	/**
@@ -424,23 +416,6 @@ class Stamp {
 			}
 		}
 		return false;
-	}
-
-	private function capture_request_data() {
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Spam filter must inspect every third-party form POST; no nonce exists for foreign forms. Read-only capture only; the real gate is the PoW/token check downstream.
-		$this->request_data = $_POST; // Standard POST data
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- see note above: read-only capture of the full request for inspection, not a state-changing action.
-		$this->whole_request_data = $_REQUEST; // Standard REQUEST data
-
-		// If the request is JSON, read data from php://input
-		if ( isset( $_SERVER['REQUEST_METHOD'] ) && 'POST' === $_SERVER['REQUEST_METHOD']
-			&& isset( $_SERVER['CONTENT_TYPE'] ) && strpos( $_SERVER['CONTENT_TYPE'], 'application/json' ) !== false ) {
-			$json_data = json_decode( file_get_contents( 'php://input' ), true );
-			if ( ! empty( $json_data ) ) {
-				$this->request_data       = array_merge( $this->request_data, $json_data );
-				$this->whole_request_data = array_merge( $this->whole_request_data, $json_data );
-			}
-		}
 	}
 
 	private function check_explicit_actions() {
@@ -724,7 +699,7 @@ class Stamp {
 	 * @return bool
 	 */
 	private function matches_blocked_values( $fields ) {
-		return self::blocklist_matches( $fields );
+		return self::blocklist_matches( $fields, $this->envelope_raw() );
 	}
 
 	/**
@@ -747,10 +722,21 @@ class Stamp {
 	 * the submission as spam under the unchanged reason code
 	 * Classification_Reason::CODE_WILDCARD.
 	 *
-	 * @param mixed $fields Field map to test.
+	 * THE RAW ENVELOPE STRINGS ($extra_raw) take part in the PLAIN-VALUE comparison only,
+	 * never in the rules. That split is the point: a rule addresses a FIELD, and fields
+	 * are exactly what unpacking created — a rule has the structure now, so it needs no
+	 * fallback. A plain value asks "does this submission contain X anywhere", and "anywhere"
+	 * used to include the inside of the envelope string; that is the coverage being
+	 * restored. See Echo_Values::matches_wildcard_values()'s $extra_strings.
+	 *
+	 * @param mixed    $fields    Field map to test.
+	 * @param string[] $extra_raw Original strings of the fields Field_Envelopes::unpack()
+	 *                            replaced (Stamp::envelope_raw()). Empty for the agent-
+	 *                            facing diagnosis, which is handed a field map rather than
+	 *                            a request.
 	 * @return bool
 	 */
-	public static function blocklist_matches( $fields ) {
+	public static function blocklist_matches( $fields, $extra_raw = array() ) {
 		$option = (string) get_option( Option::POW_BLOCKED_VALUES );
 		if ( '' === trim( $option ) ) {
 			return false;
@@ -760,7 +746,7 @@ class Stamp {
 
 		$own_domains = Echo_Store::site_domains();
 		if ( ! empty( $partition['values'] )
-			&& Echo_Values::matches_wildcard_values( $fields, $partition['values'], $own_domains ) ) {
+			&& Echo_Values::matches_wildcard_values( $fields, $partition['values'], $own_domains, $extra_raw ) ) {
 			return true;
 		}
 		foreach ( $partition['rules'] as $rule ) {
@@ -1131,7 +1117,7 @@ class Stamp {
 			&& Classification_Reason::seeds_echo_values( $this->classification_reason )
 			&& ! get_option( Option::POW_SIMULATE_SPAM )
 		) {
-			Echo_Store::record( self::strip_plugin_fields( $gdpr_fields ) );
+			Echo_Store::record( self::strip_plugin_fields( $gdpr_fields ), $this->envelope_roots() );
 		}
 
 		// If message shall be saved before flagging
@@ -1155,9 +1141,11 @@ class Stamp {
 						if ( 2 === count( $args ) ) {
 							$field_link = &$this->access_object_or_array( $gdpr_fields, html_entity_decode( $args[0] ) );
 							$post_link  = &$this->access_object_or_array( $this->request_data, html_entity_decode( $args[0] ) );
-							if ( isset( $field_link ) ) {
+							// is_scalar, nicht nur isset: seit Field_Envelopes kann ein Feldname
+							// auf eine Struktur zeigen — Prefix davor waere eine Warnung.
+							if ( isset( $field_link ) && is_scalar( $field_link ) ) {
 								$prefix     = htmlspecialchars( $args[1], ENT_QUOTES, 'UTF-8' );
-								$post_link  = $prefix . $post_link;
+								$post_link  = is_scalar( $post_link ) ? $prefix . $post_link : $post_link;
 								$field_link = $prefix . $field_link;
 							}
 						}
@@ -1419,7 +1407,7 @@ class Stamp {
 		//     a recent spam-folder message — catches the same sender/domain on ANY
 		//     form / ANY IP within the TTL window (would have caught field datum #2).
 		//     Cheap: one get_transient() + hash lookups.
-		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields ) ) {
+		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields, $this->envelope_roots() ) ) {
 			$this->print_debug_information( 'Echo value match' );
 			$this->plugin_spam           = true;
 			$this->classification_reason = Classification_Reason::CODE_ECHO_LOCK;
@@ -1450,25 +1438,25 @@ class Stamp {
 	 */
 	private function classify_blocked_value( $gdpr_fields, $content_fields, $origin ) {
 		// (2) Blocked value: a user-content field matches one of the operator's
-		//     POW_BLOCKED_VALUES lines. Reason code CODE_WILDCARD ('wildcard') is
-		//     UNCHANGED — it is stored as `_gdpr_reason` in live databases and is a
-		//     corpus label; only its source option and its UI label moved.
-		//     The trailing exemption keeps a REGISTERED user signing in on wp-login.php
-		//     out of this classification, so a sender-domain entry ("@gmail.com")
-		//     cannot lock the operator out of his own site. It applies only when EVERY
-		//     address that actually triggered the block belongs to a registered user —
-		//     appending a known registered address to an otherwise blocked login used to
-		//     buy the exemption, measured. That, why it is NOT "registered addresses are
-		//     exempt everywhere", and why the anchor is the server-set login screen rather
-		//     than anything read out of the request, is spelled out at
-		//     is_exempt_login_submission().
-		//     ORDER IS LOAD-BEARING, do not reorder these terms: the exemption stands
-		//     BEHIND matches_blocked_values() so that &&'s short-circuit keeps
+		//     POW_BLOCKED_VALUES lines. Reason code CODE_WILDCARD ('wildcard') is UNCHANGED —
+		//     stored as `_gdpr_reason` in live databases and a corpus label; only its source
+		//     option and its UI label moved.
+		//     The trailing exemption keeps a REGISTERED user signing in on wp-login.php out of
+		//     this classification, so a sender-domain entry ("@gmail.com") cannot lock the
+		//     operator out of his own site. It applies only when EVERY address that actually
+		//     triggered the block belongs to a registered user — appending a known registered
+		//     address to an otherwise blocked login used to buy the exemption, measured.
+		//     That, why it is NOT "registered addresses are exempt everywhere", and why the
+		//     anchor is the server-set login screen rather than anything read out of the
+		//     request, is spelled out at is_exempt_login_submission().
+		//     ORDER IS LOAD-BEARING, do not reorder these terms: the exemption stands BEHIND
+		//     matches_blocked_values() so that &&'s short-circuit keeps
 		//     Echo_Store::user_email_hashes() (a get_users() query) off every ordinary
 		//     unauthenticated POST — running it there would be a fresh DoS vector.
-		//     The echo branch (1) above deliberately carries NO such term: it is already
-		//     safe through its own exclude set, and adding one there would obscure that.
-		if ( $gdpr_fields && ! $this->plugin_spam && $this->matches_blocked_values( $content_fields ) && ! $this->is_exempt_login_submission( $origin, $content_fields ) ) {
+		//     The echo branch (1) carries NO such term: already safe via its own exclude set.
+		//     FIRST TERM: not `$gdpr_fields` alone — this stage also reads raw text the capture
+		//     kept back, and an oversized JSON body leaves the map empty. handbuch/envelopes.md §3.
+		if ( ( $gdpr_fields || $this->envelope_raw() ) && ! $this->plugin_spam && $this->matches_blocked_values( $content_fields ) && ! $this->is_exempt_login_submission( $origin, $content_fields ) ) {
 			$this->print_debug_information( 'Blocked value match' );
 			$this->plugin_spam           = true;
 			$this->classification_reason = Classification_Reason::CODE_WILDCARD;

@@ -15,11 +15,14 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
 class Settings_Menu {
 
-	// Die sechs ausgelagerten Sektionen dieser Klasse (Welle 3, PLAN-DATEIGROESSE.md).
+	// Die acht ausgelagerten Sektionen dieser Klasse (Welle 3, PLAN-DATEIGROESSE.md; die
+	// drei get_default_*()-Seeds seit PLAN-BUILDER-SEED.md Phase 3 weiter aufgeteilt).
 	// Traits werden zur Kompilierzeit in die Klasse kopiert, muessen also VOR ihr geladen
 	// sein (require_once-Reihenfolge in recaptcha-gdpr-compliant.php). Schnittlinie und
 	// Begruendung stehen im Kopf jeder Trait-Datei.
-	use Settings_Defaults;
+	use Settings_Default_Actions;
+	use Settings_Default_Patterns;
+	use Settings_Default_Routes;
 	use Settings_Options;
 	use Settings_Options_Storage;
 	use Settings_Status;
@@ -86,6 +89,7 @@ class Settings_Menu {
 		// actually needs the answer is the admin looking at a screen full of spam.
 		add_action( 'wp_ajax_' . self::AJAX_SELF_TEST, array( $this, 'self_test_callback' ) );
 		add_action( 'wp_ajax_' . self::AJAX_DIAG_TASK, array( $this, 'diag_task_callback' ) );
+		add_action( 'wp_ajax_' . self::AJAX_SUPPORT_REPORT, array( $this, 'support_report_callback' ) );
 	}
 
 	/** Ajax action + nonce of the settings-page self-test button. */
@@ -93,6 +97,21 @@ class Settings_Menu {
 
 	/** Ajax action + nonce of the two diagnostic resets. */
 	const AJAX_DIAG_TASK = 'gdpr_pow_diag_task';
+
+	/** Ajax action + nonce of the "Support report" button (Support_Report). */
+	const AJAX_SUPPORT_REPORT = 'gdpr_pow_support_report';
+
+	/**
+	 * Support-forum base URL, shared by the header nudge (render_header_message()),
+	 * the spam-folder review nudge (Message_Page::show_evaluation_request(), same
+	 * "Get help in the support forum" link), and the Diagnostics-tab report row's
+	 * "Open support forum" link (that one appends `#new-post` — a NEW topic, not the
+	 * forum root). One constant so a URL/slug change cannot land in one place and not
+	 * the other two; pinned in tests/unit/SupportReportWiringTest.php.
+	 *
+	 * @var string
+	 */
+	const SUPPORT_FORUM_URL = 'https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/';
 
 	/** Panel id of the synthetic Diagnostics tab (not derived from an option group). */
 	const TAB_DIAGNOSTICS = 'gdpr-tab-diagnostics';
@@ -142,6 +161,24 @@ class Settings_Menu {
 				'notes'   => isset( $result['details']['notes'] ) ? (array) $result['details']['notes'] : array(),
 			)
 		);
+	}
+
+	/**
+	 * Build the copyable, forum-safe status block for the Diagnostics tab's
+	 * "Support report" button (Support_Report). Same two guards as every other
+	 * diagnostic action on this tab: a stranger who merely knows the action name
+	 * must not be able to trigger it.
+	 *
+	 * @return void
+	 */
+	public function support_report_callback() {
+		$nonce = isset( $_POST['security_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['security_nonce'] ) ) : '';
+
+		if ( ! current_user_can( 'manage_options' ) || ! wp_verify_nonce( $nonce, self::AJAX_SUPPORT_REPORT ) ) {
+			wp_send_json_error( array( 'message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
+		}
+
+		wp_send_json_success( array( 'report' => Support_Report::render( Support_Report::collect() ) ) );
 	}
 
 	/**

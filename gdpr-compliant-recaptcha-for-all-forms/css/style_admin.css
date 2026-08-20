@@ -22,6 +22,26 @@
 	font-size: 18px;
 }
 
+/* The header line's second, quieter action (render_header_message()): visually
+ * recedes behind the plain "Get help in the support forum" link next to it -- no
+ * button look, no box, just smaller/muted text. The status span reserves nothing
+ * extra; it is empty until a copy attempt, so it costs no space up front and only
+ * ever appends inline text at the END of the sentence (never inserted mid-line). */
+.gdpr-header-report-link {
+	font-size: 12px;
+	color: #666;
+}
+
+.gdpr-header-report-link:hover,
+.gdpr-header-report-link:focus {
+	color: #1d2327;
+}
+
+.gdpr-header-report-status {
+	font-size: 12px;
+	color: #666;
+}
+
 /* ---------------------------------------------------------------------------------------
  * Status strip (Settings_Menu::render_status_strip())
  * ------------------------------------------------------------------------------------- */
@@ -99,6 +119,59 @@
 
 .gdpr-action-result.gdpr-result-ask {
 	border-left-color: #8a5a00;
+}
+
+/* Support report (Support_Report): the result area holds a readonly textarea plus a
+ * Copy button instead of a verdict sentence — same .gdpr-action-result shell. */
+.gdpr-support-report-text {
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	margin-bottom: 8px;
+	font-family: Consolas, Monaco, monospace;
+	font-size: 12px;
+	resize: vertical;
+}
+
+/* The bar under the textarea: Copy (primary), an aria-live status line, and the
+ * forum link — right-aligned as a cluster, same as the row's own control column. */
+.gdpr-support-report-bar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.gdpr-support-report-status {
+	font-size: 12px;
+	color: #666;
+}
+
+.gdpr-support-report-forum-link {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1;
+	color: #666;
+	text-decoration: none;
+	padding: 6px 10px;
+	border: 1px solid #e0e0e0;
+	border-radius: 4px;
+	background: #fff;
+}
+
+.gdpr-support-report-forum-link:hover,
+.gdpr-support-report-forum-link:focus {
+	color: #1d2327;
+	border-color: #b0b0b0;
+}
+
+/* Promoted to "the next action" once a copy just succeeded — a class swap only
+ * (same padding/border-width/font-size as the quiet state), so nothing reflows. */
+.gdpr-support-report-forum-link--ready {
+	color: #1e7e34;
+	border-color: #1e7e34;
+	background: #e6f4ea;
 }
 
 .gdpr-result-verdict {

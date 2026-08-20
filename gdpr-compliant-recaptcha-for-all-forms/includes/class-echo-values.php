@@ -483,6 +483,34 @@ final class Echo_Values {
 	}
 
 	/**
+	 * Split a field map into the part that contributes a long-text hash and the part
+	 * that does not, by TOP-LEVEL key. Returns a two-element list indexed so that index
+	 * 1 is the text-bearing part and index 0 is the one without — the index IS the flag
+	 * build_echo_set() reads, which keeps the extraction loop written exactly once.
+	 *
+	 * A non-array input, or an empty root list, degenerates to "everything bears text",
+	 * i.e. the behaviour every caller had before the parameter existed.
+	 *
+	 * @param mixed    $fields        Field map.
+	 * @param string[] $no_text_roots Top-level names excluded from the long-text hash.
+	 * @return array{0: array<mixed>, 1: mixed}
+	 */
+	private static function partition_by_roots( $fields, $no_text_roots ) {
+		if ( ! is_array( $fields ) || empty( $no_text_roots ) ) {
+			return array( array(), $fields );
+		}
+		$without = array();
+		foreach ( (array) $no_text_roots as $root ) {
+			if ( array_key_exists( $root, $fields ) ) {
+				$without[ $root ] = $fields[ $root ];
+				unset( $fields[ $root ] );
+			}
+		}
+		return array( $without, $fields );
+	}
+
+
+	/**
 	 * Build the set of echo hashes for a submission: the SHA-256 of every extracted
 	 * core value (sender email, payload domain/path-identity, phone, long-text). The
 	 * site's own registrable domain(s) are excluded from URL extraction. The result
@@ -498,27 +526,55 @@ final class Echo_Values {
 	 *                                  value that belongs to a real account out of the echo
 	 *                                  lock, so submitting spam with a user's address cannot
 	 *                                  lock that user out at login/password-reset.
+	 * @param string[] $no_text_roots   Top-level field names whose subtree contributes
+	 *                                  EMAIL, DOMAIN and PHONE hashes as usual but NO
+	 *                                  long-text hash. The unpacked JSON envelopes of a
+	 *                                  form builder (Field_Envelopes::unpack(), passed in
+	 *                                  by Echo_Store) — a FOURTH defense line, and the one
+	 *                                  that only became necessary when those envelopes
+	 *                                  started arriving as structure instead of as one
+	 *                                  opaque string.
+	 *
+	 *                                  WHY: a builder ships its own configuration inside
+	 *                                  the submission, and configuration is CONSTANT per
+	 *                                  form. Ninja Forms carries "Please correct errors
+	 *                                  before submitting this form." (43 normalized
+	 *                                  characters) and "A form with this value has already
+	 *                                  been submitted." (41) in every single submission.
+	 *                                  Seed one of those from a genuine spam submission
+	 *                                  and EVERY later submission of that same form
+	 *                                  carries it too — the form locks itself, and it is
+	 *                                  legitimate senders who keep the lock alive.
+	 *                                  Nothing is lost by skipping it: before unpacking,
+	 *                                  the envelope was ONE value whose text hash differed
+	 *                                  per submission and therefore never matched anything
+	 *                                  anyway. Sender address, payload domain and phone
+	 *                                  keep working inside the envelope, which is
+	 *                                  everything the echo lock ever effectively had
+	 *                                  there.
 	 * @return string[] Unique SHA-256 hashes.
 	 */
-	public static function build_echo_set( $fields, $own_domains = array(), $excluded_hashes = array() ) {
+	public static function build_echo_set( $fields, $own_domains = array(), $excluded_hashes = array(), $no_text_roots = array() ) {
 		$hashes = array();
-		foreach ( self::collect_content_strings( $fields ) as $value ) {
-			foreach ( self::extract_emails( $value ) as $email ) {
-				$hashes[ self::hash_value( $email ) ] = true;
-			}
-			foreach ( self::extract_urls( $value ) as $url ) {
-				$domain = self::registrable_domain( $url, $own_domains );
-				if ( null !== $domain ) {
-					$hashes[ self::hash_value( $domain ) ] = true;
+		foreach ( self::partition_by_roots( $fields, $no_text_roots ) as $with_text => $part ) {
+			foreach ( self::collect_content_strings( $part ) as $value ) {
+				foreach ( self::extract_emails( $value ) as $email ) {
+					$hashes[ self::hash_value( $email ) ] = true;
 				}
-			}
-			$phone = self::normalize_phone( $value );
-			if ( null !== $phone ) {
-				$hashes[ self::hash_value( $phone ) ] = true;
-			}
-			$text = self::normalize_text( $value );
-			if ( null !== $text ) {
-				$hashes[ self::hash_value( $text ) ] = true;
+				foreach ( self::extract_urls( $value ) as $url ) {
+					$domain = self::registrable_domain( $url, $own_domains );
+					if ( null !== $domain ) {
+						$hashes[ self::hash_value( $domain ) ] = true;
+					}
+				}
+				$phone = self::normalize_phone( $value );
+				if ( null !== $phone ) {
+					$hashes[ self::hash_value( $phone ) ] = true;
+				}
+				$text = $with_text ? self::normalize_text( $value ) : null;
+				if ( null !== $text ) {
+					$hashes[ self::hash_value( $text ) ] = true;
+				}
 			}
 		}
 		foreach ( (array) $excluded_hashes as $excluded ) {

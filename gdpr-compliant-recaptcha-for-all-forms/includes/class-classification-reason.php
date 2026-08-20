@@ -151,10 +151,41 @@ final class Classification_Reason {
 	 * Reasons whose submissions must NOT seed the auto-echo lock with their CONTENT
 	 * values — see seeds_echo_values(), which is the only thing that reads this.
 	 *
-	 * All three share one property: a token that VERIFIED was presented, and only the
-	 * solved-PoW row was missing. That is an infrastructure symptom (cache in front of
-	 * `get_stamp`, proxy, a database that cannot store the row, two clocks — HANDBUCH.md
-	 * §12 causes 4/7/8), not a statement about the submitted content.
+	 * THE FIRST THREE share one property: a token that VERIFIED was presented, and only
+	 * the solved-PoW row was missing. That is an infrastructure symptom (cache in front
+	 * of `get_stamp`, proxy, a database that cannot store the row, two clocks —
+	 * HANDBUCH.md §12 causes 4/7/8), not a statement about the submitted content.
+	 *
+	 * CODE_ECHO_LOCK is here for a different reason, and it is the general form of the
+	 * same idea: a verdict that the echo lock itself produced must not RE-SEED the very
+	 * values that produced it. Until 5.6.0 it did — an echo hit is a spam verdict like
+	 * any other, so it recorded again and pushed the entry's expiry to now + TTL_SECONDS.
+	 * The 36h therefore ran from the last HIT rather than from the last real spam, and
+	 * every further submission carrying the value renewed it. A lock could not expire
+	 * while it was being tripped.
+	 *
+	 * That is harmless while the locked value really is spam — the sender is blocked
+	 * either way — and unbounded when it is not. One case MEASURED, one that follows
+	 * from the mechanism:
+	 *
+	 *   - Measured (Echo_Values::build_echo_set()'s $no_text_roots, and arm C of
+	 *     tests/integration/cases/ninja-forms-envelope.mjs): a value that is CONSTANT per
+	 *     form — a builder's configuration text, a dropdown option label — locked the whole
+	 *     form once a single genuine spam submission had seeded it, kept alive entirely by
+	 *     legitimate traffic.
+	 *   - Not measured, but constructively certain from record()'s expiry refresh: a FORGED
+	 *     sender address stays blocked for as long as its real owner keeps trying to write,
+	 *     each attempt renewing their own lock. That is the exact scenario TTL_SECONDS names
+	 *     in its own docblock ("short enough that a forged sender address does not stay
+	 *     blocked"), which is why the refresh contradicted the stated design.
+	 *
+	 * With the entry here, every echo false positive — the two above and any not yet
+	 * known — is bounded by TTL_SECONDS from the last NON-echo spam verdict. The price
+	 * is narrow and named: a repeat sender whose original verdict was deterministic
+	 * (gibberish, blocklist) re-earns that same verdict on every attempt and keeps
+	 * seeding through it, so nothing changes for them; only a sender whose ONLY verdict
+	 * ever was an echo hit, and who waits out the TTL, is released — which is what a TTL
+	 * is for.
 	 *
 	 * @var string[]
 	 */
@@ -162,6 +193,7 @@ final class Classification_Reason {
 		self::NO_POW_TOKEN_NO_ROW,
 		self::NO_POW_TOKEN_IP_CHANGED,
 		self::NO_POW_CHAIN_NO_ROW,
+		self::CODE_ECHO_LOCK,
 	);
 
 	/**
