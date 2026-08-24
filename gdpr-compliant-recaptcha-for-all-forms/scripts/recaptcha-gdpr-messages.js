@@ -651,6 +651,46 @@ function monitorRoute(button) {
 	);
 }
 
+// Per-field gibberish toggle. Since 6.0.0 gibberish detection only ever looks at the
+// fields listed for this form's signature, so this button both adds and removes — the
+// case that usually brings someone here is "stop checking this one". The server refuses
+// password-like names and re-checks the capability and nonce; see
+// Message_Gibberish::gibberish_field_callback().
+function toggleGibberishField(button) {
+	var remove = button.getAttribute('data-selected') === '1';
+	showSpinner();
+	var xhr = new XMLHttpRequest();
+	xhr.open('POST', gdprMsg.ajaxUrl, true);
+	xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+	xhr.onload = function () {
+		hideSpinner();
+		var response = {};
+		try {
+			response = JSON.parse(xhr.responseText);
+		} catch (e) {
+			response = {};
+		}
+		if (xhr.status === 200 && response.success) {
+			var nowSelected = response.data && response.data.selected === 1;
+			button.setAttribute('data-selected', nowSelected ? '1' : '0');
+			button.classList.toggle('is-selected', nowSelected);
+			button.textContent = nowSelected ? gdprMsg.i18n.gibberishOn : gdprMsg.i18n.gibberishOff;
+			showSuccess((response.data && response.data.message) || '');
+		} else {
+			showAlert((response.data && response.data.error_message) || gdprMsg.i18n.gibberishFailed);
+		}
+	};
+	xhr.send(
+		'action=gdpr_gibberish_field' +
+		'&messageType=' + encodeURIComponent(gdprMsg.messageType) +
+		'&field=' + encodeURIComponent(button.getAttribute('data-field')) +
+		'&kind=' + encodeURIComponent(button.getAttribute('data-kind')) +
+		'&signature=' + encodeURIComponent(button.getAttribute('data-signature')) +
+		'&remove=' + (remove ? '1' : '0') +
+		'&security_nonce=' + encodeURIComponent(gdprMsg.nonces.gibberish)
+	);
+}
+
 // One-click "Treat as credential field": the rescue path of the learned
 // credential-field list, for a password that is already readable in the inbox.
 // Confirmed first, because it is irreversible for messages already received —

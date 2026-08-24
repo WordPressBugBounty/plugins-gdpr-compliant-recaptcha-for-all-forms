@@ -264,6 +264,21 @@ class Option {
 	const POW_BLOCKED_VALUES_MIGRATED = self::PREFIX . 'pow_blocked_values_migrated';
 
 	/**
+	 * The gibberish field selection (6.0.0): one rule per line, binding a form
+	 * signature to the field names the content heuristic may look at. Empty value —
+	 * the default, and the value every existing installation gets on update — means
+	 * gibberish detection is OFF. There is deliberately no separate on/off switch:
+	 * the list IS the state, and a second source of truth about the same thing would
+	 * eventually disagree with itself.
+	 *
+	 * Written by the per-field button in the message detail view and by the settings
+	 * textarea; parsed by Gibberish_Fields. Format and reasoning: that class.
+	 *
+	 * @var string
+	 */
+	const POW_GIBBERISH_FIELDS = self::PREFIX . 'pow_gibberish_fields';
+
+	/**
 	 * Third signature class alongside actions/patterns (REST_ROUTES_PLAN.md AP3):
 	 * one REST route/namespace per line, matched against the route
 	 * `RestRoute::extract()` reads off a POST (see Stamp::check_rest_routes()).

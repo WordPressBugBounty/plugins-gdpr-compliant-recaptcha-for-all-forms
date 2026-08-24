@@ -91,9 +91,10 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  *   condition, not the hump count. Accepted: pasting a single 5-hump acronym
  *   identifier as a complete field value, with nothing else in that field, is a rare
  *   shape, and the message is saved and rescuable.
- * - Exemptions: field names that look password-/code-/captcha-like
- *   (is_exempt_field_name()) are skipped entirely — real passwords, API keys and
- *   captcha tokens ARE random strings, and this plugin also runs on login forms.
+ * - NO field-name exemptions live here any more. Until 6.0.0 this class was handed every
+ *   field of every submission and had to guess which ones it had no business scoring;
+ *   since 6.0.0 it scores exactly what it is given, and choosing that is the caller's
+ *   job (Gibberish_Fields, handbuch/gibberish.md).
  *   URLs are stripped from a field's value before tokenizing, so a domain segment
  *   such as "xKcDqWzP.com" never contributes a bare "xKcDqWzP" token.
  * - Email addresses are stripped the same way, but their LOCAL PART is scored
@@ -169,38 +170,6 @@ final class Gibberish_Detector {
 	 * humps, so 4 would already reach into real code pasted in support forms.
 	 */
 	const STRONG_CASE_CHANGE_THRESHOLD = 5;
-
-	/**
-	 * Case-insensitive substrings of a field name that exempt it from scoring
-	 * entirely. Real passwords/API keys/tokens/coupon codes/captcha responses ARE
-	 * random strings — scoring them would produce guaranteed false positives, and
-	 * this plugin also protects login forms. Kept short and specific rather than
-	 * guessed-broad: every entry needs a real support vector before it is added
-	 * (a broader list weakens detection everywhere).
-	 *
-	 * `captcha` was added 2026-08-10 for exactly such a vector (wp.org support case
-	 * fs26): a third-party captcha field posts a long mixed-case token as its whole
-	 * value and was convicted as gibberish. `captcha_code` was already exempt via
-	 * `code`, the bare name `captcha` was not — an arbitrary distinction. The cost is
-	 * ~zero: a field named "captcha" carries a technical value by definition, and a
-	 * bot writing junk into a foreign captcha field fails that captcha anyway.
-	 *
-	 * `turnstile` was added 2026-08-18 for the same kind of vector (wp.org support case
-	 * vczp): Cloudflare Turnstile posts its response as `cf-turnstile-response`, and
-	 * Cloudflare's branding deliberately avoids the word "captcha" — which makes it the
-	 * ONE widespread provider this list did not already cover, since
-	 * `g-recaptcha-response`, `h-captcha-response` and `frc-captcha-solution` all match
-	 * `captcha`. Measured on an ordinary Contact Form 7 enquiry: the hidden field ALONE
-	 * carried the message over MESSAGE_GIBBERISH_THRESHOLD while the visitor's own text
-	 * scored nothing, and because a gibberish verdict seeds the echo lock
-	 * (Classification_Reason::seeds_echo_values()), the same sender came back as "Known
-	 * spam value" afterwards. The entry is the generic word rather than `cf-turnstile`:
-	 * integrations rename the field (`turnstile_response`), and an exemption only skips
-	 * content scoring for that one field.
-	 *
-	 * @var string[]
-	 */
-	const EXEMPT_FIELD_NAME_SUBSTRINGS = array( 'pass', 'pwd', 'token', 'code', 'coupon', 'captcha', 'turnstile' );
 
 	/**
 	 * Count "inner" case changes in a token: the number of positions (starting
@@ -341,24 +310,6 @@ final class Gibberish_Detector {
 	}
 
 	/**
-	 * Whether a field name looks password-/code-/token-like and should therefore
-	 * be exempted from gibberish scoring entirely (case-insensitive substring
-	 * match against EXEMPT_FIELD_NAME_SUBSTRINGS).
-	 *
-	 * @param string $name Field name.
-	 * @return bool
-	 */
-	public static function is_exempt_field_name( $name ) {
-		$name = strtolower( (string) $name );
-		foreach ( self::EXEMPT_FIELD_NAME_SUBSTRINGS as $needle ) {
-			if ( false !== strpos( $name, $needle ) ) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/**
 	 * Candidate tokens taken from the LOCAL PARTS of email addresses in a field value
 	 * (everything before the '@'), tokenized the same way as ordinary content.
 	 *
@@ -450,10 +401,9 @@ final class Gibberish_Detector {
 
 	/**
 	 * Scan a (possibly nested) field-name => value map for gibberish tokens,
-	 * skipping exempt field names and recursing defensively into nested arrays
-	 * (form builders occasionally post nested structures). The exemption check
-	 * runs BEFORE the array recursion, so an exempt name shields its entire
-	 * subtree (e.g. a `codes[]` multi-input posts as an array under one name).
+	 * recursing defensively into nested arrays (form builders occasionally post
+	 * nested structures, and a selected name may itself carry a subtree — e.g. a
+	 * `codes[]` multi-input posts as an array under one name).
 	 *
 	 * Besides the gibberish counts, reports the total number of SCOREABLE
 	 * tokens (see is_scoreable_token()) and whether any scalar field value
@@ -468,36 +418,41 @@ final class Gibberish_Detector {
 	 * Classification_Reason::gibberish()) and does not enter any decision.
 	 *
 	 * @param array $fields      Field name => value (value may itself be an array).
-	 * @param array $exempt_map  Lowercased extra exempt field name => true.
 	 * @param array $seen_local  Lowercased gibberish email local-part tokens already
 	 *                           counted, by reference — see the dedup note at the
 	 *                           local-part block below. Message-wide, hence threaded
 	 *                           through the recursion instead of being rebuilt per call.
-	 * @return array{0: int, 1: int, 2: bool, 3: int, 4: bool} Pure-letter gibberish
-	 *                                        count, alphanumeric gibberish count,
-	 *                                        lone-in-its-field gibberish hit,
-	 *                                        scoreable-token count,
-	 *                                        strong-token hit (see the STRONG-token
-	 *                                        rule in the class docblock).
+	 * @return array{0: int, 1: int, 2: bool, 3: int, 4: bool, 5: string[]} Pure-letter
+	 *                                        gibberish count, alphanumeric gibberish
+	 *                                        count, lone-in-its-field gibberish hit,
+	 *                                        scoreable-token count, strong-token hit
+	 *                                        (see the STRONG-token rule in the class
+	 *                                        docblock), and the names of the fields that
+	 *                                        carried gibberish — attribution only, it
+	 *                                        influences no count and no rule.
 	 */
-	private static function scan_gibberish_tokens( $fields, $exempt_map, &$seen_local ) {
+	private static function scan_gibberish_tokens( $fields, &$seen_local ) {
 		$letters   = 0;
 		$alnum     = 0;
 		$lone      = false;
 		$scoreable = 0;
 		$strong    = false;
+		$hits      = array();
 		foreach ( $fields as $name => $value ) {
 			$name = (string) $name;
-			if ( self::is_exempt_field_name( $name ) || isset( $exempt_map[ strtolower( $name ) ] ) ) {
-				continue;
-			}
 			if ( is_array( $value ) ) {
-				list( $child_letters, $child_alnum, $child_lone, $child_scoreable, $child_strong ) = self::scan_gibberish_tokens( $value, $exempt_map, $seen_local );
+				list( $child_letters, $child_alnum, $child_lone, $child_scoreable, $child_strong, $child_hits ) = self::scan_gibberish_tokens( $value, $seen_local );
 				$letters   += $child_letters;
 				$alnum     += $child_alnum;
 				$lone       = $lone || $child_lone;
 				$scoreable += $child_scoreable;
 				$strong     = $strong || $child_strong;
+				// Report the OUTER name, not the inner one: that is the name the operator
+				// selected and the name he can act on. A nested hit that named its inner
+				// key would point at something he never wrote down.
+				if ( $child_hits ) {
+					$hits[] = $name;
+				}
 				continue;
 			}
 			if ( ! is_scalar( $value ) ) {
@@ -520,6 +475,9 @@ final class Gibberish_Detector {
 						++$alnum;
 					}
 				}
+			}
+			if ( $field_gibberish > 0 ) {
+				$hits[] = $name;
 			}
 			// Email LOCAL PARTS, scored separately because extract_candidate_tokens()
 			// strips whole addresses (see extract_email_local_part_tokens()). They feed
@@ -553,6 +511,9 @@ final class Gibberish_Detector {
 				} else {
 					++$alnum;
 				}
+				// Attribution only — the counts above are untouched by this, and a local
+				// part still feeds neither $field_gibberish nor the solo/strong rules.
+				$hits[] = $name;
 			}
 			// Solo-token rule triggers ONLY on a pure-letter gibberish token. A lone
 			// ALPHANUMERIC value as a form's sole content is far more often legitimate
@@ -574,34 +535,28 @@ final class Gibberish_Detector {
 				}
 			}
 		}
-		return array( $letters, $alnum, $lone, $scoreable, $strong );
+		return array( $letters, $alnum, $lone, $scoreable, $strong, $hits );
 	}
 
 	/**
 	 * Score a whole message (its field name => value map) and report both the verdict
-	 * and the components it rests on. The verdict is identical to
-	 * is_gibberish_message() — that method is a thin wrapper over this one; the extra
-	 * components exist so a caller can record WHY a message was flagged
-	 * (Classification_Reason::gibberish()) without re-running the scan.
+	 * and the components it rests on. The components exist so a caller can record WHY
+	 * a message was flagged (Classification_Reason::gibberish()) without re-running
+	 * the scan.
 	 *
 	 * Verdict: at least MESSAGE_GIBBERISH_THRESHOLD gibberish tokens across all
 	 * evaluated fields, or — solo-token rule, see class docblock — a lone gibberish
 	 * token that is both the entire value of its field AND the only scoreable token
 	 * in the whole form (i.e. the form carries no other substantial free text).
 	 * Callers are responsible for having already stripped the plugin's own fields
-	 * (see Stamp::strip_plugin_fields()) before calling this.
+	 * (see Stamp::strip_plugin_fields()) and for passing ONLY fields that may be
+	 * scored at all (Gibberish_Fields::subset()) before calling this.
 	 *
-	 * @param mixed    $fields             Field name => value map (values may be nested
-	 *                                     arrays). Accepts non-array input defensively
-	 *                                     (treated as neutral) since callers pass
-	 *                                     request-derived data.
-	 * @param string[] $extra_exempt_names Additional field names to skip (matched
-	 *                                     case-insensitively at any nesting level) —
-	 *                                     e.g. the request's hashPWFields password
-	 *                                     skip list and POW_SKIP_FIELDS entries, whose
-	 *                                     values are legitimately random strings.
+	 * @param mixed $fields Field name => value map (values may be nested arrays).
+	 *                      Accepts non-array input defensively (treated as neutral)
+	 *                      since callers pass request-derived data.
 	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool, strong: bool,
-	 *               scoreable: int} Verdict plus its components: gibberish-token counts
+	 *               scoreable: int, fields: string[]} Verdict plus its components: gibberish-token counts
 	 *                                     per path (their sum is what the message
 	 *                                     threshold sees), whether the solo-token rule
 	 *                                     fired, whether the strong-token rule fired,
@@ -610,7 +565,7 @@ final class Gibberish_Detector {
 	 *                                     NON-verdict explainable, see
 	 *                                     Classification_Reason::scoring()).
 	 */
-	public static function analyze_message( $fields, $extra_exempt_names = array() ) {
+	public static function analyze_message( $fields ) {
 		if ( ! is_array( $fields ) ) {
 			return array(
 				'gibberish' => false,
@@ -619,17 +574,12 @@ final class Gibberish_Detector {
 				'solo'      => false,
 				'strong'    => false,
 				'scoreable' => 0,
+				'fields'    => array(),
 			);
-		}
-		$exempt_map = array();
-		foreach ( $extra_exempt_names as $name ) {
-			if ( '' !== $name ) {
-				$exempt_map[ strtolower( $name ) ] = true;
-			}
 		}
 		// Message-wide dedup set for email local parts, see scan_gibberish_tokens().
 		$seen_local = array();
-		list( $letters, $alnum, $lone, $scoreable, $strong ) = self::scan_gibberish_tokens( $fields, $exempt_map, $seen_local );
+		list( $letters, $alnum, $lone, $scoreable, $strong, $hits ) = self::scan_gibberish_tokens( $fields, $seen_local );
 		// Solo-token rule: the lone gibberish token is necessarily scoreable
 		// itself, so "scoreable === 1" means NO other scoreable token exists
 		// anywhere in the form — the "form otherwise empty" guard.
@@ -642,21 +592,7 @@ final class Gibberish_Detector {
 			'solo'      => $solo,
 			'strong'    => $strong,
 			'scoreable' => $scoreable,
+			'fields'    => array_values( array_unique( $hits ) ),
 		);
-	}
-
-	/**
-	 * Whether a whole message is suspicious — the verdict of analyze_message(), see
-	 * there for the rule. Kept as the boolean entry point Stamp::check_submit() and
-	 * the existing tests use.
-	 *
-	 * @param mixed    $fields             Field name => value map (values may be nested
-	 *                                     arrays); non-array input is neutral.
-	 * @param string[] $extra_exempt_names Additional field names to skip.
-	 * @return bool
-	 */
-	public static function is_gibberish_message( $fields, $extra_exempt_names = array() ) {
-		$analysis = self::analyze_message( $fields, $extra_exempt_names );
-		return $analysis['gibberish'];
 	}
 }

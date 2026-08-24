@@ -449,143 +449,6 @@ class Stamp {
 		return $fields;
 	}
 
-	/**
-	 * Field names whose values must never be gibberish-scored, beyond the
-	 * name-heuristic built into Gibberish_Detector: the request's own
-	 * hashPWFields password skip list (real passwords ARE random strings — e.g.
-	 * a signup form posting two custom-named password fields would otherwise
-	 * contribute two "gibberish" tokens and cross the message threshold) plus
-	 * the admin-configured POW_SKIP_FIELDS entries ("site:field" per line, same
-	 * format save_message() consumes) plus the LEARNED credential field names.
-	 * The last one is not optional: without it a no-JS submission carrying a
-	 * learned password field has no marker to exempt it, and its random password
-	 * would tip the very message into the gibberish classification that the
-	 * marker path is exempt from — the same form judged differently depending on
-	 * whether the JS ran. Collects every key and string leaf from the nested
-	 * hashPWFields structure — a safe superset of the exact path matching
-	 * save_message() performs, fine for an exemption list.
-	 *
-	 * Static and public since the Abilities API surface exists: the classify-text
-	 * ability has to score a supplied field map with EXACTLY this exemption list.
-	 * A second, parallel implementation there would be worse than useless — a
-	 * diagnostic tool that judges differently from the live path sends whoever
-	 * trusts it in the wrong direction. This method holds no instance state, so
-	 * sharing it costs nothing.
-	 *
-	 * @param mixed $fields The submission's field map (pre strip_plugin_fields);
-	 *                      request-/hook-derived, so not guaranteed to be an array.
-	 * @return string[]
-	 */
-	public static function gibberish_exempt_field_names( $fields ) {
-		$names = array();
-		if ( is_array( $fields ) && isset( $fields['hashPWFields'] ) && is_string( $fields['hashPWFields'] ) ) {
-			// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- benign: hashPWFields is the plugin's own base64-encoded password-field skip list (client twin in recaptcha-gdpr-analysis.js), not obfuscated code.
-			$decoded = json_decode( base64_decode( $fields['hashPWFields'] ), true );
-			if ( is_array( $decoded ) ) {
-				$stack = array( $decoded );
-				while ( $stack ) {
-					$node = array_pop( $stack );
-					foreach ( $node as $key => $value ) {
-						// EVERY name from here is ATTACKER-SUPPLIED. hashPWFields travels
-						// with the request; until 5.3.4 each key and each string leaf of
-						// the decoded structure became an exempt field name unchecked. A
-						// bot that passes the PoW (headless browser running our own JS —
-						// the class the 2026-07-16 field data documents) and has read the
-						// publicly available source could therefore list its target's real
-						// field names ("your-message", "your-email") as hashPWFields
-						// entries and become invisible to gibberish scoring, whatever it
-						// actually sent. See ISSUES.md.
-						//
-						// The marker's legitimate job is narrow: naming the password
-						// fields of THIS form so their values are not scored as gibberish.
-						// So a name is only honoured if it plausibly IS a credential field
-						// name. A password field with an unusual name loses its exemption
-						// until an admin confirms it — that is what Credential_Learning's
-						// suggestion path is for, and its learned names are added below,
-						// server-side and unfiltered.
-						if ( is_string( $key ) && '' !== $key && Credential_Fields::is_password_key( $key ) ) {
-							$names[] = $key;
-						}
-						if ( is_array( $value ) ) {
-							$stack[] = $value;
-						} elseif ( is_string( $value ) && '' !== $value && Credential_Fields::is_password_key( $value ) ) {
-							$names[] = $value;
-						}
-					}
-				}
-			}
-		}
-		$lines = preg_split( '/\r\n|\n|\r/', (string) get_option( Option::POW_SKIP_FIELDS ), -1, PREG_SPLIT_NO_EMPTY );
-		foreach ( $lines as $line ) {
-			$args = explode( ':', $line );
-			if ( 2 === count( $args ) ) {
-				$names[] = trim( $args[1] );
-			}
-		}
-		foreach ( Credential_Learning::learned_names() as $learned ) {
-			$names[] = $learned;
-		}
-
-		/**
-		 * Filters the field names exempted from gibberish/content scoring.
-		 *
-		 * The plugin's FIRST public filter, added 2026-08-10 for the wp.org support case
-		 * that asked for exactly this (fs26): the admin-facing list (POW_SKIP_FIELDS) is
-		 * site-scoped free text — the right tool for a site owner, the wrong one for a
-		 * developer who needs the decision to follow form logic. This hook is that second
-		 * half, and it is deliberately SERVER-SIDE, unlike the `hashPWFields` marker
-		 * above, which arrives with the request and is therefore attacker-supplied
-		 * (see ISSUES.md).
-		 *
-		 * Being the first filter makes this an API commitment, so it carries the
-		 * plugin's established `gdpr_pow_` prefix (Option::PREFIX) rather than a new
-		 * one. The return value is normalised by normalize_exempt_names(): a filter
-		 * returning garbage degrades to the unfiltered list instead of throwing or —
-		 * far worse for a security plugin — silently exempting everything.
-		 *
-		 * @since 5.3.2
-		 *
-		 * @param string[] $names  Field names exempted from gibberish scoring. Matched
-		 *                         case-insensitively at any nesting level.
-		 * @param mixed    $fields The submission's field map (pre strip_plugin_fields);
-		 *                         request-derived, so not guaranteed to be an array.
-		 */
-		$filtered = apply_filters( 'gdpr_pow_gibberish_exempt_fields', $names, $fields );
-
-		return self::normalize_exempt_names( $filtered, $names );
-	}
-
-	/**
-	 * Normalise whatever a filter returned into a usable exempt-name list.
-	 *
-	 * Pure and separate from the hook site on purpose. A filter is third-party code
-	 * that may return anything at all, and in a security plugin the failure direction
-	 * matters: a malformed return must never widen the exemption list, because a wider
-	 * list means LESS scoring. Hence non-array input falls back to the unfiltered
-	 * names, and non-string entries are dropped rather than coerced — a stringified
-	 * array or object would become a nonsense field name that silently matches nothing
-	 * (harmless) or something (not harmless).
-	 *
-	 * Being a separate pure function also keeps it directly unit-testable without a
-	 * WordPress runtime (tests/unit/StampExemptNamesTest.php).
-	 *
-	 * @param mixed    $filtered The filter's return value — untrusted, any type.
-	 * @param string[] $fallback The unfiltered list, used when $filtered is unusable.
-	 * @return string[] Non-empty string field names.
-	 */
-	public static function normalize_exempt_names( $filtered, $fallback ) {
-		if ( ! is_array( $filtered ) ) {
-			return $fallback;
-		}
-		$clean = array();
-		foreach ( $filtered as $name ) {
-			if ( is_string( $name ) && '' !== $name ) {
-				$clean[] = $name;
-			}
-		}
-		return $clean;
-	}
-
 	private function check_existing_patterns() {
 		$pattern_found = false;
 		//Specific posts as proprietary ajax calls
@@ -1024,9 +887,9 @@ class Stamp {
 	 * feeding them '[redacted]' would change what counts as spam — a silent weakening
 	 * of the filter. They are safe on raw values: the echo store only keeps sha256
 	 * hashes (text hashes only from 40 chars up), wildcard matching stores nothing at
-	 * all, and the gibberish detector needs the raw text and exempts password fields
-	 * itself (is_exempt_field_name(): substring `pass`/`pwd`, plus
-	 * gibberish_exempt_field_names()).
+	 * all, and the gibberish detector needs the raw text — which since 6.0.0 it only
+	 * ever sees for fields the operator explicitly selected, and never for a field the
+	 * credential path recognised as a password (Gibberish_Fields).
 	 */
 	public function check_submit( $wp = null, $gdpr_fields = null, $form_builder = '', $action = null, $ajax = null, $origin = '' ) {
 
@@ -1057,7 +920,7 @@ class Stamp {
 		$this->classify_echo_lock( $gdpr_fields, $content_fields );
 		$this->classify_blocked_value( $gdpr_fields, $content_fields, $origin );
 
-		$analysis             = $this->classify_gibberish( $gdpr_fields );
+		$analysis             = $this->classify_gibberish( $gdpr_fields, $origin );
 		$quarantine_only_spam = $this->classify_under_attack_quarantine( $gdpr_fields );
 
 		// WHY this submission was NOT flagged — the counterpart of the reason above, and
@@ -1470,44 +1333,39 @@ class Stamp {
 
 	/**
 	 * Stage 5 — gibberish detection, the content heuristic. Runs behind both value-based
-	 * signals so their more deliberate verdict takes precedence.
+	 * signals so their more deliberate verdict takes precedence, and since 6.0.0 only
+	 * over the fields the operator selected for this form (Gibberish_Fields).
 	 *
 	 * Mutates $this->plugin_spam, $this->classification_reason and the wave counter, and
 	 * RETURNS the single scan result — the clean-scoring line is built from the very same
 	 * components, and handing them back is what keeps it at one scan per submission.
 	 *
 	 * @phpstan-impure
-	 * @param mixed $gdpr_fields Submitted fields, raw.
+	 * @param mixed  $gdpr_fields Submitted fields, raw.
+	 * @param string $origin      Submission path handed down to check_submit() ('login' or '').
 	 * @return array{gibberish: bool, letters: int, alnum: int, solo: bool, strong: bool,
 	 *         scoreable: int} The one scan result, for the clean-scoring line.
 	 */
-	private function classify_gibberish( $gdpr_fields ) {
-		// Gibberish detection (BACKLOG "Gibberish-Erkennung: Binnen-Case-Wechsel-Regel"):
-		// only evaluated when the submission passed every check above and would
-		// otherwise be clean ($this->plugin_spam still false here) — a genuine
-		// PoW/token failure or the simulation above already routed the message
-		// through $this->plugin_spam. A hit is treated EXACTLY like any other spam
-		// classification from here on (same rgm_type-2 save gated by POW_SAVE_SPAM/
-		// POW_FLAG_SAVE, same POW_FLAG_SPAM field-flagging, same Fail2Ban log line,
-		// same POW_BLOCK gate — reusing $this->plugin_spam instead of a parallel
-		// one-off save call also avoids double-saving the message when
-		// POW_SAVE_CLEAN is on). An earlier revision exempted gibberish-only hits
-		// from POW_BLOCK ("sort, never block"); dropped by user decision
-		// 2026-07-17: a spam classification must always interrupt delivery to the
-		// original target — the spam folder is an analysis/rescue archive, not a
-		// delivery path, and the saved copy (written before the block gate) keeps
-		// false positives rescuable while the block's error message tells a
-		// genuine sender how to reach the site instead.
+	private function classify_gibberish( $gdpr_fields, $origin ) {
+		// Gibberish detection, since 6.0.0 SELECTION-BASED: it looks at the fields the
+		// operator picked for this form and at nothing else. An empty selection — the
+		// default, and what every installation gets on update — means the stage does
+		// nothing at all.
 		//
-		// $quarantine_only_spam marks the under-attack quarantine below, which —
-		// unlike every other classification — is neither counter-fed nor
-		// echo-recorded nor fail2ban-logged (see the quarantine block below and the
-		// guards on Echo_Store::record() and the fail2ban block).
+		// WHY THE DEFAULT FLIPPED. Until 5.6.0 this scored every field of every
+		// monitored submission behind a growing pile of exemptions, and the recurring
+		// failure was always the same: some field nobody thinks about legitimately
+		// carries a random-looking value, and a real person's submission is refused.
+		// See Gibberish_Fields for the full reasoning and the wp.org thread of
+		// 2026-08-24 that decided it.
 		//
-		// analyze_message() rather than its is_gibberish_message() wrapper: the verdict
-		// is identical (the wrapper just returns ['gibberish']), but the same single
-		// scan also yields the scoring components for the reason string — calling both
-		// would score every submission twice.
+		// Everything AFTER the verdict is unchanged: a hit is treated exactly like any
+		// other spam classification (same type-2 save, same POW_FLAG_SPAM flagging,
+		// same Fail2Ban line, same POW_BLOCK gate). The 2026-07-17 decision that a
+		// gibberish hit does block — "sort, never block" was dropped — still stands.
+		//
+		// analyze_message() rather than its boolean wrapper: the same single scan also
+		// yields the scoring components for the reason string.
 		$analysis = array(
 			'gibberish' => false,
 			'letters'   => 0,
@@ -1515,12 +1373,18 @@ class Stamp {
 			'solo'      => false,
 			'strong'    => false,
 			'scoreable' => 0,
+			'fields'    => array(),
 		);
+		$scored   = array();
 		if ( $gdpr_fields && ! $this->plugin_spam ) {
-			$analysis = Gibberish_Detector::analyze_message(
-				self::strip_plugin_fields( $gdpr_fields ),
-				self::gibberish_exempt_field_names( $gdpr_fields )
-			);
+			$scored = $this->gibberish_scored_fields( $gdpr_fields, $origin );
+			// NESTED inside the otherwise-clean guard, never beside it: an empty
+			// selection must mean "this stage does nothing", and the only way that
+			// stays true under later edits is for the scan to be unreachable without
+			// both conditions. Pinned in StampClassificationOrderTest.
+			if ( $scored ) {
+				$analysis = Gibberish_Detector::analyze_message( $scored );
+			}
 		}
 		if ( $analysis['gibberish'] ) {
 			$this->print_debug_information( 'Gibberish detected' );
@@ -1529,7 +1393,8 @@ class Stamp {
 				$analysis['letters'],
 				$analysis['alnum'],
 				$analysis['solo'],
-				$analysis['strong']
+				$analysis['strong'],
+				self::gibberish_field_names( $analysis['fields'] )
 			);
 			// Feed the same under-attack wave counter as a real PoW/token failure —
 			// but only in the real (non-simulated) mode, matching the existing
@@ -1543,6 +1408,58 @@ class Stamp {
 		}
 
 		return $analysis;
+	}
+
+	/**
+	 * Strip the path suffix Gibberish_Fields::subset() adds to keep same-named nested
+	 * fields apart, so the reason names the field the way the operator wrote it.
+	 *
+	 * @param string[] $hits Field keys reported by the scan.
+	 * @return string[] Field names, deduplicated.
+	 */
+	private static function gibberish_field_names( $hits ) {
+		$names = array();
+		foreach ( $hits as $hit ) {
+			$name = (string) preg_replace( '/#\d+$/', '', (string) $hit );
+			if ( '' !== $name && ! in_array( $name, $names, true ) ) {
+				$names[] = $name;
+			}
+		}
+		return $names;
+	}
+
+	/**
+	 * The fields this submission is allowed to be scored on: the operator's selection
+	 * for whichever signature brought the request in here, resolved against the live
+	 * request.
+	 *
+	 * THE LOGIN PATH IS EXCLUDED OUTRIGHT. check_submit() also runs over the login POST
+	 * (pre_process_login()), where a randomly chosen username would read as gibberish
+	 * and lock a legitimate user out of the site — the structural risk ISSUES.md carried
+	 * as an open point. A login submission has no form signature worth binding a rule
+	 * to, so the honest answer is that this stage never applies there.
+	 *
+	 * @param mixed  $gdpr_fields Submitted fields, raw.
+	 * @param string $origin      Submission path ('login' or '').
+	 * @return array<string, mixed> Matched field name => value; empty means "score nothing".
+	 */
+	private function gibberish_scored_fields( $gdpr_fields, $origin ) {
+		$script = isset( $_SERVER['SCRIPT_NAME'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SCRIPT_NAME'] ) ) : '';
+		if ( 'login' === $origin || 'wp-login.php' === Overbroad_Pattern_Guard::screen_file( $script ) ) {
+			return array();
+		}
+		$rules = Gibberish_Fields::parse_lines( get_option( Option::POW_GIBBERISH_FIELDS ) );
+		if ( ! $rules ) {
+			return array();
+		}
+		$action = isset( $this->whole_request_data['action'] ) && is_string( $this->whole_request_data['action'] )
+			? sanitize_text_field( $this->whole_request_data['action'] )
+			: '';
+		$names  = Gibberish_Fields::selected_names( $rules, $action, $this->rest_route, $this->whole_request_data );
+		if ( ! $names ) {
+			return array();
+		}
+		return Gibberish_Fields::subset( self::strip_plugin_fields( $gdpr_fields ), $names );
 	}
 
 	/**

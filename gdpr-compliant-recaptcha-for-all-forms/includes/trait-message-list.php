@@ -4,14 +4,15 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Detail-Doku (Methodenebene): handbuch/messages.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
 
 /**
  * Trait Message_List: the read half of Message_Page — the message table itself
- * (search, pagination, the action bar) and the queries behind it.
+ * (search, pagination, the action bar), the queries behind it, and read-only rendering
+ * helpers for the detail view (route_line(), 6.0.0). Nothing here writes.
  *
  * Schnittlinie und Begruendung fuer das Trait: siehe trait-message-actions.php.
  */
@@ -427,5 +428,55 @@ trait Message_List {
 		);
 
 		return $results;
+	}
+
+	/**
+	 * The "REST route:" line above the field table.
+	 *
+	 * WHY IT SAYS WHETHER THE ROUTE IS WATCHED. The line reports how the submission
+	 * technically arrived — which is NOT the same as what brought it in for checking,
+	 * and reads like a statement about protection when it is not. An operator seeing
+	 * `contact-form-7/v1/contact-forms/121/feedback` here while his site watches the
+	 * `{"_wpcf7":null}` pattern has no way to tell which of the two is doing the work
+	 * (owner, 2026-08-24 — it took two rounds of questions to resolve, so the answer
+	 * belongs on the line itself).
+	 *
+	 * THE WORDING IS TYPE-DEPENDENT, and that is not cosmetic. For a normal message
+	 * (types 1-3) "recognised another way" is always true: it exists only because some
+	 * term brought it in — a pattern, an action, the blocklist, the login path. An
+	 * ANALYSIS row (type 4) is different: save_for_analysis() records BEFORE the gate,
+	 * deliberately including requests no signature matched at all. Telling that
+	 * operator his submission "was recognised another way" would be plainly false, and
+	 * those rows are exactly the ones people click this button on.
+	 *
+	 * THE BUTTON IS ONLY OFFERED WHEN IT WOULD ADD SOMETHING. Note what the reason is
+	 * NOT: monitor_route_callback() rejects only an EXACT duplicate line
+	 * (`trim( $existing_line ) === $route`), so a route already covered by a wildcard
+	 * would have been accepted and appended as a redundant line. The old button was
+	 * therefore not a refused dead end but a quiet way to litter the route list; the
+	 * matching is an OR over lines, so nobody loses coverage by its absence, and anyone
+	 * who wants the concrete line anyway has the textarea.
+	 *
+	 * @param string     $route        The route this message arrived on.
+	 * @param int|string $message_type The list being viewed; 4 is the analysis view.
+	 * @return string HTML.
+	 */
+	private static function route_line( $route, $message_type ) {
+		$watched = RestRoute::matches( $route, (string) get_option( Option::POW_REST_ROUTES ) );
+		$html    = '<p class="gdpr-route-line">'
+			. esc_html__( 'REST route:', 'gdpr-compliant-recaptcha-for-all-forms' )
+			. ' <code>' . esc_html( $route ) . '</code> ';
+		if ( $watched ) {
+			return $html . '<span class="gdpr-route-watched">'
+				. esc_html__( '— this route is monitored', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. '</span></p>';
+		}
+		$note = 4 === (int) $message_type
+			? esc_html__( '— not monitored', 'gdpr-compliant-recaptcha-for-all-forms' )
+			: esc_html__( '— not monitored; this submission was recognised another way', 'gdpr-compliant-recaptcha-for-all-forms' );
+		return $html . '<span class="gdpr-route-unwatched">' . $note . '</span>'
+			. ' <button type="button" class="gdpr-monitor-route-btn" data-route="' . esc_attr( $route ) . '" onclick="monitorRoute(this)">'
+			. esc_html__( 'Monitor this route', 'gdpr-compliant-recaptcha-for-all-forms' )
+			. '</button></p>';
 	}
 }

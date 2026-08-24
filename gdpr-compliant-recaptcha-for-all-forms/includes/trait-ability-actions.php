@@ -282,10 +282,12 @@ trait Ability_Actions {
 			);
 		}
 
-		// Same exemption list the live path builds, from the same method — a
-		// diagnostic that scores differently from production is worse than none.
-		$exempt   = Stamp::gibberish_exempt_field_names( $fields );
-		$analysis = Gibberish_Detector::analyze_message( $fields, $exempt );
+		// Scores exactly the fields the caller supplied. Since 6.0.0 that IS the live
+		// semantics rather than a deviation from it: the live path scores the fields the
+		// operator selected and nothing else, and an agent handing a field map here is
+		// making the same explicit choice. There is no exemption list on either side any
+		// more — see Gibberish_Fields.
+		$analysis = Gibberish_Detector::analyze_message( $fields );
 
 		$echo_hit     = Echo_Store::matches( $fields );
 		$wildcard_hit = $this->wildcard_hit( $fields );
@@ -311,11 +313,10 @@ trait Ability_Actions {
 			'verdict'                 => $is_spam ? 'spam' : 'clean',
 			'reason'                  => $reason,
 			'signals'                 => array(
-				'echo_lock'          => $echo_hit,
-				'blocked_value'      => $wildcard_hit,
-				'gibberish'          => $analysis['gibberish'],
-				'gibberish_tokens'   => $analysis['letters'],
-				'exempt_field_count' => count( $exempt ),
+				'echo_lock'        => $echo_hit,
+				'blocked_value'    => $wildcard_hit,
+				'gibberish'        => $analysis['gibberish'],
+				'gibberish_tokens' => $analysis['letters'],
 			),
 			'proof_of_work_evaluated' => false,
 			'under_attack'            => $under_attack,
@@ -324,6 +325,7 @@ trait Ability_Actions {
 				&& (bool) get_option( Option::POW_UNDER_ATTACK_QUARANTINE ),
 			'limits'                  => array(
 				__( 'The proof-of-work stage was not evaluated: supplied text carries no solved puzzle. Live, that stage runs first and is by far the most common reason a submission is treated as spam.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				__( 'Every supplied field was scored for gibberish. Live, only fields the site owner selected for that form are scored, and sites that selected none are never scored at all.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				__( 'Nothing was stored, counted or remembered by this call.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			),
 		);

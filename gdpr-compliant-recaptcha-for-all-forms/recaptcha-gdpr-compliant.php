@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 5.6.0
+	 * Version: 6.0.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '5.6.0';
+	const VERSION = '6.0.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -94,6 +94,9 @@ class RCM_Main {
 		// Not stored: its constructor registers the admin hooks, which keep the instance
 		// alive for the request (matches WordPress's usual add_action( [$this, …] ) idiom).
 		new Scope_Sync();
+		// Same idiom: the one-off notice telling an upgraded installation that gibberish
+		// detection is now selection-based and therefore off until fields are picked.
+		( new Gibberish_Notice() )->run();
 		// Same idiom: registers the credential-field proposal notice, its two
 		// one-click handlers and the message-inbox rescue ajax endpoint.
 		new Credential_Learning();
@@ -222,6 +225,9 @@ class RCM_Main {
 
 		// Check the plugin version
 		if ( ! $current_version || version_compare( $this->version, $current_version, '>' ) ) {
+
+			// Only here is the PREVIOUSLY stored version still known (see Gibberish_Notice).
+			Gibberish_Notice::remember_upgrade( $current_version );
 
 			//Create tables to save messages
 			global $wpdb;
@@ -585,7 +591,7 @@ class RCM_Main {
 			// only helps once the NEW code is what runs activate(); a fully stale worker
 			// that never re-reads this file needs an OPcache flush / FPM restart (see
 			// readme.txt Upgrade Notice).
-			$this->invalidate_own_opcache();
+			Opcache::invalidate_plugin_files();
 		}
 
 		// DELIBERATELY OUTSIDE the version gate above. That gate fires only when
@@ -604,49 +610,6 @@ class RCM_Main {
 		// container at all, because its stored version is already current. Guarded by
 		// its own done flag, so a completed migration costs one cached get_option().
 		Blocked_Values_Migration::maybe_run();
-	}
-
-	/**
-	 * Invalidate the OPcache entries for this plugin's own PHP files. No-op when
-	 * OPcache is disabled or the invalidate API is unavailable/restricted. Never
-	 * calls opcache_reset(): that would nuke every other app's cache on shared hosting.
-	 */
-	private function invalidate_own_opcache() {
-		if ( ! function_exists( 'opcache_invalidate' ) || ! ini_get( 'opcache.enable' ) ) {
-			return;
-		}
-		// Recurse the plugin directory with a portable iterator. Deliberately NOT
-		// glob('{,*/}*.php', GLOB_BRACE): GLOB_BRACE is not defined on every platform
-		// (absent on musl/Alpine, common in containers and on some managed hosts), and
-		// referencing it there is a fatal "undefined constant" — the very kind of
-		// breakage this method is meant to prevent.
-		try {
-			$iterator = new \RecursiveIteratorIterator(
-				new \RecursiveDirectoryIterator( plugin_dir_path( __FILE__ ), \FilesystemIterator::SKIP_DOTS )
-			);
-		} catch ( \Exception $e ) {
-			return;
-		}
-		foreach ( $iterator as $file ) {
-			if ( ! $file->isFile() || 'php' !== strtolower( $file->getExtension() ) ) {
-				continue;
-			}
-			$path = $file->getPathname();
-			// wp_opcache_invalidate() (WP >=5.5) wraps opcache_invalidate() and honours
-			// opcache.restrict_api; fall back to the raw call on older cores.
-			if ( function_exists( 'wp_opcache_invalidate' ) ) {
-				// Called via a variable so Plugin Check's "requires WP 5.5" static
-				// compatibility check does not flag it while the plugin still declares
-				// "Requires at least: 4.8": the function_exists() guard already makes the
-				// call safe on older cores (which take the raw-call fallback below), and
-				// this security update must keep reaching those installs.
-				$wp_opcache_invalidate = 'wp_opcache_invalidate';
-				$wp_opcache_invalidate( $path, true );
-			} else {
-				// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- opcache.restrict_api can make this emit a warning for a path outside the allowed prefix; the invalidation is strictly best-effort hardening, so silence is intended.
-				@opcache_invalidate( $path, true );
-			}
-		}
 	}
 
 	/** Deactivation of the plugin */

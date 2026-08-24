@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.0
-Stable tag: 5.6.0
+Stable tag: 6.0.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -121,6 +121,10 @@ Every submission has to pay for itself with a small proof-of-work computation. T
 1. Right after installation this is usually a caching issue: the proof-of-work JavaScript is not yet included in cached pages. Clear the cache on your webserver (or caching plugin) and in your browser.
 2. JavaScript might crash due to an incompatibility with another plugin. Press F12 on the affected page and check the browser console for errors — and please report the issue in the support forum; such reports are usually addressed within a day.
 
+= A real message was refused as "Gibberish content" =
+Since 6.0, gibberish detection is off unless you switch it on for individual fields, so this should no longer happen on its own. If you did switch it on for a field: open the message, look at the reason line — it names the field that triggered it — and use that field's button to stop checking it. Fields carrying tokens, licence keys or reference numbers are random by design and are not suitable for this check; message and subject fields are.
+
+
 = Neither messages nor spam show up in the inbox =
 1. Activate the **Analysis mode**
 2. Submit the affected form and look for the captured entry in the **Analytic Box**
@@ -152,6 +156,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.0.0 =
+Gibberish detection is now off by default and only checks fields you pick yourself. If you relied on it, open a stored message and use the button next to the field you want checked. Proof of work, blocked values and the repeat-sender lock are unchanged.
 = 5.6.0 =
 Recommended if you use Ninja Forms: every submission was blocked regardless of what was written. Also restores detection for Jetpack, WP User Frontend and Formidable Forms.
 = 5.5.0 =
@@ -183,6 +189,16 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.0.0 =
+* Added: A message's REST route line now says whether that route is monitored
+* Note: New FAQ entry explaining what to do if a real message is refused as gibberish
+* Added: Pick fields to check for gibberish with one click from a stored message, or type them in Settings
+* Added: Saving the gibberish list points out unreadable lines and forms no longer monitored
+* Note: A one-time notice explains that gibberish detection is off and how to switch it on
+* Changed: Gibberish detection is off by default and only checks fields you select
+* Changed: A gibberish verdict now names the field that triggered it
+* Removed: The gdpr_pow_gibberish_exempt_fields filter - only selected fields are checked now
+* Fixed: Gibberish detection no longer applies to the WordPress login form
 = 5.6.0 =
 * Fixed: Ninja Forms submissions were always blocked as "Gibberish content".
 * Added: Builders posting their whole form as JSON in one field now expose their single fields to rules.

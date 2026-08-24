@@ -92,6 +92,56 @@ trait Settings_Save {
 				// (never swallowed silently); everything else in the textarea is saved
 				// normally. The decision itself is pure and unit-tested:
 				// RestRoute::reject_self_lockout_lines() / tests/unit/RestRouteTest.php.
+				// The gibberish selection is normally written by the per-field button, so a
+				// line typed here is the exception — and the two ways it goes wrong are
+				// both silent by nature: a line the parser cannot read simply disappears
+				// from the rules, and a line naming a form that is no longer monitored
+				// looks like a check while checking nothing (the same failure class as an
+				// action name that was never registered, CLAUDE.md). Both are NAMED here
+				// rather than swallowed. Nothing is dropped or rewritten: the operator's
+				// text is stored as typed, this only tells him what it will do.
+				if ( Option::POW_GIBBERISH_FIELDS === $key && is_string( $post_value ) ) {
+					$unreadable = array();
+					foreach ( preg_split( '/\r\n|\n|\r/', $post_value, -1, PREG_SPLIT_NO_EMPTY ) as $line ) {
+						if ( '' !== trim( $line ) && ! Gibberish_Fields::parse_lines( $line ) ) {
+							$unreadable[] = trim( $line );
+						}
+					}
+					if ( ! empty( $unreadable ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-gibberish-unreadable',
+							sprintf(
+								/* translators: %s: the unreadable lines, comma separated */
+								__( 'These gibberish lines do nothing, because they could not be read: %s. A line looks like <code>pattern {"_wpcf7":null} =&gt; your-message</code> — how the form is recognised, then <code>=&gt;</code>, then the field names.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								// esc_html() because settings_errors() prints unescaped and
+								// this interpolates text the administrator just typed —
+								// same reason as the route guard below.
+								esc_html( implode( ', ', $unreadable ) )
+							),
+							'error'
+						);
+					}
+					$inactive = array();
+					foreach ( Gibberish_Fields::parse_lines( $post_value ) as $rule ) {
+						if ( ! Gibberish_Signature::is_active( $rule, get_option( Option::POW_EXPLICIT_ACTION ), get_option( Option::POW_PARAMETER_PATTERN ), get_option( Option::POW_REST_ROUTES ) ) ) {
+							$inactive[] = $rule['signature'];
+						}
+					}
+					if ( ! empty( $inactive ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-gibberish-inactive',
+							sprintf(
+								/* translators: %s: the signatures no longer monitored, comma separated */
+								__( 'Saved, but these forms are not monitored at the moment, so nothing is checked for them: %s. Add them under Apply on pattern, Apply on ajax action or Apply on REST route first. (A broader entry may still cover the form — this check only looks for the exact line.)', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								esc_html( implode( ', ', $inactive ) )
+							),
+							'warning'
+						);
+					}
+				}
+
 				if ( Option::POW_REST_ROUTES === $key && is_string( $post_value ) ) {
 					list( $post_value, $rejected_routes ) = RestRoute::reject_self_lockout_lines( $post_value );
 					if ( ! empty( $rejected_routes ) ) {

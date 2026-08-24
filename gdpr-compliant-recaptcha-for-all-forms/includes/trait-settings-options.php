@@ -293,6 +293,32 @@ trait Settings_Options {
 				'🚫',
 				__( 'Values that mark a submission as spam outright: sender addresses, sender domains (@domain), link domains, or exact field text — one per line, optionally bound to one field or one form.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
+			Option::POW_GIBBERISH_FIELDS     => new Option(
+				__( 'Gibberish detection', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::TEXT,
+				'',
+				__(
+					'<strong>What this does:</strong> checks the fields you list here for random-looking text and treats the submission as spam if it finds it. <strong>Empty means off</strong> — that is the default, because the check can only ever judge text a person actually typed.
+                    <br>
+                    <br>You normally never type here. Open a stored message, find the field, and use its <b>Check this field for gibberish</b> button — it writes the line for you and turns into <b>stop checking</b> if you change your mind.
+                    <br>
+                    <br>One line per form, in the form <code>where => which fields</code>:
+                    <br>
+                    <br><code>pattern {"_wpcf7":null} =&gt; your-subject, your-message</code>
+                    <br><code>action everest_forms_ajax_form_submission =&gt; message</code>
+                    <br><code>route sureforms/v1/submit-form =&gt; message</code>
+                    <br>
+                    <br>On the left is how the form is recognised — copy it from <b>Apply on pattern</b> 🧭, <b>Apply on ajax action</b> ⚡ or <b>Apply on REST route</b> 🛣️, whichever one covers that form. On the right are the field names it sends, separated by commas, matched whatever their upper/lower case.
+                    <br>
+                    <br><strong>Use the plain field name, not the brackets.</strong> Many builders send names like <code>everest_forms[form_fields][message]</code>; write just the last part (<code>message</code>). The button in a stored message does this for you — one more reason to use it.
+                    <br>
+                    <br><strong>Pick message and subject fields, not technical ones.</strong> A hidden token, a licence key or a reference number is random by design — checking one flags every real submission of that form. Password fields are refused outright.',
+					'gdpr-compliant-recaptcha-for-all-forms'
+				),
+				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🔤',
+				__( 'Checks the fields you list for random-looking text. Empty means the check is off — set it up per field from a stored message.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
 			Option::POW_FLAG_SPAM            => new Option(
 				__( 'Flag spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,

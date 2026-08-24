@@ -259,14 +259,60 @@ final class Classification_Reason {
 	 * @param int  $letters Gibberish tokens found on the pure-letter path.
 	 * @param int  $alnum   Gibberish tokens found on the alphanumeric path.
 	 * @param bool $solo    Whether the solo-token rule fired.
-	 * @param bool $strong  Whether the strong-token rule fired.
-	 * @return string Reason string, e.g. "gibberish:letters=2,alnum=0,solo=0".
+	 * @param bool     $strong  Whether the strong-token rule fired.
+	 * @param string[] $fields  Field names that carried the gibberish (6.0.0).
+	 * @return string Reason string, e.g. "gibberish:letters=2,alnum=0,solo=0,field=your-message".
 	 */
-	public static function gibberish( $letters, $alnum, $solo, $strong = false ) {
+	public static function gibberish( $letters, $alnum, $solo, $strong = false, $fields = array() ) {
 		return self::CODE_GIBBERISH . ':letters=' . max( 0, (int) $letters )
 			. ',alnum=' . max( 0, (int) $alnum )
 			. ',solo=' . ( $solo ? '1' : '0' )
-			. ( $strong ? ',strong=1' : '' );
+			. ( $strong ? ',strong=1' : '' )
+			. self::field_component( $fields );
+	}
+
+	/**
+	 * The `,field=<name>[+<name>…]` tail of a gibberish reason — which field actually
+	 * carried the gibberish.
+	 *
+	 * ADDED IN 6.0.0 because the reason was unanswerable without it: it named counts
+	 * ("letters=5,alnum=304") but not the field, so an operator looking at a wrongly
+	 * refused submission could not tell what to change (wp.org, 2026-08-24). APPENDED,
+	 * never inserted: every existing component keeps its position and its spelling, so
+	 * stored rows and the corpus labels stay readable and comparable.
+	 *
+	 * Field NAMES only. A name is already stored with every message detail row and
+	 * describes the form, not the person who filled it in — unlike a value, which is
+	 * exactly what the credential path exists to keep out of the database.
+	 *
+	 * Names are sanitised to the characters real form fields use and each one capped,
+	 * because this string goes into a database column, a log line and a Fail2Ban
+	 * pattern: anything else is percent-encoded rather than dropped, so a surprising
+	 * name still points somewhere instead of vanishing. At most three names — beyond
+	 * that the answer is "most of the selection", not a pointer.
+	 *
+	 * @param string[] $fields Contributing field names.
+	 * @return string Empty string when nothing was attributed.
+	 */
+	private static function field_component( $fields ) {
+		if ( ! $fields ) {
+			return '';
+		}
+		$clean = array();
+		foreach ( array_slice( $fields, 0, 3 ) as $name ) {
+			if ( '' === $name ) {
+				continue;
+			}
+			$safe    = (string) preg_replace_callback(
+				'/[^A-Za-z0-9_\-\[\]]/',
+				static function ( $found ) {
+					return rawurlencode( $found[0] );
+				},
+				$name
+			);
+			$clean[] = substr( $safe, 0, 60 );
+		}
+		return $clean ? ',field=' . implode( '+', $clean ) : '';
 	}
 
 	/**

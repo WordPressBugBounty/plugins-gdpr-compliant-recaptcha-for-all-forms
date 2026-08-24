@@ -19,6 +19,8 @@ class Message_Page {
 	// Traits statt zweiter Klassen, damit jede `array( $this, ... )`-Registrierung im
 	// Konstruktor und jeder Zugriff auf die privaten Listen-Caches unveraendert bleibt.
 	use Message_Actions;
+	use Message_Gibberish;
+	use Message_Script_Data;
 	use Message_List;
 
 	private $listed_actions    = null;
@@ -40,6 +42,7 @@ class Message_Page {
 		add_action( 'wp_ajax_save_pattern', array( $this, 'save_pattern_callback' ) );
 		add_action( 'wp_ajax_gdpr_block_value', array( $this, 'block_value_callback' ) );
 		add_action( 'wp_ajax_gdpr_monitor_route', array( $this, 'monitor_route_callback' ) );
+		add_action( 'wp_ajax_gdpr_gibberish_field', array( $this, 'gibberish_field_callback' ) );
 	}
 
 
@@ -255,50 +258,7 @@ class Message_Page {
 			RCM_Main::VERSION,
 			true
 		);
-		wp_localize_script(
-			'gdpr-recaptcha-messages',
-			'gdprMsg',
-			array(
-				'ajaxUrl'     => admin_url( 'admin-ajax.php' ),
-				'messageType' => (string) $message_type,
-				'nonces'      => array(
-					'search'       => wp_create_nonce( 'render-messages_' . $message_type ),
-					'saveList'     => wp_create_nonce( 'save_list_nonce_' . $message_type ),
-					'savePattern'  => wp_create_nonce( 'save_pattern_nonce_' . $message_type ),
-					'blockValue'   => wp_create_nonce( 'block_value_nonce_' . $message_type ),
-					'monitorRoute' => wp_create_nonce( 'monitor_route_nonce_' . $message_type ),
-					// Rescue path of the learned credential-field list: the handler
-					// lives in Credential_Learning, only the nonce is minted here.
-					'credential'   => wp_create_nonce( Credential_Learning::AJAX_NONCE . $message_type ),
-				),
-				'i18n'        => array(
-					// NB: sprintf( __( … ), $title ) — translate the template, then fill in.
-					'confirmDeleteAll'    => sprintf(
-						/* translators: %s: inbox/spam/trash title. */
-						__( 'You are about to delete all messages from "%s". Are you sure?', 'gdpr-compliant-recaptcha-for-all-forms' ),
-						$titles[ $message_type ]
-					),
-					'moved'               => __( 'Message moved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'deleted'             => __( 'Message deleted successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'actionAdded'         => __( 'Action added successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'whitelisted'         => __( 'Whitelisting successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'patternSaved'        => __( 'Pattern saved successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'choosePattern'       => __( 'Please choose the message attributes which you want to save as pattern!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'blocked'             => __( 'Blocked successfully!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'blockFailed'         => __( 'Could not block this value.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialAsk'       => __( 'Treat this field as a password field? Its value is removed from this message and from every other saved message, and future submissions never store it. This cannot be undone for messages already received.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialSaved'     => __( 'Field is now treated as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'credentialFailed'    => __( 'Could not mark this field as a credential field.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'routeMonitored'      => __( 'Now monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'monitorFailed'       => __( 'Could not start monitoring this route.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					// %s is a literal placeholder, replaced client-side with the actual
-					// domain (only known per table row, not at page-load time when this
-					// script is localized) — see blockValue() in recaptcha-gdpr-messages.js.
-					/* translators: %s is replaced client-side with the sender's domain, without the @, e.g. "mailinator.com". */
-					'confirmSenderDomain' => __( 'Every future submission containing a sender address at %s or its subdomains will be treated as spam. If the WordPress-Login protection is on, this can lock out registered users too, possibly yourself. It is meant for disposable or spam domains — blocking a large provider such as gmail.com will also block real visitors.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				),
-			)
-		);
+		wp_localize_script( 'gdpr-recaptcha-messages', 'gdprMsg', self::script_data( $message_type, $titles ) );
 	}
 
 	public function render_message() {
@@ -463,12 +423,7 @@ class Message_Page {
 				. '</span></p>';
 		}
 		if ( null !== $route_value ) {
-			$html_details .= '<p class="gdpr-route-line">'
-				. esc_html__( 'REST route:', 'gdpr-compliant-recaptcha-for-all-forms' )
-				. ' <code>' . esc_html( $route_value ) . '</code>'
-				. ' <button type="button" class="gdpr-monitor-route-btn" data-route="' . esc_attr( $route_value ) . '" onclick="monitorRoute(this)">'
-				. esc_html__( 'Monitor this route', 'gdpr-compliant-recaptcha-for-all-forms' )
-				. '</button></p>';
+			$html_details .= self::route_line( (string) $route_value, $message_type );
 		}
 		if ( null !== $scoring_value ) {
 			$html_details .= '<p class="gdpr-scoring-line">'
@@ -503,6 +458,9 @@ class Message_Page {
 		// "Treat as credential field" button is pointless on a field that is
 		// redacted already).
 		$learned_names = Credential_Learning::learned_names();
+		// Which form this message came from and which of its fields are already checked
+		// for gibberish — determined once for the whole table (see Message_Gibberish).
+		$gibberish_context = self::gibberish_context( $details );
 		//Set the details page for each message
 		foreach ( $details as $detail ) {
 			// Already shown as the badge/route/scoring line above — do not repeat as a raw row.
@@ -579,10 +537,18 @@ class Message_Page {
 					$html_details .= ' <button type="button" class="gdpr-credential-btn" data-attribute="' . esc_attr( $detail->rgd_attribute ) . '" data-message="' . esc_attr( $message_id ) . '" onclick="treatAsCredential(this)">' . esc_html__( 'Treat as credential field', 'gdpr-compliant-recaptcha-for-all-forms' ) . '</button>';
 				}
 			}
+			// Deliberately OUTSIDE the block above, which excludes the analysis view: a
+			// form that has never produced spam has no message in the inbox, so the
+			// analysis view is the ONLY place its field names are ever visible — and
+			// picking a field there is exactly the intended way to set this up before
+			// the first spam arrives. Still user-posted rows only.
+			if ( $detail->rgm_posted ) {
+				$html_details .= self::gibberish_button( (string) $detail->rgd_attribute, $gibberish_context );
+			}
 			$html_details .= '</td>
                 </tr>';
 		}
-		$html_details .= '</tbody></table>';
+		$html_details .= '</tbody></table>' . self::gibberish_notice( $gibberish_context );
 		$array_result  = array(
 			'success' => 1,
 			'result'  => $html_details,

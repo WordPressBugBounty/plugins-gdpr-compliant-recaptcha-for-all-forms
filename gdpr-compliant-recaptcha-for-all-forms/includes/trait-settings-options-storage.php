@@ -133,10 +133,7 @@ trait Settings_Options_Storage {
                     <br>
                     <br><u>Line to add:</u> <code>/specific_site/:pwd</code>
                     <br>
-                    <br><strong>Also exempts from spam analysis:</strong> fields on this list are additionally excluded from content analysis, in particular gibberish detection. This is the right place for fields with technical values (captcha tokens, license/serial numbers, API keys) that get misclassified as 'Gibberish content'.
-                    <br><strong>Important difference:</strong> for saving, an entry only applies to the given site (<code>site:field-name</code>). For spam analysis, the site part is ignored — the field name is exempted <strong>across all sites</strong>.
-                    <br>Fields whose name contains <code>pass</code>, <code>pwd</code>, <code>token</code>, <code>code</code>, <code>coupon</code>, or <code>captcha</code> are already exempted automatically and don't need to be listed here.
-                    <br>Developers can grant the same exemption in PHP via the <code>gdpr_pow_gibberish_exempt_fields</code> filter (signature: <code>apply_filters( 'gdpr_pow_gibberish_exempt_fields', array \$names, array|mixed \$fields )</code>, must return an array of field-name strings).
+                    <br><strong>This list is only about saving.</strong> Up to version 5.6 it also excluded fields from gibberish detection; since 6.0 that is not needed, because gibberish detection only ever looks at fields you pick yourself (see <b>Gibberish detection</b> 🔤).
                     ",
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
@@ -145,7 +142,7 @@ trait Settings_Options_Storage {
 				),
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🚫▭',
-				__( 'Excludes specific fields, such as passwords, from being saved with messages and from spam/gibberish analysis.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( 'Excludes specific fields, such as passwords, from being saved with messages.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_CREDENTIAL_FIELDS          => new Option(
 				__( 'Credential fields', 'gdpr-compliant-recaptcha-for-all-forms' ),

@@ -35,6 +35,8 @@ require_once __DIR__ . '/class-echo-store.php';
 // GILT FUER JEDE trait-*.php-Zeile hier: Traits werden zur Kompilierzeit in die
 // Klasse kopiert, muessen also VOR ihrer Klassendatei stehen — sonst Fatal Error.
 require_once __DIR__ . '/trait-message-actions.php';
+require_once __DIR__ . '/trait-message-gibberish.php';
+require_once __DIR__ . '/trait-message-script-data.php';
 require_once __DIR__ . '/trait-message-list.php';
 require_once __DIR__ . '/class-message-page.php';
 require_once __DIR__ . '/class-client-ip.php';
@@ -42,6 +44,10 @@ require_once __DIR__ . '/class-proxy-candidate-ledger.php';
 require_once __DIR__ . '/class-rest-route.php';
 require_once __DIR__ . '/class-stamp-token.php';
 require_once __DIR__ . '/class-gibberish-detector.php';
+require_once __DIR__ . '/class-gibberish-fields.php';
+require_once __DIR__ . '/class-gibberish-signature.php';
+require_once __DIR__ . '/class-gibberish-notice.php';
+require_once __DIR__ . '/class-opcache.php';
 require_once __DIR__ . '/class-classification-reason.php';
 require_once __DIR__ . '/class-credential-fields.php';
 require_once __DIR__ . '/class-learned-credential-fields.php';
