@@ -5,6 +5,10 @@
  * Area doc: handbuch/abilities.md (this class), handbuch/gate.md (what the three
  * scope options mean and why a wrong entry is dangerous).
  *
+ * Its operator-facing half — the two lockout questions, the one-click verdict on an
+ * action line and the sentences they answer with — lives in trait-scope-refusals.php
+ * since 2026-08-28 (Dateigroessen-Schnitt); the split line is documented there.
+ *
  * @package VENDOR\RECAPTCHA_GDPR_COMPLIANT
  */
 
@@ -19,7 +23,7 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * The whole class exists because the settings textarea and this path have different
  * threat models even though they write the same three options. A human typing
  * `{"email":null}` into the textarea causes the documented, self-inflicted cost case
- * in handbuch/gate.md: backend forms start matching, POW_BLOCK discards the save, and
+ * in handbuch/matchers.md: backend forms start matching, POW_BLOCK discards the save, and
  * wp-admin never gets a proof-of-work script, so the admin cannot type their way out
  * again. That is a bad afternoon, and it is theirs.
  *
@@ -39,6 +43,11 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * (tests/unit/ScopeAddPlanTest.php).
  */
 final class Scope_Add {
+
+	// The one-click / operator-facing half: pattern_locks_out_admin(),
+	// action_locks_out_admin(), action_line_refusal() and their message texts. A trait,
+	// so every `Scope_Add::…()` call site stays byte-identical across the split.
+	use Scope_Refusals;
 
 	/** Domain key for POW_EXPLICIT_ACTION (admin-ajax action names). */
 	const DOMAIN_ACTIONS = 'actions';
@@ -65,29 +74,6 @@ final class Scope_Add {
 
 	/** Longest single entry we accept, in characters. */
 	const MAX_LINE_LENGTH = 500;
-
-	/**
-	 * Field names wp-admin itself posts. A pattern mentioning any of these matches
-	 * administrative traffic rather than a public form — including, for `_wpnonce`
-	 * and `option_page`, the save of this plugin's own settings page, which is the
-	 * one door the admin would need in order to undo the damage.
-	 *
-	 * @var string[]
-	 */
-	const ADMIN_FIELD_KEYS = array(
-		'_wpnonce',
-		'_wp_http_referer',
-		'_wp_original_http_referer',
-		'option_page',
-		'action',
-		'screen-options-apply',
-		'wp_screen_options',
-		'save',
-		'submit',
-		'post_ID',
-		'post_type',
-		'user_id',
-	);
 
 	/**
 	 * Field names so common that a pattern built only from them matches almost any
@@ -237,12 +223,23 @@ final class Scope_Add {
 		}
 
 		if ( self::DOMAIN_ACTIONS === $domain ) {
+			// THE AGENT PATH TAKES PLAIN ACTION NAMES ONLY (2026-08-28). The identifier
+			// regex below would already refuse a JSON rule line as `not_an_action_name`,
+			// but silently and under a code that reads like a typo. It gets its own code
+			// instead, because the exclusion is a DECISION and has to be visible as one:
+			// the two human one-click paths have the captured request in front of them
+			// when they build a rule, and an agent has exactly that not — a plausible
+			// looking "narrowing" such as {"action":"heartbeat","data":null} is none, and
+			// nothing in an agent's context can tell it apart from a real one. If rules
+			// through an ability are ever wanted, they need their own design; until then
+			// this refusal is enforced rather than asserted.
+			if ( Action_Rules::is_rule_line( $entry ) ) {
+				return 'rule_line_not_allowed';
+			}
 			if ( ! preg_match( '/^[A-Za-z0-9_-]+$/', $entry ) ) {
 				return 'not_an_action_name';
 			}
-			return in_array( strtolower( $entry ), self::ADMIN_AJAX_ACTIONS, true )
-				? 'would_lock_out_admin'
-				: null;
+			return self::action_locks_out_admin( $entry ) ? 'would_lock_out_admin' : null;
 		}
 
 		if ( self::DOMAIN_PATTERNS === $domain ) {
@@ -266,7 +263,10 @@ final class Scope_Add {
 	 *    stable identifiers in the agent's answer, and renaming one is itself an API
 	 *    change. Blocking a VALUE is a different setting entirely (POW_BLOCKED_VALUES)
 	 *    and has no agent path at all.
-	 * 2. A pattern naming a wp-admin field matches administrative traffic.
+	 * 2. A pattern that would also match a wp-admin POST puts administrative traffic
+	 *    under evaluation. The answer comes from pattern_locks_out_admin() below, i.e.
+	 *    from the SAME matcher the live gate uses — see the note there for why this is
+	 *    not a list of field names any more.
 	 * 3. A pattern built only from generic field names matches nearly every form,
 	 *    which is the documented cost case, just not self-inflicted this time.
 	 *
@@ -292,10 +292,8 @@ final class Scope_Add {
 			return 'wildcard_value_pattern';
 		}
 
-		foreach ( $keys as $key ) {
-			if ( in_array( $key, self::ADMIN_FIELD_KEYS, true ) ) {
-				return 'matches_admin_fields';
-			}
+		if ( self::pattern_locks_out_admin( $entry ) ) {
+			return 'matches_admin_fields';
 		}
 
 		foreach ( $keys as $key ) {
@@ -349,6 +347,7 @@ final class Scope_Add {
 			'already_monitored'      => __( 'Already monitored.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'would_lock_out_admin'   => __( 'Refused: this would make the plugin evaluate WordPress\' own administration traffic, which would lock the administrator out of wp-admin.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'not_an_action_name'     => __( 'Not a valid admin-ajax action name.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'rule_line_not_allowed'  => __( 'Refused: a JSON rule line that pins an action name plus further conditions can only be added by a human looking at a captured request. Supply a plain action name here.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'not_a_json_object'      => __( 'A recognition pattern must be a JSON object of field names.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'wildcard_value_pattern' => __( 'Refused: a "*" wildcard matches on a value regardless of field name and would monitor almost every form. Name the form\'s own fields instead. Blocking a value is a site-owner decision and has no agent path.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'matches_admin_fields'   => __( 'Refused: this pattern names fields that WordPress\' own admin screens post.', 'gdpr-compliant-recaptcha-for-all-forms' ),

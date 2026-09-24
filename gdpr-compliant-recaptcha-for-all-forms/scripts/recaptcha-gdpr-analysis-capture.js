@@ -261,7 +261,52 @@ Object.assign( gdpr_compliant_recaptcha_analysis, {
 				}
 			}
 		}else{
-			params.append('key', name);
+			// Ajax-Action entry (2026-08-28): the same checkbox table as a pattern entry
+			// (-ui.js createFormForNestedObject), but the "action" row is always checked
+			// and disabled there — its signature (the action name) is already known, not
+			// something the operator chooses. So this branch asks the SAME question the
+			// pattern branch above did (which key checkboxes are checked, with their peer
+			// value checkbox deciding null-vs-pinned-value), reusing insertIntoNestedObject
+			// exactly as above — no second JSON builder.
+			//
+			// OWNER DECISION, precise on purpose: checking only the always-checked
+			// "action" row (i.e. clicking "Save action" with no further field selected)
+			// must send the PLAIN action name, byte-identical to the pre-2026-08-28
+			// behaviour — NOT {"action":"x"}. The two are NOT equivalent, which is what
+			// makes this binding rather than cosmetic: a plain line ALSO matches through
+			// the field-name reading (any action plus a top-level field named `x`),
+			// a rule line only through the action value. Plain is strictly WIDER, so
+			// silently writing the rule form would have NARROWED yesterday's behaviour
+			// where nobody could see it. Keeping the short, familiar line in the
+			// operator's textarea is the second reason, not the first.
+			// Only an ADDITIONAL checked field turns this into a rule line, and
+			// `action` is set LAST so it always wins over whatever the loop already put
+			// there — the zero-effort path stays the zero-effort path.
+			var elements = document.getElementsByClassName('gdpr-key-check-' + key);
+			var ruleArray = {};
+			var extraSelected = false;
+			if (elements.length > 0) {
+				for (var i = 0; i < elements.length; i++) {
+					var element = elements[i];
+					if(element.checked){
+						if(element.value !== 'action'){
+							extraSelected = true;
+						}
+						var peer = document.getElementById(element.getAttribute("peer"));
+						if(peer.checked){
+							gdpr_compliant_recaptcha_analysis.insertIntoNestedObject(ruleArray, element.value, peer.value);
+						}else{
+							gdpr_compliant_recaptcha_analysis.insertIntoNestedObject(ruleArray, element.value, null);
+						}
+					}
+				}
+			}
+			if(extraSelected){
+				ruleArray['action'] = name;
+				params.append('key', JSON.stringify(ruleArray));
+			}else{
+				params.append('key', name);
+			}
 			params.append('standard', true);
 		}
 		if(!err){

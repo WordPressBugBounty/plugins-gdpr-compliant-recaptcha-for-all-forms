@@ -27,6 +27,8 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 require_once __DIR__ . '/trait-option-counters.php';
 require_once __DIR__ . '/class-option.php';
 require_once __DIR__ . '/class-proof-of-work.php';
+// Das Wartebudget des Zeilen-Polls (Stamp::poll_for_row()) — rein, s. handbuch/pow.md.
+require_once __DIR__ . '/class-poll-budget.php';
 // Die ausgelagerte Blocklisten-Haelfte von Echo_Values (Welle 4, s.u.).
 require_once __DIR__ . '/trait-blocklist-values.php';
 require_once __DIR__ . '/class-echo-values.php';
@@ -39,6 +41,9 @@ require_once __DIR__ . '/trait-message-gibberish.php';
 require_once __DIR__ . '/trait-message-script-data.php';
 require_once __DIR__ . '/trait-message-list.php';
 require_once __DIR__ . '/class-message-page.php';
+// Das cron-gesteuerte Loeschen alter Nachrichten (Welle Dateigroesse: aus der
+// Hauptdatei ausgelagert, s. class-message-cleanup.php).
+require_once __DIR__ . '/class-message-cleanup.php';
 require_once __DIR__ . '/class-client-ip.php';
 require_once __DIR__ . '/class-proxy-candidate-ledger.php';
 require_once __DIR__ . '/class-rest-route.php';
@@ -47,6 +52,7 @@ require_once __DIR__ . '/class-gibberish-detector.php';
 require_once __DIR__ . '/class-gibberish-fields.php';
 require_once __DIR__ . '/class-gibberish-signature.php';
 require_once __DIR__ . '/class-gibberish-notice.php';
+require_once __DIR__ . '/class-review-request.php';
 require_once __DIR__ . '/class-opcache.php';
 require_once __DIR__ . '/class-classification-reason.php';
 require_once __DIR__ . '/class-credential-fields.php';
@@ -56,6 +62,9 @@ require_once __DIR__ . '/class-credential-learning.php';
 require_once __DIR__ . '/class-credential-cleanup.php';
 require_once __DIR__ . '/class-blocked-values-migration.php';
 require_once __DIR__ . '/class-pattern-matcher.php';
+// Die JSON-Regelzeilen der Action-Liste (2026-08-28). Delegiert jeden Feldvergleich an
+// Pattern_Matcher, steht deshalb dahinter.
+require_once __DIR__ . '/class-action-rules.php';
 // Die zwei ausgelagerten Haelften von Overbroad_Pattern_Guard (Welle 4).
 require_once __DIR__ . '/trait-overbroad-blame.php';
 require_once __DIR__ . '/trait-overbroad-save-warning.php';
@@ -70,8 +79,13 @@ require_once __DIR__ . '/class-stamp.php';
 // muss also nach allen vieren stehen.
 require_once __DIR__ . '/class-support-report.php';
 // Die acht ausgelagerten Sektionen von Settings_Menu (Welle 3, PLAN-DATEIGROESSE.md;
-// die drei get_default_*()-Seeds seit PLAN-BUILDER-SEED.md Phase 3 weiter aufgeteilt).
+// die drei get_default_*()-Seeds seit PLAN-BUILDER-SEED.md Phase 3 weiter aufgeteilt,
+// der admin-ajax-Seed seit Welle 3 der Seed-Ausweitung, 2026-08-28, noch einmal).
 require_once __DIR__ . '/trait-settings-default-actions.php';
+// Welle 2/3 des admin-ajax-Seeds, abgespalten am 2026-08-28 (Welle 3 der
+// Seed-Ausweitung), weil trait-settings-default-actions.php keine weitere Welle mehr
+// hielt. Muss VOR class-settings-menu.php stehen wie jeder Trait.
+require_once __DIR__ . '/trait-settings-default-actions-wave2.php';
 require_once __DIR__ . '/trait-settings-default-patterns.php';
 require_once __DIR__ . '/trait-settings-default-routes.php';
 require_once __DIR__ . '/trait-settings-options.php';
@@ -81,11 +95,20 @@ require_once __DIR__ . '/trait-settings-save.php';
 require_once __DIR__ . '/trait-settings-page.php';
 require_once __DIR__ . '/class-settings-menu.php';
 require_once __DIR__ . '/class-scope-sync.php';
+// Scope_Add's operator-facing half is a trait since 2026-08-28 and must be defined
+// before the class that composes it.
+require_once __DIR__ . '/trait-scope-refusals.php';
 require_once __DIR__ . '/class-scope-add.php';
 require_once __DIR__ . '/class-agent-access.php';
 require_once __DIR__ . '/class-ability-probe.php';
 // Die ausgelagerten Execute-Callbacks von Abilities (Welle 4, PLAN-DATEIGROESSE.md).
 require_once __DIR__ . '/trait-ability-actions.php';
 require_once __DIR__ . '/class-abilities.php';
+// Der Deaktivierungs-Dialog auf plugins.php. Braucht nur RCM_Main::VERSION, steht
+// deshalb ohne Reihenfolge-Zwang hier.
+require_once __DIR__ . '/class-deactivation-feedback.php';
 require_once __DIR__ . '/class-dashboard-widget.php';
+// get_patterns()/save_pattern_callback() (Dateigroessen-Schnitt 2026-08-28), muss vor
+// der Klasse geladen sein.
+require_once __DIR__ . '/trait-analysis-endpoints.php';
 require_once __DIR__ . '/class-analysis.php';

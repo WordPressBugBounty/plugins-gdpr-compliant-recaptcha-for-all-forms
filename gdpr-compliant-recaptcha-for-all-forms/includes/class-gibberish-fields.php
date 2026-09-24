@@ -57,7 +57,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Detail-Doku (Methodenebene): handbuch/gibberish.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 
 /**

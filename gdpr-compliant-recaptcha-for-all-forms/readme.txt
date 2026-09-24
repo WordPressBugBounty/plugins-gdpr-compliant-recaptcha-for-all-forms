@@ -2,8 +2,8 @@
 Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
-Tested up to: 7.0
-Stable tag: 6.0.0
+Tested up to: 7.1
+Stable tag: 6.1.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -47,7 +47,7 @@ Everything runs on your own web server — there is no external service in the l
 
 = Why not just use ... =
 
-* **Google reCAPTCHA, hCaptcha or Turnstile?** They require an account and API keys, load scripts from external servers (hello, consent banners) and still challenge real users when in doubt. This plugin needs no keys, makes no external requests and never challenges anyone.
+* **Google reCAPTCHA, hCaptcha or Turnstile?** They require an account and API keys, load scripts from external servers (hello, consent banners) and still challenge real users when in doubt. This plugin needs no keys, loads no third-party scripts and never challenges anyone.
 * **Akismet?** Sends the content of every submission to an external service for analysis, and commercial sites need a subscription. Here, everything stays on your own server.
 * **Honeypot fields and time checks?** Modern bots skip honeypots routinely, and browser autofill loves to fill them by accident. Proof-of-work attacks the economics of spam instead of playing hide-and-seek.
 
@@ -57,13 +57,13 @@ And they all share one structural limit: they protect the forms they ship an int
 
 * **Invisible** — zero user interaction, ever
 * **Protects everything**: logins, registrations, comments, WooCommerce, every form builder — even hand-coded custom forms
-* **No account, no API keys, no external services** — install and you are done
+* **No account, no API keys, no external service for the spam check** — install and you are done
 * **Brute-force protection** for logins, with optional Fail2Ban log support
 * **Adaptive under-attack mode**: the challenge automatically gets harder for everyone while a spam wave is running, and relaxes afterwards
 * **Your choice per site**: block spam, deliver it flagged, or just collect it in a spam inbox and watch
 * **Teach it live**: unrecognized custom form? Direct analysis mode adds it with one click, straight from the live page
 * **Lightweight**: a few KB of JavaScript, no render-blocking, no layout shift
-* **Privacy-friendly by design**: no cookies, no sessions, no tracking, no data leaves your server, IP addresses are only stored as hashes — GDPR/DSGVO/RGPD-friendly without a consent banner
+* **Privacy-friendly by design**: no cookies, no sessions, no tracking, no visitor data leaves your server, IP addresses are only stored as hashes — GDPR/DSGVO/RGPD-friendly without a consent banner
 * **Free**
 
 = Setup Guide =
@@ -72,13 +72,17 @@ And they all share one structural limit: they protect the forms they ship an int
 
 = Works with =
 
-**WordPress:** Login, Registration, Password Reset, Comments
+**Pre-configured out of the box** — as soon as the plugin is active, these are recognized automatically, no setup:
 
-**WooCommerce:** Checkout, Login, Registration, Password Reset, Comments, Product Reviews
+**WordPress:** Login, Password Reset, Comments
 
-**Form and page builders:** Elementor Pro Forms, Contact Form 7, Fluent Forms, Jetpack Forms, Divi Forms, WPForms, Forminator, Thrive Architect & Thrive Apprentice, Gravity Forms, Formidable Forms, Mailchimp for WordPress Forms, BuddyPress Registration Form, bbPress Create Topic & Reply Forms, Ultimate Member Forms, wpDiscuz Custom Comments Form, Easy Digital Downloads Forms, Paid Memberships Pro Forms, MemberPress Forms, WP-Members Forms, WP User Frontend Forms, CheckoutWC & Flux Checkout, Ninja Forms, Everest Forms, WS Forms, Quform, Otter Blocks, Typeform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, Jotform, Page Builder, Metform, Calculated Fields Form, JetFormBuilder, weForms, Responsive Contact Form Builder, Zoho Forms, Smart Forms, Kali Forms, Happyforms, ApplyOnline, Subscribe Forms, FormCraft, Advanced Forms, CRM Perks Forms, Tripetto, Formstack, BuddyForms, vcita, Easy Form Builder, SimpleForm
+**WooCommerce:** Cart, Checkout, Login, Password Reset, Product Reviews
 
-Anything not on the list can be added in minutes with the built-in analysis modes — no code required.
+**Form and page builders:** Contact Form 7, WPForms, Elementor Pro Forms, Ninja Forms, Fluent Forms, Forminator, Gravity Forms, Formidable Forms, Everest Forms, WS Form, SureForms, MetForm, JetFormBuilder, Otter Blocks, Spectra, Kadence Blocks, Essential Blocks, Divi Forms, MW WP Form, Jetpack Forms, Mailchimp for WordPress, MailPoet, WP User Frontend, wpDiscuz, bbPress (topics & replies), Thrive Architect, Thrive Leads, Thrive Apprentice, Thrive Quiz Builder, Thrive Comments, UserFeedback, Popup Maker (subscription form), YITH WooCommerce Wishlist, Newsletter (subscription forms), CoBlocks, Popup Builder
+
+**Added in under a minute, without code** — switch on direct analysis mode, submit the form once, click save: registration forms (WordPress and WooCommerce), Ultimate Member, BuddyPress, BuddyForms, MemberPress, Paid Memberships Pro, WP-Members, Easy Digital Downloads, CheckoutWC & Flux Checkout, Quform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, SiteOrigin Page Builder, Calculated Fields Form, weForms, Responsive Contact Form Builder, Smart Forms, Kali Forms, Happyforms, ApplyOnline, FormCraft, CRM Perks Forms, Tripetto, Easy Form Builder, SimpleForm — and any hand-coded or custom form.
+
+One honest limit: a form that is hosted elsewhere and only embedded on your page (Typeform, Jotform, Zoho Forms, HubSpot, OptinMonster and the like) sends its data straight to that service. The submission never reaches WordPress, so no WordPress plugin — this one included — can check it.
 
 == Installation ==
 
@@ -97,7 +101,7 @@ Yes. For the kind of spam that plagues almost every site — automated, mass-sen
 No. There is nothing to see, click or solve. The proof-of-work runs in the background while the visitor fills in the form and is typically finished in milliseconds — long before they hit *Send*.
 
 = Do I need an account or API keys? =
-No. Unlike reCAPTCHA, hCaptcha or Turnstile there is no external service involved — no keys, no registration, no third-party scripts, no rate limits.
+No. Unlike reCAPTCHA, hCaptcha or Turnstile the spam protection involves no external service at all — no keys, no registration, no third-party scripts, no rate limits.
 
 = Will it slow down my site? =
 No. The plugin ships a few kilobytes of JavaScript, loads no external resources and causes no layout shift. The computation happens on the visitor's device in the background; the server-side check is a single fast lookup.
@@ -109,7 +113,10 @@ Yes. The challenge token is fetched via Ajax at runtime, so fully cached pages s
 All public forms — including hand-coded and custom ones. The plugin recognizes submissions by their signature (the request's characteristic fields and actions) instead of integrating with specific form plugins, so it is not limited to a fixed list. WordPress core, WooCommerce and the several dozen builders listed above come pre-configured; any other form is added without code in under a minute via direct analysis mode: submit it once, click save.
 
 = What data is stored? Is it GDPR compliant? =
-Everything stays on your server: no cookies, no sessions, no tracking, no external requests. IP addresses are only stored as SHA-256 hashes, and password fields are never stored with saved messages. That means no consent banner is needed for the spam protection — friendly to GDPR (DSGVO, RGPD) and similar privacy laws.
+Everything the spam protection touches stays on your server: no cookies, no sessions, no tracking, no external requests. IP addresses are only stored as SHA-256 hashes, and password fields are never stored with saved messages. That means no consent banner is needed for the spam protection — friendly to GDPR (DSGVO, RGPD) and similar privacy laws. The one thing that can leave your server is a message you type yourself when deactivating the plugin — see the next question.
+
+= Does the plugin send anything to an external service? =
+The spam protection: never. There is exactly one exception, and it only happens if you make it happen. When you deactivate the plugin, a box asks what went wrong. If you type something and press *Send and deactivate*, that text is sent to the plugin author's server at programmiere.de and kept for 90 days. The plugin's name and version number travel with it, so a message can be told apart from one about a different plugin. Nothing else is stored with it — no IP address, no address of your site, no referring page, no browser details, and nothing from your forms. Press *Deactivate without sending*, or leave the box empty, and nothing at all is transmitted. Full details: https://programmiere.de/GDPRCompliantRecaptcha/
 
 = Does it protect WooCommerce? =
 Yes: checkout, login, registration, password reset, comments and product reviews are covered out of the box.
@@ -156,6 +163,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.1.0 =
+Fixes the deactivation feedback box: messages never reached anyone, and it now says where a message goes. Adds out-of-the-box detection for many more form plugins. Note: plain GET requests are no longer checked, so ?add-to-cart= links no longer reach the inbox; the ajax cart button now does.
 = 6.0.0 =
 Gibberish detection is now off by default and only checks fields you pick yourself. If you relied on it, open a stored message and use the button next to the field you want checked. Proof of work, blocked values and the repeat-sender lock are unchanged.
 = 5.6.0 =
@@ -189,6 +198,49 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.1.0 =
+* Changed: The deactivation box and the readme now also name what travels with a message: the plugin name and version.
+* Note: Tested up to WordPress 7.1.
+* Added: The direct-analysis overlay can save an action narrowed to selected field values.
+* Changed: One-click and agent scope writes now validate JSON rule lines; agents get plain action names only.
+* Added: MailPoet signups sent with JavaScript are now detected too, not just the no-JavaScript path.
+* Added: Newsletter (The Newsletter Plugin) subscription forms are now detected out of the box.
+* Added: CoBlocks contact form submissions are now detected out of the box.
+* Added: Popup Builder subscription forms are now detected out of the box.
+* Added: Action-list lines can be JSON rules that pin field values, for AJAX actions shared with a plugin's backend.
+* Added: WooCommerce's ajax add-to-cart button (wc-ajax=add_to_cart) is now checked out of the box.
+* Fixed: A pattern that discards a form posted through admin-post.php now triggers the follow-up admin notice.
+* Changed: Plain GET requests are no longer checked — a link click cannot carry a proof of work.
+* Note: WooCommerce cart links (?add-to-cart=) no longer produce inbox entries, nor does any GET form.
+* Added: MailPoet's subscription form is recognized out of the box on the path automated submissions take.
+* Changed: The "Works with" list now names exactly the builders recognized out of the box.
+* Added: Kadence Blocks, Essential Blocks, Popup Maker, UserFeedback and MW WP Form are named there now.
+* Note: Registration forms are no longer listed as pre-configured — only login and password reset are.
+* Added: out-of-the-box detection for MW WP Form
+* Added: out-of-the-box detection for wpDiscuz comment forms (regular and inline)
+* Added: out-of-the-box detection for Kadence Blocks forms (Form block and Advanced Form)
+* Added: out-of-the-box detection for Essential Blocks forms
+* Added: out-of-the-box detection for Popup Maker subscription forms
+* Added: out-of-the-box detection for MetForm form submissions
+* Added: out-of-the-box detection for UserFeedback survey responses
+* Added: out-of-the-box detection for bbPress forum topics and replies
+* Added: out-of-the-box detection for Mailchimp for WordPress (MC4WP) sign-up forms
+* Security: One-click "monitor this" buttons now refuse a pattern or action that would evaluate wp-admin itself.
+* Changed: Scope additions made through the Abilities API are judged by the same catalog as the settings page.
+* Fixed: The over-broad pattern warning now also covers the Screen Options box and the classic editors.
+* Fixed: The feedback box shown when deactivating the plugin never reached its recipient; messages were lost.
+* Changed: The deactivation box now names its recipient, sends no referrer, and offers a button to send nothing.
+* Note: The readme now discloses this one optional transmission; the spam protection itself still talks to no one.
+* Note: The pattern box now says what its save-time check covers: WordPress own screens, not other plugins admin pages.
+* Added: The repeat-sender lock now shows how many submissions it caught recently, next to the button that releases it.
+* Fixed: A form that posts the same long text in every submission no longer locks itself out after a single spam message.
+* Fixed: The WordPress-login help text now suggests a test that actually works instead of one that cannot.
+* Changed: The Block spam help text now warns it rejects real submissions while spam simulation also runs.
+* Fixed: Deleting the plugin now also removes the one gibberish-notice option row it used to leave behind.
+* Fixed: Requests that cannot carry a token no longer wait for one, cutting the time they occupy the server.
+* Fixed: The "apply on actions" list now only matches the actions and field names actually listed in it.
+* Added: YITH WooCommerce Wishlist is detected out of the box.
+* Added: A one-time, dismissible review request on the plugin's own pages after 30 days and 100 caught spam submissions.
 = 6.0.0 =
 * Added: A message's REST route line now says whether that route is monitored
 * Note: New FAQ entry explaining what to do if a real message is refused as gibberish

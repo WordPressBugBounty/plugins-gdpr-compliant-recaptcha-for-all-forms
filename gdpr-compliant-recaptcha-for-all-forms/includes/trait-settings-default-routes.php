@@ -134,6 +134,95 @@ trait Settings_Default_Routes {
 			self::display_admin_notice( __( 'SureForms detected – added REST route: sureforms/v1/submit-form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
+		// *** MetForm (PLAN-BUILDER-SEED.md Welle 2, ERHEBUNG-BUILDER.md §4.1). Submits
+		// over its own REST namespace, no admin-ajax SUBMIT path. Verified against the
+		// current wp.org zip (metform 4.2.0, main file metform/metform.php):
+		// MetForm\Base\Api::init() (base/api.php:24-30) registers, on `rest_api_init`,
+		// `register_rest_route( untrailingslashit( 'metform/v1/' . $this->prefix ),
+		// '/(?P<action>\w+)/' . ltrim( $this->param, '/' ), [ 'permission_callback' =>
+		// '__return_true' ] )` — anonymous. MetForm\Core\Entries\Api (core/entries/api.php:
+		// 13-17) sets `$this->prefix = 'entries'`, `$this->param = '/(?P<id>\w+)'`, so the
+		// full route is `metform/v1/entries/{action}/{id}`; dispatch is by method+action
+		// name (`Base\Api::action()`, base/api.php:33-43: `strtolower(method) . '_' .
+		// action`), and `post_insert()` (core/entries/api.php:19) is the actual submission
+		// handler. The client confirms the exact segment: utils/util.php:530 renders every
+		// form wrapper with `data-action="<rest_url>metform/v1/entries/insert/<form_id>"`
+		// (the only occurrence of "entries/insert" in the whole zip), and
+		// public/assets/js/app.js constructs `new FormData` from that same wrapper before
+		// posting to it — FormData, matching the table this wave was handed.
+		// Seeded as `metform/v1/entries/insert/*` (namespace-suffix wildcard covering the
+		// numeric form id), NOT a bare `metform/v1/entries/*`: MetForm\Core\Entries\Api
+		// also answers `get_export`, `get_get_response_list`, `get_paypal`, `get_stripe`,
+		// `get_store_mailchimp_list`, `get_store_mailerlite_groups` and more under the SAME
+		// `entries` prefix (core/entries/api.php), every one of them gated by
+		// `current_user_can( 'manage_options' )` and reachable from MetForm's own admin
+		// screens — a wildcard would put those admin-only endpoints behind this plugin's
+		// spam gate too. Fixing the action segment to the literal `insert` keeps the seed
+		// off all of them, and `Stamp::check_rest_routes()` filters to `REQUEST_METHOD ===
+		// 'POST'` before any route comparison runs at all (class-stamp.php), so even a
+		// same-path GET/DELETE admin call — none exists here, checked — could never reach
+		// this gate regardless. MetForm\Core\Forms\Api (core/forms/api.php) is a wholly
+		// separate `metform/v1/forms/*` namespace (admin form settings/builder, all
+		// `manage_options`-gated) and shares no segment with `entries/insert`, so it is
+		// unaffected either way. MetForm itself is NOT registered anywhere else in this
+		// plugin (ERHEBUNG-BUILDER.md §1) — it has stood in the readme's "Works with" list
+		// for years without a matching seed; this entry closes that gap, it opens none.
+		if ( array_key_exists( 'metform/metform.php', $installed_plugins ) ) {
+			$routes[] = 'metform/v1/entries/insert/*';
+			self::display_admin_notice( __( 'MetForm detected – added REST route: metform/v1/entries/insert/*', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** UserFeedback (PLAN-BUILDER-SEED.md Welle 2, ERHEBUNG-BUILDER.md §4.1). Submits
+		// over its own REST namespace with a JSON body — the one entry in this wave whose
+		// body shape is the one AP3's token injection once regressed on (the Spectra
+		// defect, HANDBUCH.md §12), so the injection path was re-checked by hand rather than
+		// assumed. Verified against the current wp.org zip (slug `userfeedback-lite`,
+		// version 1.11.3 — the free plugin is named "UserFeedback Lite", main file
+		// userfeedback-lite/userfeedback.php, NOT the naively-guessed
+		// `userfeedback/userfeedback.php`, the same class of slug mistake ISSUES.md
+		// documents for Everest/WS Forms). UserFeedback_Frontend::register_frontend_routes()
+		// (includes/frontend/class-userfeedback-frontend.php:57-65) registers, on
+		// `rest_api_init`, `register_rest_route( 'userfeedback/v1', '/surveys/(?P<id>\w+)
+		// /responses', [ 'methods' => 'POST', 'permission_callback' => '__return_true' ] )`
+		// — anonymous. Client: assets/vue/js/chunk-common.js bundles an axios-based REST
+		// client defaulting to base path `userfeedback/v1/` (`class r{constructor(e=
+		// "userfeedback/v1/")…}`) and posts `s.post(\`surveys/${e}/responses\`, t)` with a
+		// plain JS object `t` as the body — axios' default `transformRequest` JSON.stringify
+		// (`"application/json"` ships in the same bundle's vendor chunk) turns that into a
+		// JSON string before XMLHttpRequest ever sees it.
+		// JSON-INJECTION CHECK (the point of this comment): by the time that string reaches
+		// `XMLHttpRequest.prototype.send( data )`, `recaptcha-gdpr-pow.js`'s override
+		// (`addFirstStamp()`'s XHR wrapper) already applies `injectTokenIntoBody( data )` to
+		// every non-plugin POST — the branch at `typeof body === 'string'` +
+		// `isValidJson( body )` parses it, adds `gdpr_pow_token` to the parsed plain object
+		// (guarded against arrays and an already-present token) and re-serializes with
+		// `JSON.stringify`, i.e. exactly this shape is hit, not fallen through. Server side,
+		// `Stamp::capture_request_data()` (trait-stamp-capture.php) already reads ANY
+		// `Content-Type: application/json` body via `php://input` +
+		// `Field_Envelopes::decode_body()` regardless of which builder sent it — nothing
+		// builder-specific was needed on that side either. Confirmed working, not merely
+		// plausible.
+		// Seeded with the wildcard in the MIDDLE (`RestRoute::matches()`, single-segment
+		// form, not the trailing namespace-suffix form) because the exact same literal path
+		// `userfeedback/v1/surveys/{id}/responses` is ALSO registered — twice — for
+		// UserFeedback's OWN admin "Results" screen: GET (list responses,
+		// includes/admin/class-userfeedback-results.php:61-67) and DELETE (delete
+		// responses, class-userfeedback-results.php:127-146), both `permission_callback =>
+		// view_results_permission_check`. Neither collides in practice: `check_rest_routes()`
+		// (class-stamp.php:502) returns `false` outright unless `$_SERVER['REQUEST_METHOD']
+		// === 'POST'`, before the route is even extracted, so the admin's GET/DELETE calls
+		// to this identical path never reach the route comparison at all — checked
+		// explicitly rather than assumed, this is exactly the class of near-miss
+		// (Formidable's `frm_action`, MailPoet's whole API) CLAUDE.md requires checking
+		// against the product's own admin views for. The two admin POSTs on this
+		// namespace (`/surveys/{id}/responses/trash`, `/surveys/{id}/responses/restore`,
+		// class-userfeedback-results.php:85-125) add a 6th path segment and fail the exact
+		// 5-segment match regardless of method, so they were never a risk either way.
+		if ( array_key_exists( 'userfeedback-lite/userfeedback.php', $installed_plugins ) ) {
+			$routes[] = 'userfeedback/v1/surveys/*/responses';
+			self::display_admin_notice( __( 'UserFeedback detected – added REST route: userfeedback/v1/surveys/*/responses', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
 		return implode( "\n", $routes );
 	}
 }

@@ -418,23 +418,6 @@ class Stamp {
 		return false;
 	}
 
-	private function check_explicit_actions() {
-		$action = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
-		if ( $action ) {
-			$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY );
-			if ( count( $lines ) > 0 ) {
-				foreach ( $lines as $line ) {
-					if ( trim( $line ) === $action //explicitly listed ajax-action
-						|| isset( $this->whole_request_data [ $action ] ) //explicitly listed post-attribute
-					) {
-						return true;
-					}
-				}
-			}
-		}
-		return false;
-	}
-
 	/**
 	 * Remove the plugin's own injected fields (PLUGIN_FIELDS) from a captured
 	 * submission. Pure and static — unit-tested in tests/unit/StampStripPluginFieldsTest.php.
@@ -948,31 +931,26 @@ class Stamp {
 		// Auto-echo record (BACKLOG "Auto-Echo-Sperre mit TTL"): once a submission is
 		// classified as spam it will land in the spam folder — remember its core values
 		// (hashed, TTL) so the same sender/domain/text is caught on any form / any IP
-		// within the window. Never in simulation mode (everything is "spam" there,
-		// which would poison the store with legitimate submissions).
+		// within the window. Never in simulation mode (everything is "spam" there, which
+		// would poison the store with legitimate submissions).
 		//
-		// TWO CLASSES OF VERDICT ARE EXCLUDED, for one and the same reason: the echo
-		// store holds CONTENT (sender email, payload domain, phone, long-text hash) for
-		// 36h across every form and every address, so only a verdict that actually says
-		// something about the content may fill it.
+		// THREE CARVE-OUTS from one rule: the store holds CONTENT (sender email, payload
+		// domain, phone, long-text hash) for 36h across every form and every address, so
+		// only a verdict that says something about the content may fill it.
 		//  a) The under-attack quarantine ($quarantine_only_spam, exception #2 above):
-		//     its grey-zone submissions are presumed innocent and must not seed echo
-		//     values that would spam-classify legitimate senders after the wave ends.
-		//  b) The three infrastructure-shaped no_pow sub-cases
-		//     (Classification_Reason::seeds_echo_values(), false for token_no_row /
-		//     token_ip_changed / the historic chain_no_row): there a token that VERIFIED
-		//     was presented and merely its solved-PoW row was missing — cache, proxy,
-		//     storage failure, clock skew (HANDBUCH.md §12 causes 4/7/8). A `no_pow`
-		//     verdict states that the handshake failed, nothing about the content, and
-		//     "everything is flagged as spam" is the single most common support case
-		//     there is: letting those seed turns each mass false alarm into a content
-		//     blocklist that outlives its own fix by up to 36h (measured on 5.3.4 — the
-		//     two-clocks bug's victims kept being blocked after the update, now as
-		//     "Known spam value"). `no_pow:no_token` and `no_pow:invalid_token` DO keep
-		//     seeding: protocol-blind mass spam is the echo lock's main food source.
-		//     The two prices of that cut (a protocol-aware bot can provoke
-		//     token_no_row for free; invalid_token is a false-alarm class too) are
-		//     spelled out at seeds_echo_values() and deliberately accepted.
+		//     grey-zone submissions are presumed innocent and must not seed values that
+		//     would spam-classify legitimate senders after the wave ends.
+		//  b) The three infrastructure-shaped no_pow sub-cases (seeds_echo_values(),
+		//     false for token_no_row / token_ip_changed / the historic chain_no_row): a
+		//     token that VERIFIED was presented and merely its solved-PoW row was missing
+		//     — cache, proxy, storage failure, clock skew (HANDBUCH.md §12 causes 4/7/8).
+		//     Letting those seed turns each mass false alarm into a content blocklist
+		//     outliving its own fix by 36h (measured on 5.3.4, now as "Known spam value").
+		//  c) The LONG-TEXT hash for the WHOLE no_pow family — third argument below,
+		//     Classification_Reason::seeds_long_text(). It is the one echo value a form
+		//     can carry without anyone typing it (a consent label, a dropdown option), so
+		//     one spam hit locked the form for everybody. Price named there: cross-form
+		//     TEXT matching for tokenless spam is gone; address/domain/phone still seed.
 		if (
 			$gdpr_fields
 			&& $this->plugin_spam
@@ -980,7 +958,11 @@ class Stamp {
 			&& Classification_Reason::seeds_echo_values( $this->classification_reason )
 			&& ! get_option( Option::POW_SIMULATE_SPAM )
 		) {
-			Echo_Store::record( self::strip_plugin_fields( $gdpr_fields ), $this->envelope_roots() );
+			Echo_Store::record(
+				self::strip_plugin_fields( $gdpr_fields ),
+				$this->envelope_roots(),
+				Classification_Reason::seeds_long_text( $this->classification_reason )
+			);
 		}
 
 		// If message shall be saved before flagging
@@ -1822,18 +1804,18 @@ class Stamp {
 	}
 
 	/** Poll (bounded, 100ms interval) until $consume() reports a consumed row or the
-	 * attempt budget is exhausted. Check-before-sleep, no sleep after the last
-	 * attempt — worst case is (max_attempts - 1) * 100ms ≈ 2s instead of blocking
-	 * the PHP worker for 5s under a spam flood.
+	 * attempt budget is exhausted. Check-before-sleep, no sleep after the last attempt.
 	 *
-	 * @param callable $consume      Zero-arg callable returning affected-rows (int).
-	 * @param int      $max_attempts Attempt budget (default 20 ≈ 2s). Every caller uses
-	 *                               that default since the adaptive, difficulty-scaled
-	 *                               window went with the re-challenge chain.
+	 * THE BUDGET IS NOT ONE NUMBER: it depends on whether this request could still be
+	 * racing the check_stamp() call that writes its row — a POST can, anything else
+	 * cannot. Numbers, reasoning and accepted cost: Poll_Budget (class-poll-budget.php).
+	 * Asked here, not at the two call sites, so no future caller can forget it.
+	 *
+	 * @param callable $consume Zero-arg callable returning affected-rows (int).
 	 * @return int Affected rows from the winning attempt (0 if the budget ran out).
 	 */
-	private function poll_for_row( callable $consume, $max_attempts = 20 ) {
-		$max_attempts = max( 1, (int) $max_attempts );
+	private function poll_for_row( callable $consume ) {
+		$max_attempts = Poll_Budget::attempts( isset( $_SERVER['REQUEST_METHOD'] ) && 'POST' === $_SERVER['REQUEST_METHOD'] );
 		$attempts     = 0;
 		$valid        = 0;
 

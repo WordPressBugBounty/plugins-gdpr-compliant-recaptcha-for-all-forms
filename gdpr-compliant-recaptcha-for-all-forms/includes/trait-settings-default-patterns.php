@@ -82,7 +82,12 @@ trait Settings_Default_Patterns {
 		self::display_admin_notice( __( 'WordPress comments are now checked – added recognition pattern: {"comment":null,"comment_post_ID":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 
 		// *** Contact Form 7 ***
-		// `_wpcf7` is the ONE real request key, verified against the wp.org zip 6.1.7:
+		// `_wpcf7` is the ONE real request key, verified against the wp.org zip of
+		// Contact Form 7 (v6.1.x, read 2026-08-19). The patch level is deliberately
+		// left off: check-release-state.mjs reads any THREE-part number on our own
+		// major line as a promise about OUR next release, and a foreign plugin that
+		// happens to share the major would make that guard report a version we never
+		// promised — see the note in that script.
 		// read in includes/controller.php:22 (`wpcf7_superglobal_post( '_wpcf7' )`),
 		// rendered unconditionally in includes/contact-form.php:711.
 		//
@@ -118,23 +123,77 @@ trait Settings_Default_Patterns {
 		//
 		// NO REPLACEMENT for `update-cart`, deliberately. The real field IS `update_cart`
 		// (class-wc-form-handler.php:702, templates/cart/cart.php:190) — but the cart
-		// update is ALREADY hard-wired into Stamp::__construct() and checked more
-		// NARROWLY there: class-stamp.php:303-307 requires `update_cart` AND `cart` AND
-		// `woocommerce-cart-nonce` together (plus `wc-ajax=checkout` for the checkout).
+		// update is ALREADY hard-wired into the constructor triage and checked more
+		// NARROWLY there: trait-stamp-triage.php:322-327 requires `update_cart` AND `cart`
+		// AND `woocommerce-cart-nonce` together (plus `wc-ajax=checkout` for the checkout).
 		// A `{"update_cart":null}` pattern would be redundant AND broader than the
 		// existing check, because it lacks those two extra conditions.
 		//
 		// NO REPLACEMENT for `remove-from-cart` either: the real `remove_item`
 		// (class-wc-form-handler.php:718) is a nonce-protected GET link — no free text,
-		// no spam vector — and check_existing_patterns() has no REQUEST_METHOD gate, so
-		// a pattern on it would only import the GET-side false-block risk.
+		// no spam vector. Since 2026-08-28 a GET is not even read by this matcher any
+		// more (Stamp::signature_matching_applies(), handbuch/gate.md), so such a pattern
+		// would now be plain dead weight; before that date it also imported a real
+		// false-block risk on a link click.
 		//
 		// NO REPLACEMENT for `woocommerce_checkout` / `woocommerce_login`: checkout and
 		// login are the risk class (payment data, credentials) and stay outside the
 		// shipped seed lists by plan (PLAN-BUILDER-SEED.md).
+		//
+		// *** THE SECOND WooCommerce LINE, added 2026-08-28: the ajax add-to-cart button.
+		// `{"add-to-cart":null}` above covers the classic product-page FORM and the
+		// archive LINK — but on a default installation neither is how a visitor fills a
+		// cart. `woocommerce_enable_ajax_add_to_cart` ships as `yes`
+		// (includes/admin/settings/class-wc-settings-products.php:104-108), and then the
+		// archive button sends a POST to the home URL with the query variable
+		// `wc-ajax=add_to_cart` (assets/js/frontend/add-to-cart.js:107-109 via
+		// WC_AJAX::get_endpoint(), class-wc-ajax.php:51-53), carrying the button's
+		// data-attributes as its body — `product_id`, `product_sku`
+		// (wc-template-functions.php:1475-1479) and `quantity`, rendered as `data-quantity`
+		// by templates/loop/add-to-cart.php:29. That body contains NO field `add-to-cart`
+		// and no nonce, so it matched no seed at all: the main door of the cart stood open on
+		// every default shop.
+		// All of it verified against the wp.org zip of WooCommerce 11.0.1, both halves.
+		//
+		// A SEED LINE AND NOT A HARD-WIRED TERM next to the `wc-ajax=checkout` one in
+		// Stamp::__construct(), for three reasons that all point the same way: the line
+		// is VISIBLE and switchable for the operator, Scope_Sync carries it into existing
+		// installations with a notice, and it is reachable for the blame diagnosis
+		// (Overbroad_Pattern_Guard::blaming_lines()) and the save guard. A constructor
+		// term is invisible at all three places. The checkout term stays where it is —
+		// checkout is the risk class, not a seed subject.
+		//
+		// THE VALUE PIN `add_to_cart` IS THE ENTRY, not spelling detail. `wc-ajax` is the
+		// dispatcher for every one of WooCommerce's own frontend endpoints, and the
+		// read-only ones fire on ordinary page views: `get_refreshed_fragments`
+		// (class-wc-ajax.php:262), `get_cart_totals` (:361), `get_variation` (:607),
+		// `get_customer_location` (:637). A bare `{"wc-ajax":null}` would monitor every
+		// one of them. Strict comparison in Pattern_Matcher::matches() keeps them out.
+		//
+		// `product_id` IS AND-ED, and it must never stand alone. It is the field the
+		// server requires (class-wc-ajax.php:513, `if ( ! isset( $_POST['product_id'] ) )
+		// return;`), which is what makes it the right second half — but the same
+		// top-level name is read by three wp-admin handlers of the product editor:
+		// load_variations() (:2630), save_variations() (:2681) and
+		// bulk_edit_variations() (:3215), and by the frontend's own `get_variation`
+		// (:611). A `{"product_id":null}` seed would put the product editor into the
+		// scope of a plugin that blocks by default, on screens that never receive the
+		// PoW script. Same shape and same reason as Formidable's
+		// `{"frm_action":"create","item_meta":null}` above.
+		//
+		// BACKEND CHECKED (CLAUDE.md, mandatory since 2026-08-19): the string `wc-ajax`
+		// occurs ZERO times under includes/admin/, assets/js/admin/ and templates/ — the
+		// value pin therefore cannot reach any admin request at all.
+		//
+		// THE NAMED LIMIT: this line does not cover the BLOCK cart. That one adds items
+		// through the Store API, `POST /wp-json/wc/store/v1/cart/add-item`
+		// (src/StoreApi/Routes/V1/CartAddItem.php, permission_callback __return_true) —
+		// REST, i.e. a different signature class, and a candidate of its own.
 		if ( array_key_exists( 'woocommerce/woocommerce.php', $installed_plugins ) ) {
 			$patterns[] = '{"add-to-cart":null}';
 			self::display_admin_notice( __( 'WooCommerce detected – added recognition pattern: {"add-to-cart":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			$patterns[] = '{"wc-ajax":"add_to_cart","product_id":null}';
+			self::display_admin_notice( __( 'WooCommerce detected – added recognition pattern: {"wc-ajax":"add_to_cart","product_id":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Gravity Forms (custom submission method) ***
@@ -200,9 +259,11 @@ trait Settings_Default_Patterns {
 		// FrmFormsController::show_form() -> get_form_contents() -> new.php.
 		// `item_meta` is AND-ed on top because `item_meta[0]` is rendered
 		// unconditionally in the same view: it pins that this is an entry SUBMISSION,
-		// and keeps a bare `?frm_action=create` query string from being evaluated
-		// (check_existing_patterns() reads $_REQUEST and has no REQUEST_METHOD gate —
-		// the measured WooCommerce `add-to-cart` lesson, BACKLOG.md).
+		// and keeps a bare `?frm_action=create` query string from being evaluated.
+		// (That second reason has since become belt-and-braces: since 2026-08-28 a GET
+		// does not reach this matcher at all, see Stamp::signature_matching_applies() /
+		// handbuch/gate.md. The AND stays — it also pins "submission, not query", and a
+		// narrow line does not become wrong because a second guard appeared.)
 		//
 		// DO NOT widen this to `{"frm_action":null}`. That candidate was checked and
 		// REJECTED (ERHEBUNG-BUILDER.md §3.3) and then MEASURED on a live 6.34 install
@@ -306,6 +367,168 @@ trait Settings_Default_Patterns {
 			self::display_admin_notice( __( 'JetFormBuilder detected – added recognition pattern: {"_jet_engine_booking_form_id":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
+		// *** Mailchimp for WP ***
+		// `_mc4wp_form_id` is the hidden field EVERY MC4WP form renders — unconditionally,
+		// in MC4WP_Form_Element::get_hidden_fields() (includes/forms/class-form-element.php:85,
+		// wp.org zip 4.14.0) — and it is the one field the submit handler keys on:
+		// MC4WP_Form_Listener::action_init() returns immediately unless
+		// $_POST['_mc4wp_form_id'] is non-empty (includes/forms/class-form-listener.php:28,
+		// read again at :34). Both halves, client and server, verified against that zip.
+		// It is a plain POST to the current page, processed on `init`; the plugin registers
+		// exactly ONE ajax action in the whole zip (`wp_ajax_mc4wp_get_list_details`,
+		// includes/admin/class-admin-ajax.php:30) and that one is admin-only and not a
+		// submission — so a field pattern is the correct signature class here, and there is
+		// nothing for get_default_ajax_actions() to carry.
+		//
+		// THE LEADING UNDERSCORE IS THE ENTRY, not a detail of spelling. MC4WP's own form
+		// EDITOR in wp-admin posts `mc4wp_form_id` WITHOUT it
+		// (includes/forms/views/edit-form.php:52 — the only other occurrence of the name in
+		// the zip). Pattern_Matcher::matches() tests key existence with
+		// isset( $request[ $key ] ), i.e. names are compared exactly, so the two never meet;
+		// but a seed written `{"mc4wp_form_id":null}` would have put the operator's own form
+		// editor into the scope of a plugin whose block setting is on by default, on a screen
+		// that never receives the PoW script. Pattern_Matcher::overbroad_lines() would NOT
+		// have warned — it knows WordPress CORE screens only (handbuch/matchers.md). Same lesson
+		// as Formidable's rejected `{"frm_action":null}`, one size smaller.
+		if ( array_key_exists( 'mailchimp-for-wp/mailchimp-for-wp.php', $installed_plugins ) ) {
+			$patterns[] = '{"_mc4wp_form_id":null}';
+			self::display_admin_notice( __( 'Mailchimp for WordPress detected – added recognition pattern: {"_mc4wp_form_id":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** bbPress (forum topics and replies) ***
+		// Not a form builder — seeded for the same reason WordPress' own comment form above
+		// is: a public forum IS a free-text form, and it is one of the three products the
+		// readme has been promising without a signature behind it (ERHEBUNG-BUILDER.md §4.1).
+		//
+		// TWO LINES, ONE PRODUCT, and they are OR-ed because they are two different forms:
+		// a new topic and a reply to one. Both verified against the wp.org zip of bbPress
+		// 2.6.14 — note that `downloads.wordpress.org/plugin/bbpress.zip` serves TRUNK, whose
+		// header reads 2.7.0-alpha-2; the tagged `bbpress.2.6.14.zip` is the released code
+		// and the one read here.
+		//   CLIENT: bbp_get_the_content() names the editor `bbp_{context}_content` — via
+		//   wp_editor()'s id argument (includes/common/template.php:1939) or, without the
+		//   rich editor, the plain <textarea name="bbp_…_content"> fallback (:1966) — and the
+		//   templates call it with context `topic` (templates/default/bbpress/form-topic.php:93)
+		//   and `reply` (form-reply.php:72). The name comes from a literal template argument,
+		//   not from a form id or an option, so it is identical on every installation.
+		//   SERVER: bbp_new_topic_handler() reads $_POST['bbp_topic_content']
+		//   (includes/topics/functions.php:168), bbp_new_reply_handler() reads
+		//   $_POST['bbp_reply_content'] (includes/replies/functions.php:289); the two edit
+		//   handlers read the same names again (topics/functions.php:555,
+		//   replies/functions.php:623).
+		//
+		// PATTERN, NOT ACTION, and that is structural rather than a preference: the forms are
+		// plain POSTs to the forum page carrying a hidden `action=bbp-new-topic` /
+		// `bbp-new-reply` (includes/common/template.php:1764 and :1797), dispatched by
+		// bbp_post_request() off `bbp_init` — nothing ever goes to admin-ajax. bbPress
+		// registers FOUR wp_ajax_* hooks in the entire zip (the importer and the two admin
+		// suggest boxes, includes/admin/…), none of them with a `nopriv` half and none of
+		// them a submission, so get_default_ajax_actions() has nothing to carry here.
+		//
+		// Backend checked (CLAUDE.md, mandatory since 2026-08-19): `bbp_reply_content` does
+		// occur once under includes/admin/ — as a COLUMN ID of the topic-replies list table
+		// (class-bbp-topic-replies-list-table.php:60/136/140). A column id is never a request
+		// key: sorting sends it as the VALUE of `orderby`, and hiding columns sends the
+		// comma-joined `hidden_columns` string, so neither request carries a field by that
+		// name and the key-existence test never closes. `bbp_topic_content` has no admin hit
+		// at all.
+		if ( array_key_exists( 'bbpress/bbpress.php', $installed_plugins ) ) {
+			$patterns[] = '{"bbp_topic_content":null}';
+			self::display_admin_notice( __( 'bbPress detected – added recognition pattern: {"bbp_topic_content":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			$patterns[] = '{"bbp_reply_content":null}';
+			self::display_admin_notice( __( 'bbPress detected – added recognition pattern: {"bbp_reply_content":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** MW WP Form ***
+		// `mw_wp_form_token` is the plugin's own CSRF field (MWF_Config::TOKEN_NAME,
+		// classes/config.php:116, wp.org zip 5.1.5) and it is emitted for EVERY form it
+		// renders, not per setting: MW_WP_Form_Form::end() runs the `mwform_form_end_html`
+		// filter just before `</form>` (classes/models/class.form.php:252-256) and the
+		// shortcode service hangs on it (classes/services/class.exec-shortcode.php:45),
+		// appending the hidden input at :420-422 for any form whose form key is set.
+		// Server side it is the field the controller keys on: MW_WP_Form_Main reads
+		// $_POST[ TOKEN_NAME ] to recognise its own request (classes/controllers/class.main.php:46)
+		// and validates it before processing (:146). Classic POST to the form page,
+		// enctype multipart/form-data (class.form.php:235/241) — PHP fills $_REQUEST for a
+		// multipart body just as for an urlencoded one, so the pattern branch sees it.
+		//
+		// The whole zip contains the string in exactly five places: the constant, the two
+		// controller reads, the render call and MW_WP_Form_Data::get_post_value_by_key()
+		// (classes/models/class.data.php:218). Backend checked (CLAUDE.md, mandatory since
+		// 2026-08-19): ZERO hits in classes/controllers/class.admin*.php or any other admin
+		// class — the form BUILDER is a normal custom-post-type editor screen and posts
+		// core's post fields, never this token. Nothing to work around here.
+		if ( array_key_exists( 'mw-wp-form/mw-wp-form.php', $installed_plugins ) ) {
+			$patterns[] = '{"mw_wp_form_token":null}';
+			self::display_admin_notice( __( 'MW WP Form detected – added recognition pattern: {"mw_wp_form_token":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** Newsletter (The Newsletter Plugin) — Welle 3 der Seed-Ausweitung
+		// (2026-08-28), the SECOND of its two entries, VERENGT in derselben Session nach
+		// Abnahme. The first — the RULE action line `{"action":"tnp","nlang":null}` —
+		// covers the shipped `links=ajax` default (trait-settings-default-actions-wave2.php,
+		// where the full analysis of both entries lives; the rejection of the Klartext
+		// value `tnp` on its own, and of the withdrawn `{"na":null,"ne":null}` pattern,
+		// also lives there). THIS line covers the OTHER configuration: `links=Standard`.
+		//
+		// With `links=Standard`, get_action_base_url() (includes/module-base.php:963)
+		// returns get_home_url() instead of the admin-ajax URL — every subscription form
+		// then posts to the CURRENT PAGE with no `action` parameter at all. That request
+		// takes the non-ajax branch of the triage, where check_explicit_actions() exits
+		// early without an `action` value (its field-name reading never fires either), so
+		// only a PATTERN can see it.
+		//
+		// TWO FIELDS, not one — the original Welle-3 shape pinned only `nlang`, added
+		// because it is rendered UNCONDITIONALLY by get_form_hidden_fields()
+		// (subscription/subscription.php:1262, outside any `if`), and all four
+		// form-rendering entry points call it (:1152, :1716, :1828, :1915). `na` is added
+		// alongside it AT ZERO COST: build_action_url() (module-base.php:982) appends
+		// `na=` to the action URL it builds REGARDLESS of `links` — even the home-URL
+		// target this very pattern exists for still carries it as a query-string
+		// parameter (module-base.php:963/982, used by subscription/subscription.php:1138,
+		// :1699, :1827, :1905), and POW_PARAMETER_PATTERN lines read $_REQUEST
+		// (trait-stamp-triage.php:203), which folds GET query-string fields in. A real
+		// `links=Standard` subscribe therefore always carries both fields; the only thing
+		// the second condition rules out is the residual risk of some UNRELATED plugin
+		// sending a bare `nlang` of its own — narrower coverage of the exact same traffic,
+		// nothing given up. Verified against the 9.3.5 zip: `nlang` occurs only in
+		// subscription/subscription.php (also read at :250, :654, :669) and in no admin
+		// view; `na` is read at plugin.php:140 and :198.
+		//
+		// `ne` (the email field) remains rejected as a third, AND-ed condition — unlike
+		// Formidable's `item_meta[0]`, it is not rendered unconditionally by all four
+		// variants (shortcode_newsletter_field() only emits it when the `email` field is
+		// part of the configured field list, and both get_subscription_form_custom() and
+		// get_form() can omit it). See the action-list entry for the full argument,
+		// including why `nlang` collides with no other seeded product.
+		//
+		// KNOWN BLIND SPOT, same as the action-list twin: the minimal WIDGET
+		// (widget/minimal.php:34-43) builds its markup by hand and never calls
+		// get_form_hidden_fields(), so it emits neither field and is covered by neither
+		// entry.
+		if ( array_key_exists( 'newsletter/plugin.php', $installed_plugins ) ) {
+			$patterns[] = '{"nlang":null,"na":null}';
+			self::display_admin_notice( __( 'Newsletter detected – added recognition pattern: {"nlang":null,"na":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** Crowdsignal Dashboard (Polldaddy), slug `polldaddy` — CONSIDERED AND
+		// REJECTED (ERHEBUNG-BUILDER.md §4.3, Welle 3 of the seed expansion, 2026-08-28).
+		// Same class of rejection as Jotform/Typeform/Zoho above, and for the same
+		// structural reason: no submission ever reaches THIS WordPress installation.
+		//
+		// Verified against the wp.org zip, Crowdsignal Dashboard 3.1.8: every poll,
+		// survey and rating shortcode loads FOREIGN JavaScript —
+		// polldaddy-shortcode.php:34 `pd.src = 'https://polldaddy.com/survey.js'` — or
+		// links out to `https://survey.fm/<id>` (same file, :46/:291/:320). The plugin's
+		// only two `wp_ajax_*` hooks in the entire zip (ajax.php:9-10,
+		// `polls_upload_image` / `polls_add_answer`) have NO `_nopriv` counterpart —
+		// verified zero `nopriv` occurrences anywhere in the zip — so both are
+		// editor-only endpoints inside the poll-building screens, never a visitor
+		// submission.
+		//
+		// Do not add a seed by analogy to the other foreign-origin rejections above: the
+		// verification standard this survey exists to uphold is "checked", not "probably
+		// the same as its siblings" — this comment IS that check, and it came back empty.
 		return implode( "\n", $patterns );
 	}
 }

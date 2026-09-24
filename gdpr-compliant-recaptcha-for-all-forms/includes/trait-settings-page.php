@@ -362,12 +362,13 @@ trait Settings_Page {
 	 * @return void
 	 */
 	private function render_diagnostics_panel( $is_active ) {
-		$fp_share   = Option::fp_mismatch_share(
+		$fp_share    = Option::fp_mismatch_share(
 			get_option( Option::POW_FP_MATCHED_TOTAL, 0 ),
 			get_option( Option::POW_FP_MISMATCHED_TOTAL, 0 )
 		);
-		$echo_count = Echo_Store::count();
-		$diag_nonce = wp_create_nonce( self::AJAX_DIAG_TASK );
+		$echo_count  = Echo_Store::count();
+		$echo_status = self::echo_lock_status_text( $echo_count, self::echo_lock_caught() );
+		$diag_nonce  = wp_create_nonce( self::AJAX_DIAG_TASK );
 		?>
 	<section class="gdpr-tab-panel" id="<?php echo esc_attr( self::TAB_DIAGNOSTICS ); ?>"<?php echo $is_active ? '' : ' hidden'; ?>>
 		<div class="gdpr-card">
@@ -430,17 +431,7 @@ trait Settings_Page {
 					<p class="gdpr-option-short"><?php esc_html_e( 'Values from recent spam, briefly remembered as one-way hashes so the same sender is caught again on any form.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?></p>
 				</div>
 				<div class="gdpr-option-control">
-					<span class="gdpr-action-value" data-diag-value="echo">
-						<?php
-						echo esc_html(
-							sprintf(
-								/* translators: %d: number of values currently held in the repeat-sender lock */
-								_n( '%d value held', '%d values held', $echo_count, 'gdpr-compliant-recaptcha-for-all-forms' ),
-								$echo_count
-							)
-						);
-						?>
-					</span>
+					<span class="gdpr-action-value" data-diag-value="echo"><?php echo esc_html( $echo_status ); ?></span>
 					<button type="button" class="button button-secondary" data-diag-run="reset_echo"
 						data-nonce="<?php echo esc_attr( $diag_nonce ); ?>"
 						data-confirm="<?php esc_attr_e( 'Release all held values?', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>"
@@ -451,7 +442,7 @@ trait Settings_Page {
 					</button>
 					<button type="button" class="gdpr-help-toggle" aria-expanded="false" aria-controls="help_gdpr_reset_echo">?</button>
 					<div class="gdpr-help-popover" id="help_gdpr_reset_echo" hidden>
-						<?php esc_html_e( 'The repeat-sender lock briefly remembers values from spam submissions (as one-way hashes) so the same sender is caught again on any form. Releasing frees every value it currently holds at once — use it if a legitimate sender got caught. No data is lost, and the lock rebuilds itself as new spam arrives.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
+						<?php esc_html_e( 'The repeat-sender lock briefly remembers values from spam submissions (as one-way hashes) so the same sender is caught again on any form. The second number counts how many submissions it actually turned away recently, which is the number to look at if a form has gone unexpectedly quiet — it only counts submissions that were saved, so it stays at zero while "Save spam messages" is off. Releasing frees every value the lock currently holds at once — use it if a legitimate sender got caught. No data is lost, and the lock rebuilds itself as new spam arrives.', 'gdpr-compliant-recaptcha-for-all-forms' ); ?>
 					</div>
 				</div>
 				<div class="gdpr-action-result" hidden></div>
@@ -500,6 +491,55 @@ trait Settings_Page {
 	}
 
 	/**
+	 * How many submissions the repeat-sender lock turned away inside its own memory
+	 * window. The window IS the lock's TTL and is derived from it, never a round number
+	 * chosen here: a submission refused longer ago than that was refused by values the
+	 * store no longer holds, and printing it next to "values held" would put two
+	 * different time frames in one line.
+	 *
+	 * @return int
+	 */
+	private static function echo_lock_caught() {
+		return Option::count_echo_lock_reasons_since_hours( (int) ( Echo_Store::TTL_SECONDS / HOUR_IN_SECONDS ) );
+	}
+
+	/**
+	 * The two numbers on the repeat-sender lock row as one line: how many values the lock
+	 * currently holds, and how many submissions it actually turned away recently.
+	 *
+	 * WHY THE SECOND NUMBER EXISTS. "Values held" says the lock is loaded, never that it
+	 * is firing — and the cure has been sitting next to it all along with nothing to say
+	 * WHEN to press it. A form that went quiet because one of its own constant values got
+	 * locked looks, from the outside, exactly like a form nobody writes to; this is the
+	 * number that tells those two apart. Derived from the stored messages' reason rows,
+	 * so nothing new is written while a submission is being judged.
+	 *
+	 * Written once and used twice — on render and in the answer diag_task_callback()
+	 * sends after a reset — so the row cannot end up phrasing the same two numbers in two
+	 * different ways.
+	 *
+	 * @param int $held   Values currently held (Echo_Store::count()).
+	 * @param int $caught Submissions turned away inside the window.
+	 * @return string
+	 */
+	private static function echo_lock_status_text( $held, $caught ) {
+		$held   = (int) $held;
+		$caught = (int) $caught;
+		$hours  = (int) ( Echo_Store::TTL_SECONDS / HOUR_IN_SECONDS );
+
+		return sprintf(
+			/* translators: %d: number of values currently held in the repeat-sender lock */
+			_n( '%d value held', '%d values held', $held, 'gdpr-compliant-recaptcha-for-all-forms' ),
+			$held
+		) . ' · ' . sprintf(
+			/* translators: 1: number of submissions turned away, 2: length of the lookback window in hours */
+			_n( '%1$d submission caught in the last %2$d hours', '%1$d submissions caught in the last %2$d hours', $caught, 'gdpr-compliant-recaptcha-for-all-forms' ),
+			$caught,
+			$hours
+		);
+	}
+
+	/**
 	 * Run one of the two diagnostic resets and answer with the FRESH value, so the row
 	 * can update itself — the changed number is the success feedback, no toast needed.
 	 *
@@ -535,11 +575,10 @@ trait Settings_Page {
 
 			wp_send_json_success(
 				array(
-					'value'   => sprintf(
-						/* translators: %d: number of values currently held in the repeat-sender lock */
-						_n( '%d value held', '%d values held', 0, 'gdpr-compliant-recaptcha-for-all-forms' ),
-						0
-					),
+					// Nothing is held any more; the second number is HISTORY and stays as
+					// it was — releasing frees the values, it does not un-refuse the
+					// submissions that were already turned away.
+					'value'   => self::echo_lock_status_text( 0, self::echo_lock_caught() ),
 					'message' => __( 'All held values released.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'empty'   => true,
 				)

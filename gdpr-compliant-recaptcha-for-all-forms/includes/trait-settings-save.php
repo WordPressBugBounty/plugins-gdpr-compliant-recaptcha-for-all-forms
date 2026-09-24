@@ -142,6 +142,93 @@ trait Settings_Save {
 					}
 				}
 
+				// THE ACTION LIST'S RULE LINES (2026-08-28, handbuch/matchers.md "Die
+				// Regelzeilen der Action-Liste"). A line here may now be a JSON rule that
+				// pins the action name plus further fields or values. Three things can go
+				// wrong with one, all three of them SILENTLY, and all three are named
+				// here rather than swallowed. WARN-ONLY throughout: the line is stored as
+				// typed — this is not the pattern box's hold-back mechanic, because a
+				// rule line can only ever be NARROWER than the plain action name it pins
+				// (that name alone is a legal line already), so there is nothing to hold
+				// back that the operator could not have written more broadly.
+				if ( Option::POW_EXPLICIT_ACTION === $key && is_string( $post_value ) ) {
+					// (1) Looks like a rule, pins no action name: inert. It never matches
+					// anything and yet reads like protection.
+					$inert_rules = Action_Rules::inert_rule_lines( $post_value );
+					if ( ! empty( $inert_rules ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-action-rules-inert',
+							sprintf(
+								/* translators: %s: the inert rule lines, comma separated */
+								__( 'These lines look like a rule but never match anything, because they do not pin a fixed "action" value: %s. A rule looks like {"action":"mailpoet","endpoint":"subscribers"} — the action name first, then the further conditions.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								// Unescaped by settings_errors(), admin-typed input — same
+								// reason as Overbroad_Pattern_Guard::warning_message().
+								esc_html( implode( ', ', $inert_rules ) )
+							),
+							'warning'
+						);
+					}
+
+					// Collect the ARMED rule lines once, for (2) and (3) below. An inert
+					// line is already reported above and can never match, so neither of
+					// the two remaining questions applies to it.
+					$armed_rules   = array();
+					$lockout_rules = array();
+					foreach ( (array) preg_split( "/\r\n|\n|\r/", $post_value ) as $raw_line ) {
+						$pinned = Action_Rules::pinned_action( (string) $raw_line );
+						if ( '' === $pinned ) {
+							continue;
+						}
+						$armed_rules[] = trim( (string) $raw_line );
+						// (2) The pinned name is one wp-admin drives ITSELF with. The
+						// ajax branch recognises a request by action name only, and
+						// wp-admin carries no proof-of-work script, so such a rule can
+						// take an admin feature down with no way back from inside
+						// wp-admin. Asked through the ONE list that answers this
+						// question for action names (Scope_Add::ADMIN_AJAX_ACTIONS,
+						// handbuch/overbroad.md) — a second copy of it is exactly the
+						// mistake that list was created to undo.
+						if ( Scope_Add::action_locks_out_admin( $pinned ) ) {
+							$lockout_rules[] = trim( (string) $raw_line );
+						}
+					}
+					if ( ! empty( $lockout_rules ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-action-rules-lockout',
+							sprintf(
+								/* translators: %s: the rule lines pinning a WordPress admin-ajax action, comma separated */
+								__( 'These rules pin an action WordPress uses for wp-admin itself: %s. If they match, the corresponding admin feature stops working, and wp-admin never gets a puzzle to solve. Saved as typed — check the conditions narrow it to visitor traffic.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								// Unescaped by settings_errors(), admin-typed input — see above.
+								esc_html( implode( ', ', array_unique( $lockout_rules ) ) )
+							),
+							'warning'
+						);
+					}
+
+					// (3) The rule also matches one of WordPress' core backend POSTs.
+					// Same catalog, same question and the SAME implementation as the
+					// pattern box's guard — Pattern_Matcher::overbroad_lines() runs
+					// line_matches() over CORE_BACKEND_SIGNATURES and nothing is compared
+					// here. Only the armed lines are handed over: a plain action name is
+					// not a field condition and has no business in that catalog.
+					$core_screen_rules = Pattern_Matcher::overbroad_lines( implode( "\n", $armed_rules ) );
+					if ( ! empty( $core_screen_rules ) ) {
+						add_settings_error(
+							Option::PREFIX . 'options',
+							'gdpr-action-rules-core-screen',
+							sprintf(
+								/* translators: %s: the rule lines matching a WordPress core backend screen, comma separated */
+								__( 'These rules also match a WordPress core backend request: %s. Saved as typed — but a submission from that screen would be judged like a visitor submission.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+								// Unescaped by settings_errors(), admin-typed input — see above.
+								esc_html( implode( ', ', array_keys( $core_screen_rules ) ) )
+							),
+							'warning'
+						);
+					}
+				}
+
 				if ( Option::POW_REST_ROUTES === $key && is_string( $post_value ) ) {
 					list( $post_value, $rejected_routes ) = RestRoute::reject_self_lockout_lines( $post_value );
 					if ( ! empty( $rejected_routes ) ) {

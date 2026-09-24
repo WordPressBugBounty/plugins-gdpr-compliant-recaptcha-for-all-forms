@@ -124,6 +124,120 @@ trait Stamp_Triage {
 	}
 
 	/**
+	 * Do the two signature matchers (field patterns, action list) apply to THIS request?
+	 *
+	 * Pure — both inputs are handed in, nothing is read here, so the decision is
+	 * unit-tested without a WordPress runtime (tests/unit/StampMethodGateTest.php). Same
+	 * shape and same reason as Overbroad_Pattern_Guard::is_core_admin_screen_post().
+	 *
+	 * TRUE for a POST, and for ANY method on admin-post.php. The second half is not a
+	 * courtesy: admin-post.php dispatches `admin_post_*` / `admin_post_nopriv_*` without
+	 * looking at the method, so a plain method check would turn every seeded handler
+	 * behind it into an unevaluated GET endpoint — the gate meant to close noise would
+	 * open a bypass. (admin-ajax.php needs no entry here: it defines DOING_AJAX and is
+	 * therefore handled in the OTHER branch of the triage, which this gate never reaches.)
+	 *
+	 * ERROR DIRECTION FOR AN EMPTY SCRIPT_FILENAME: true, i.e. evaluate. The file name is
+	 * the only thing that can identify admin-post.php; without it, the safe answer is the
+	 * behaviour that stood here for years rather than a silent hole in it.
+	 *
+	 * @param string $request_method  $_SERVER['REQUEST_METHOD'], raw.
+	 * @param string $script_filename $_SERVER['SCRIPT_FILENAME'], raw.
+	 * @return bool
+	 */
+	public static function signature_matching_applies( string $request_method, string $script_filename ): bool {
+		if ( 'POST' === strtoupper( trim( $request_method ) ) ) {
+			return true;
+		}
+		$path = strtolower( trim( str_replace( '\\', '/', $script_filename ) ) );
+		if ( '' === $path ) {
+			return true;
+		}
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( 'admin-post.php' === trim( $segment ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * THE ACTION LIST (POW_EXPLICIT_ACTION), the signature class the ajax branch of the
+	 * triage matches on — and, since 2026-08-28, the only list in this plugin that is
+	 * read in BOTH branches with the same three readings.
+	 *
+	 * MOVED HERE FROM class-stamp.php on 2026-08-28, unchanged apart from the rule branch
+	 * below. Two reasons, and the second one is the real one: the file-size cap
+	 * (scripts/check-file-size.mjs) had class-stamp.php sitting on its ledger cap with a
+	 * single line of headroom, and the rule this repo holds there is "auslagern, nicht
+	 * die Grenze heben" (CLAUDE.md, "Dateigroessen"). Thematically it belongs here in any
+	 * case: this is the gate, it is described in handbuch/gate.md, and its only callers
+	 * are the two branches of triage_request() right below.
+	 *
+	 * THE EARLY EXIT IS PART OF THE SECURITY BOUNDARY, not a shortcut: without an
+	 * `action` in the request nothing here can match, in ANY of the three readings. It is
+	 * what keeps a listed line from turning into a bare field pattern (a plain GET
+	 * carrying `?add_to_wishlist=12` has no action and must stay unevaluated) — and it is
+	 * what keeps the rule form below from ever becoming a second, general pattern box.
+	 *
+	 * THREE READINGS PER LINE, all against `trim( $line )`:
+	 *   1. the line IS the action value the request sent;
+	 *   2. the request carries a top-level FIELD by that name. This one read `$action`
+	 *      instead of the line until 2026-08-26, which made it loop-invariant: every
+	 *      request sending `action=X` together with a field named `X` was evaluated as
+	 *      soon as the option held ONE line, whatever it said (measured on the running
+	 *      instance: `?action=zzz&zzz=1` evaluated and blocked, `zzz` listed nowhere).
+	 *      Pinned in tests/unit/StampGateTest.php.
+	 *   3. NEW 2026-08-28: the line is a JSON RULE that pins `action` plus further fields
+	 *      or values — Action_Rules::line_matches(), which delegates every comparison to
+	 *      Pattern_Matcher::matches(). For a rule line the two readings above are NOT
+	 *      consulted (`continue`), so a `{`-line has exactly one meaning and exactly one
+	 *      place that decides it. This is a strict NARROWING of what reading 1 could
+	 *      already express — `{"action":"mailpoet","endpoint":"subscribers"}` is a subset
+	 *      of the plain line `mailpoet` — and it exists for builders whose frontend
+	 *      action name IS the name of their admin API, where "all or nothing" means
+	 *      locking the operator out of their own backend (handbuch/matchers.md, "Die
+	 *      Regelzeilen der Action-Liste").
+	 *
+	 * WHY NOT RUN THE PATTERN MACHINERY IN THE AJAX BRANCH INSTEAD, the alternative that
+	 * was weighed and rejected: POW_PARAMETER_PATTERN lines read $_REQUEST, so every
+	 * generic operator line that is harmless today (`{"email":null}`, `{"content":null}`)
+	 * would suddenly evaluate admin-ajax BACKEND traffic — the comment reply in wp-admin
+	 * carries `content`. wp-admin serves no PoW script and POW_BLOCK is the default: that
+	 * is a lockout generator on existing installations, and the over-broad guard would
+	 * not see any of it (it deliberately catalogues no admin-ajax screens).
+	 *
+	 * @return bool
+	 */
+	private function check_explicit_actions() {
+		$action = isset( $this->whole_request_data ['action'] ) ? sanitize_text_field( $this->whole_request_data ['action'] ) : '';
+		if ( $action ) {
+			$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY );
+			if ( count( $lines ) > 0 ) {
+				foreach ( $lines as $line ) {
+					// Reading 3. Everything about a rule line — is it one, does it arm,
+					// does it match — is Action_Rules' job; nothing is decoded or
+					// compared here, deliberately, so no second semantics can grow next
+					// to Pattern_Matcher (same construction and same reason as
+					// check_existing_patterns() above delegating to line_matches()).
+					if ( Action_Rules::is_rule_line( $line ) ) {
+						if ( Action_Rules::line_matches( $line, $this->whole_request_data ) ) {
+							return true;
+						}
+						continue;
+					}
+					if ( trim( $line ) === $action //explicitly listed ajax-action
+						|| isset( $this->whole_request_data [ trim( $line ) ] ) //explicitly listed post-attribute: the LINE, never $action
+					) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * The request triage: whitelists, special cases and the gate `if` that decides
 	 * whether this request is evaluated.
 	 *
@@ -243,8 +357,42 @@ trait Stamp_Triage {
 				if ( ! ( isset( $this->request_data['wordfence_syncAttackData'] ) && count( $this->request_data ) === 1 ) ) {
 					// Priority: the DEFAULT 10, deliberately — see the note above the gate `if`.
 					add_action( 'init', array( $this, 'run' ) );
-					$pattern_found = $this->check_existing_patterns();
-					$action_found  = $this->check_explicit_actions();
+					// THE METHOD GATE (2026-08-28). Both matchers below read
+					// $whole_request_data, which is $_REQUEST — so before this line they
+					// also judged plain GET requests. That was never a decision: it comes
+					// unchanged from the 4.x code (`$this->whole_request_data = $_REQUEST`
+					// with no REQUEST_METHOD anywhere near it), and it has one measurable
+					// consequence — WooCommerce's one-click `?add-to-cart=123` links on an
+					// archive page match `{"add-to-cart":null}`. A GET can never carry a
+					// token (the client stamps no GET form, isGetForm()), so such a hit is
+					// decided by the IP fallback alone: whoever has not solved a PoW on
+					// this address is judged spam ON A LINK CLICK, and with POW_BLOCK on
+					// by default the click dies. A crawler, a link preview and a visitor
+					// with JavaScript off all take that path.
+					//
+					// What is given up is small and named: a GET carries no free text, so
+					// there is nothing to classify — the message row it produced was a
+					// cart line, which is why POW_SAVE_CART exists at all.
+					//
+					// WHY THE GATE SITS HERE AND NOT IN THE MATCHERS. Both are called from
+					// the ajax branch above as well, where admin-ajax.php dispatches
+					// `wp_ajax_*` REGARDLESS of the HTTP method — a gate inside
+					// check_explicit_actions() would hand any builder whose handler reads
+					// $_GET a free, unevaluated GET-admin-ajax path. Same trap one level
+					// down for admin-post.php, which is literally a "Generic Request
+					// (POST/GET) Handler" and runs through THIS branch: hence the
+					// exception in signature_matching_applies() rather than a bare
+					// REQUEST_METHOD check. Our own MailPoet seed rides that endpoint.
+					$pattern_found = false;
+					$action_found  = false;
+					// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set, only compared against fixed strings in the pure helper; never stored, never printed.
+					$request_method = isset( $_SERVER['REQUEST_METHOD'] ) ? (string) $_SERVER['REQUEST_METHOD'] : '';
+					// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- ditto, same reasoning as the SCRIPT_FILENAME read in the constructor.
+					$script_filename = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
+					if ( self::signature_matching_applies( $request_method, $script_filename ) ) {
+						$pattern_found = $this->check_existing_patterns();
+						$action_found  = $this->check_explicit_actions();
+					}
 					// $this->route_found: computed earlier in the constructor, before
 					// save_for_analysis() — see there.
 					//WooCommerce

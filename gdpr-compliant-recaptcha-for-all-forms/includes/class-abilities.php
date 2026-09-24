@@ -602,6 +602,14 @@ final class Abilities {
 	 * nothing to maintain: no key, no account, no endpoint. The card says so, which
 	 * is the point of appearing on a screen listing what this site talks to.
 	 *
+	 * THE SENTENCE IS SCOPED TO THE SPAM CHECK, and that word is load-bearing. This
+	 * plugin does have exactly one outbound request — the optional message an
+	 * administrator can type when deactivating it (Deactivation_Feedback,
+	 * handbuch/feedback.md). It is not spam filtering, it fires only on an explicit
+	 * click after a disclosure, and it is described in readme.txt; but a flat "no
+	 * external service" on the very screen that lists what a site talks to would be
+	 * a claim this plugin cannot fully keep.
+	 *
 	 * @param mixed $registry Connector registry instance, passed by core.
 	 * @return void
 	 */
@@ -614,7 +622,7 @@ final class Abilities {
 			self::CONNECTOR_ID,
 			array(
 				'name'           => __( 'Invisible Anti-Spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				'description'    => __( 'Blocks form spam with an invisible proof-of-work challenge. Runs entirely on this site — no external service, no API key, and no submitted content leaves your server.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'description'    => __( 'Blocks form spam with an invisible proof-of-work challenge. The spam check runs entirely on this site: no external service, no API key, and no submitted content leaves your server.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'type'           => 'spam_filtering',
 				'authentication' => array( 'method' => 'none' ),
 			)

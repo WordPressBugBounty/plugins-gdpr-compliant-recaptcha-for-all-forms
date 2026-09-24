@@ -49,6 +49,29 @@ trait Message_Actions {
 		// Sanitize the boolean using filter_var()
 		$hide = isset( $_POST['hide'] ) ? filter_var( wp_unslash( $_POST['hide'] ), FILTER_VALIDATE_BOOLEAN ) : false;
 
+		// SELF-LOCKOUT GUARD on the MONITORING branch only (Scope_Add::action_line_refusal()):
+		// `heartbeat` in POW_EXPLICIT_ACTION stops wp-admin working, and the way back
+		// leads through the very backend that is then blocked. The HIDE branch writes an
+		// EXEMPTION list, where the same name is harmless to useful — it takes traffic
+		// OUT of the evaluation instead of pulling it in — so it deliberately runs
+		// unchecked.
+		//
+		// SERVER PARITY, NO USER INTERFACE (2026-08-28). This button has no way to build
+		// a JSON rule line and is not getting one — it lists an action NAME read off a
+		// stored message. But it writes the SAME option as the overlay with a valid
+		// nonce, so it has to JUDGE the same, or there would be two write paths into
+		// POW_EXPLICIT_ACTION with different strictness and the laxer one would be the
+		// way around the other. Hence the shared helper, plus one extra sentence on a
+		// refused rule line saying where rules are actually built.
+		$refusal = $hide ? null : Scope_Add::action_line_refusal( $list_key );
+		if ( null !== $refusal ) {
+			if ( Action_Rules::is_rule_line( $list_key ) ) {
+				$refusal .= ' ' . Scope_Add::action_rule_analysis_hint();
+			}
+			wp_send_json_error( array( 'error_message' => $refusal ) );
+			exit;
+		}
+
 		$existing_option = null;
 		if ( $hide ) {
 			$existing_option = get_option( Option::POW_HIDE_ACTION );
@@ -106,6 +129,17 @@ trait Message_Actions {
 		$pattern = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
 		$hide    = isset( $_POST['hide'] ) ? filter_var( wp_unslash( $_POST['hide'] ), FILTER_VALIDATE_BOOLEAN ) : false;
 
+		// SELF-LOCKOUT GUARD on the MONITORING branch only — same split, same reasoning
+		// as in save_list_parameter_callback() above: POW_PARAMETER_PATTERN pulls traffic
+		// INTO the evaluation, POW_HIDE_PATTERN takes it out. A human composes this line
+		// by picking fields in the detail view and can pick differently, so a named
+		// refusal costs one click and leaves no state behind — unlike the settings page,
+		// this path has no second save to bind a confirmation to.
+		if ( ! $hide && Scope_Add::pattern_locks_out_admin( $pattern ) ) {
+			wp_send_json_error( array( 'error_message' => Scope_Add::pattern_lockout_message() ) );
+			exit;
+		}
+
 		$existing_option = null;
 		if ( $hide ) {
 			$existing_option = get_option( Option::POW_HIDE_PATTERN );
@@ -142,7 +176,7 @@ trait Message_Actions {
 	 * (BACKLOG bausteine 2 + "Absender-Domain-Blockliste"): append the value as a
 	 * PLAIN-TEXT line to POW_BLOCKED_VALUES, the standalone blocklist option. For
 	 * 'sender_domain' the stored value is "@domain" — Echo_Values::matches_wildcard_values()
-	 * treats a leading @ as the sender-domain match form, see handbuch/detection.md.
+	 * treats a leading @ as the sender-domain match form, see handbuch/echo.md.
 	 * Capability-gated (manage_options) + nonce. CRITICAL self-DoS guard: refuses to
 	 * block a value on the site's own registrable domain.
 	 *

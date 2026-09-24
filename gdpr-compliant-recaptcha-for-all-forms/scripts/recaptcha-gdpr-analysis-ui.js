@@ -25,21 +25,17 @@ Object.assign( gdpr_compliant_recaptcha_analysis, {
 	//This function creates a form out of a nested json array
 	createFormForNestedObject : function(obj, parentKey = null, form, id, wp_ajax, diff=false) {
 		if(!parentKey && !diff){
-			var tableHeadings = null;
+			// Unified 2026-08-28: a wp_ajax (action) entry gets the SAME checkbox table
+			// as a pattern entry now, not the earlier 2-column key/value-only variant —
+			// see the "action" row special-case below and savePatterns() in
+			// recaptcha-gdpr-analysis-capture.js.
+			var tableHeadings = [
+				gdprAnalysis.i18n.choosePattern,
+				gdprAnalysis.i18n.key,
+				gdprAnalysis.i18n.choosePattern,
+				gdprAnalysis.i18n.key
+			];
 
-			if(!wp_ajax)
-				tableHeadings = [
-					gdprAnalysis.i18n.choosePattern, 
-					gdprAnalysis.i18n.key,
-					gdprAnalysis.i18n.choosePattern,
-					gdprAnalysis.i18n.key
-				];
-			else
-				tableHeadings = [
-					gdprAnalysis.i18n.key,
-					gdprAnalysis.i18n.value
-				];
-	
 			// Erstelle die Kopfspalte der Tabelle
 			const thead = document.createElement("thead");
 			const headingRow = document.createElement("tr");
@@ -71,31 +67,42 @@ Object.assign( gdpr_compliant_recaptcha_analysis, {
 						// Erstelle eine Zeile in der Tabelle
 						const row = document.createElement("tr");
 						row.classList.add('row-'+fullPath);
-						if(!wp_ajax){
-							var hiddenInputs = document.querySelectorAll('input[name="'+fullPath+'"][type="hidden"], button[name="'+fullPath+'"], input[name="'+fullPath+'"][type="submit"]');
-							if(hiddenInputs.length)
-								row.classList.add('hiddenInput');
+						var hiddenInputs = document.querySelectorAll('input[name="'+fullPath+'"][type="hidden"], button[name="'+fullPath+'"], input[name="'+fullPath+'"][type="submit"]');
+						if(hiddenInputs.length)
+							row.classList.add('hiddenInput');
 
-							// 1. Spalte: Checkbox für den Key
-							const keyCheckboxCell = document.createElement("td");
-							keyCheckboxCell.style.border = "1px solid #ddd";
-							keyCheckboxCell.style.padding = "8px";
-							const keyCheckbox = document.createElement("input");
-							keyCheckbox.type = "checkbox";
-							keyCheckbox.classList.add('gdpr-key-check-' + id);
-							keyCheckbox.setAttribute('peer', `value_check_${fullPath}` + id);
-							keyCheckbox.id = `key_check_${fullPath}` + id;
-							keyCheckbox.name = `key_check_${fullPath}` + id;
-							keyCheckbox.value = fullPath;
-							keyCheckbox.onchange = function() {
-								var valueCheckbox = document.getElementById('value_check_' + fullPath + id);
-								if(valueCheckbox.checked)
-									valueCheckbox.checked = this.checked;
-							};
-							keyCheckboxCell.appendChild(keyCheckbox);
-							row.appendChild(keyCheckboxCell);
+						// The "action" row of a wp_ajax (action) entry: unlike a pattern
+						// entry, the signature here is already known (the action name) -
+						// the operator has nothing to decide about it. Checked+disabled
+						// instead of hidden, so the table shows what is true either way:
+						// "action" is always part of what gets saved. savePatterns() reads
+						// this same checked state to decide plain-text vs. JSON rule
+						// (2026-08-28).
+						var isActionPin = wp_ajax && !parentKey && key === 'action';
+
+						// 1. Spalte: Checkbox für den Key
+						const keyCheckboxCell = document.createElement("td");
+						keyCheckboxCell.style.border = "1px solid #ddd";
+						keyCheckboxCell.style.padding = "8px";
+						const keyCheckbox = document.createElement("input");
+						keyCheckbox.type = "checkbox";
+						keyCheckbox.classList.add('gdpr-key-check-' + id);
+						keyCheckbox.setAttribute('peer', `value_check_${fullPath}` + id);
+						keyCheckbox.id = `key_check_${fullPath}` + id;
+						keyCheckbox.name = `key_check_${fullPath}` + id;
+						keyCheckbox.value = fullPath;
+						if(isActionPin){
+							keyCheckbox.checked = true;
+							keyCheckbox.disabled = true;
 						}
-		
+						keyCheckbox.onchange = function() {
+							var valueCheckbox = document.getElementById('value_check_' + fullPath + id);
+							if(valueCheckbox.checked)
+								valueCheckbox.checked = this.checked;
+						};
+						keyCheckboxCell.appendChild(keyCheckbox);
+						row.appendChild(keyCheckboxCell);
+
 						// 2. Spalte: Eingabefeld für den Key
 						const keyInputCell = document.createElement("td");
 						keyInputCell.style.border = "1px solid #ddd";
@@ -105,31 +112,33 @@ Object.assign( gdpr_compliant_recaptcha_analysis, {
 						keyInput.id = `key_input_${fullPath}` + id;
 						keyInput.name = `key_input_${fullPath}` + id;
 						keyInput.value = fullPath;
-						keyInput.readOnly = true; 
+						keyInput.readOnly = true;
 						keyInputCell.appendChild(keyInput);
 						row.appendChild(keyInputCell);
-						
-						if(!wp_ajax){
-							// 3. Spalte: Checkbox für den Wert
-							const valueCheckboxCell = document.createElement("td");
-							valueCheckboxCell.style.border = "1px solid #ddd";
-							valueCheckboxCell.style.padding = "8px";
-							const valueCheckbox = document.createElement("input");
-							valueCheckbox.type = "checkbox";
-							valueCheckbox.classList.add('gdpr-value-check-' + id);
-							valueCheckbox.setAttribute('peer', `key_check_${fullPath}` + id);
-							valueCheckbox.id = `value_check_${fullPath}` + id;
-							valueCheckbox.name = `value_check_${fullPath}` + id;
-							valueCheckbox.value = value;
-							valueCheckbox.onchange = function() {
-								var keyCheckbox = document.getElementById('key_check_' + fullPath + id);
-								if(!keyCheckbox.checked)
-									keyCheckbox.checked = this.checked;
-							};
-							valueCheckboxCell.appendChild(valueCheckbox);
-							row.appendChild(valueCheckboxCell);
+
+						// 3. Spalte: Checkbox für den Wert
+						const valueCheckboxCell = document.createElement("td");
+						valueCheckboxCell.style.border = "1px solid #ddd";
+						valueCheckboxCell.style.padding = "8px";
+						const valueCheckbox = document.createElement("input");
+						valueCheckbox.type = "checkbox";
+						valueCheckbox.classList.add('gdpr-value-check-' + id);
+						valueCheckbox.setAttribute('peer', `key_check_${fullPath}` + id);
+						valueCheckbox.id = `value_check_${fullPath}` + id;
+						valueCheckbox.name = `value_check_${fullPath}` + id;
+						valueCheckbox.value = value;
+						if(isActionPin){
+							valueCheckbox.checked = true;
+							valueCheckbox.disabled = true;
 						}
-		
+						valueCheckbox.onchange = function() {
+							var keyCheckbox = document.getElementById('key_check_' + fullPath + id);
+							if(!keyCheckbox.checked)
+								keyCheckbox.checked = this.checked;
+						};
+						valueCheckboxCell.appendChild(valueCheckbox);
+						row.appendChild(valueCheckboxCell);
+
 						// 4. Spalte: Eingabefeld für den Wert
 						const valueInputCell = document.createElement("td");
 						valueInputCell.style.border = "1px solid #ddd";
@@ -367,12 +376,14 @@ Object.assign( gdpr_compliant_recaptcha_analysis, {
 		}
 		gdprForm.appendChild(buttonBefore);
 
-		if(!wp_ajax){
-			const hintColoredFields = document.createElement("div");
-			hintColoredFields.classList.add("hiddenInput");
-			hintColoredFields.innerHTML = gdprAnalysis.i18n.techFields;
-			gdprForm.appendChild(hintColoredFields);
-		}
+		// Unified 2026-08-28 along with the checkbox table itself: a wp_ajax (action)
+		// entry's rows can carry the same "hiddenInput"/technical-field highlighting now
+		// (createFormForNestedObject() no longer gates that on wp_ajax either), so the
+		// explanation for it is shown for both entry kinds.
+		const hintColoredFields = document.createElement("div");
+		hintColoredFields.classList.add("hiddenInput");
+		hintColoredFields.innerHTML = gdprAnalysis.i18n.techFields;
+		gdprForm.appendChild(hintColoredFields);
 
 		// Dynamisches Erzeugen der Tabelle im Formular
 		const gdprTable = document.createElement("table");

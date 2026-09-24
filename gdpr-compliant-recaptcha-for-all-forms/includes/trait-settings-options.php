@@ -166,7 +166,15 @@ trait Settings_Options {
                         <br><strong>Example:</strong>
                         <br>
                         <br><code>forminator_submit_form_custom-forms</code>
-                        <br><code>wpforms_submit</code>",
+                        <br><code>wpforms_submit</code>
+                        <br>
+                        <br>A line may also be a <b>JSON rule</b> that pins the action name plus further fields or values — use this when a plugin routes visitor and admin traffic through the same action name.
+                        <br>
+                        <br><strong>Example:</strong>
+                        <br>
+                        <br><code>{\"action\":\"mailpoet\",\"endpoint\":\"subscribers\",\"method\":\"subscribe\"}</code>
+                        <br>
+                        <br>A rule without a fixed <code>action</code> value never matches, and is named when you save.",
 						'gdpr-compliant-recaptcha-for-all-forms'
 					),
 					'<a href="' . admin_url( 'admin.php', 'https' ) . Option::PAGE_QUERY_MESSAGES . '">',
@@ -197,6 +205,8 @@ trait Settings_Options {
                     <br><code>{"my_form":null,"step":"2"}</code>
                     <br>
                     <br><code>null</code> as the value means <em>this field only has to be present</em>, whatever it contains — that is the usual case, and one field name is often enough for a whole form builder (every Contact Form 7 submission carries <code>_wpcf7</code>). Writing a value instead narrows it to submissions where that field holds exactly that value, e.g. one single form rather than all of them — keep the quotation marks around it even when the value is a number, as in the example above. Naming several fields in one line means all of them must match.
+                    <br>
+                    <br><strong>What the warning here can and cannot see:</strong> when you save, a line that would also match one of WordPress\'s own backend screens is flagged. That check knows the screens of WordPress itself — it does <em>not</em> know the admin pages of your other plugins. If a field name you enter is also used by a plugin\'s own settings or import forms, saving there can start failing for anyone without editing rights, without a warning from here. When in doubt, name a value rather than just a field: <code>{"frm_action":"create"}</code> is safe where <code>{"frm_action":null}</code> is not.
                     <br>
                     <br><strong>Matching by value, whatever the field is called:</strong> <code>{"*":"value"}</code> matches when ANY field carries this value — useful when the field name differs between submissions. Like every other line here it only makes the submission get CHECKED; to treat a value as spam outright, use <b>Blocked values</b> 🚫 instead.',
 						'gdpr-compliant-recaptcha-for-all-forms'
@@ -234,7 +244,7 @@ trait Settings_Options {
 				__(
 					'This option improves site security a lot.
                     <br>
-                    <br><strong>Test first:</strong> enable <em>Simulate spam messages</em> before switching this on for a live site — it lets you verify nothing legitimate gets locked out.
+                    <br><strong>Test first:</strong> <em>Simulate spam messages</em> is never applied to the WordPress login, so it cannot tell you whether this would lock anyone out. Instead: turn off <em>Block spam</em> for a moment, keep this switched on, and log in normally a few times. Then check the spam inbox — if your own attempts show up there, fix that before turning <em>Block spam</em> back on.
                     <br>
                     <br><strong>But beware:</strong> for any plugin that secures the WP login, only use this if you know how to switch it off without logging in (e.g. by deleting the plugin files from your plugin directory). If anything goes wrong, the plugin will block your login too.',
 					'gdpr-compliant-recaptcha-for-all-forms'
@@ -247,7 +257,7 @@ trait Settings_Options {
 				__( 'Block spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
-				$text_block . '<br><br><strong>Test first:</strong> ' . __( 'enable <em>Simulate spam messages</em> before switching this on for a live site — it lets you verify nothing legitimate gets blocked.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				$text_block . '<br><br><strong>Test first:</strong> ' . __( 'switching this on together with <em>Simulate spam messages</em> rejects every real submission on a live site for as long as the simulation runs. Test in this order: turn this off, switch on <em>Simulate spam messages</em>, send one test submission, switch <em>Simulate spam messages</em> back off — only then turn this on.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'⛔', // Blocking
 				__( 'Blocks submissions classified as spam instead of letting them through.', 'gdpr-compliant-recaptcha-for-all-forms' )
@@ -284,7 +294,7 @@ trait Settings_Options {
                         <li><code>null</code> instead of a value means the field only has to be there: <code>{"_wpcf7":null,"message":"casino-bonus.tld"}</code></li>
                     </ul>
                     <br>A rule narrows <em>where</em> a value is looked for, not <em>what</em> counts as a hit: the value is still compared in the four forms above, never as a part of a word.
-                    <br>A value is always compared as text here, so the quotation marks around a number are optional: <code>{"phone":12345}</code> and <code>{"phone":"12345"}</code> are the same rule. (In <b>Apply on pattern</b> 🧭 they are <em>not</em> — a pattern compares types as well, and an unquoted number there matches nothing.) An empty value, though, matches nothing at all: if you mean <em>this field only has to be there</em>, write <code>null</code> rather than <code>""</code>.
+                    <br>A value is always compared as text here, so the quotation marks around a number are usually optional: <code>{"phone":12345}</code> and <code>{"phone":"12345"}</code> are the same rule. Use quotation marks when the number has decimal places or is very long (more than 18 digits) — without them it is decoded differently and the rule silently matches nothing. (In <b>Apply on pattern</b> 🧭 they are <em>not</em> optional at all — a pattern compares types as well, and an unquoted number there matches nothing.) An empty value, though, matches nothing at all: if you mean <em>this field only has to be there</em>, write <code>null</code> rather than <code>""</code>.
                     <br>The field name is the one your form actually sends (see a stored message\'s detail view); the form id field differs per builder (<code>_wpcf7</code>, <code>wpforms[id]</code> …). A rule that names <em>only</em> a form and pins no value — <code>{"_wpcf7":null}</code> — blocks every submission of that form, so it is held back once and asks you to confirm. If you meant to <em>watch</em> a form rather than block it, that line belongs in <b>Apply on pattern</b> 🧭 instead.
                     <br><strong>Careful with the sender-domain form:</strong> if <b>Apply for WordPress-Login</b> 🔒 is on (the default), it also blocks logins — entering a large provider like <code>gmail.com</code> can lock out registered users, possibly yourself with no way back in. It also blocks real visitors who write to you from such an address, so keep it to disposable and spam domains. Plain lines spare registered users signing in on the WordPress login page; a rule bound to a login field does not, so do not bind one to <code>log</code> or <code>pwd</code>.',
 					'gdpr-compliant-recaptcha-for-all-forms'

@@ -4,7 +4,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Detail-Doku (Methodenebene): handbuch/messages.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -16,6 +16,12 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  */
 
 class Analysis {
+
+	// get_patterns() and save_pattern_callback() moved to trait-analysis-endpoints.php
+	// (2026-08-28, CLAUDE.md "Dateigroessen") — this file stood at 595 of its 600-line
+	// cap. Trait, not a second class, for the same reason as Message_Page's traits: both
+	// methods are registered as `array( $this, ... )` ajax callbacks in run() below.
+	use Analysis_Endpoints;
 
 	/** Nonce action for the direct-analysis endpoints (one nonce covers all three:
 	 *  store, restore, save_pattern_frontend — see gdprAnalysis.storeNonce in
@@ -56,116 +62,6 @@ class Analysis {
 	/** Function to get rssource to the frontend */
 	public function include_ressources() {
 		wp_enqueue_style( 'gdpr-compliant-style-analysis', plugins_url( '/css/style_analysis.css', __DIR__ ), array(), RCM_Main::VERSION );
-	}
-
-	/** Function to get the patterns to apply the spam check to the frontend
-	 *
-	 */
-	public function get_patterns() {
-
-		// Same CSRF + capability gate as the other direct-analysis endpoints. The
-		// hook-time gate in run() only registers this action for manage_options users,
-		// but relying on that alone is fragile (any refactor of run() reopens it) and a
-		// callback without check_ajax_referer is a certain review finding — it returns
-		// the full spam-detection configuration.
-		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( self::STORE_NONCE_ACTION, '_ajax_nonce', false ) ) {
-			wp_send_json_error( array( 'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
-		}
-
-		$existing_pattern       = get_option( Option::POW_PARAMETER_PATTERN );
-		$existing_lines_pattern = null;
-		$existing_action        = get_option( Option::POW_EXPLICIT_ACTION );
-		$existing_lines_action  = null;
-		// Third signature class (REST_ROUTES_PLAN.md AP3/AP5): so checkPatterns() in
-		// recaptcha-gdpr-analysis.js can mark a captured entry "covered" when its
-		// request targeted an already-monitored REST route — mirrors patterns/actions
-		// above, same textarea-line format.
-		$existing_route       = get_option( Option::POW_REST_ROUTES );
-		$existing_lines_route = null;
-		if ( $existing_pattern ) {
-			$existing_lines_pattern = preg_split( "/\r\n|\n|\r/", $existing_pattern, -1, PREG_SPLIT_NO_EMPTY );
-		}
-		if ( $existing_action ) {
-			$existing_lines_action = preg_split( '/\r\n|\n|\r/', $existing_action, -1, PREG_SPLIT_NO_EMPTY );
-		}
-		if ( $existing_route ) {
-			$existing_lines_route = preg_split( '/\r\n|\n|\r/', $existing_route, -1, PREG_SPLIT_NO_EMPTY );
-		}
-
-		$array_result = array(
-			'patterns' => $existing_lines_pattern,
-			'actions'  => $existing_lines_action,
-			'routes'   => $existing_lines_route,
-		);
-
-		// Make your array as json
-		wp_send_json( $array_result );
-
-		// Don't forget to stop execution afterward.
-		wp_die();
-	}
-
-	/** Save Pattern or Ajax-Action
-	 *
-	 * CSRF-guarded like store_analysis_entry()/restore_analysis_entries(): one shared
-	 * nonce (STORE_NONCE_ACTION, sent by the overlay JS as _ajax_nonce) covers all
-	 * three direct-analysis endpoints. The capability check mirrors the hook-time
-	 * gate in run() — defense in depth, and the nonce alone is not an authz check.
-	 */
-	public function save_pattern_callback() {
-		if ( ! current_user_can( 'manage_options' ) || ! check_ajax_referer( self::STORE_NONCE_ACTION, '_ajax_nonce', false ) ) {
-			wp_send_json_error(
-				array(
-					'error_message' => __( 'Unauthorized request!', 'gdpr-compliant-recaptcha-for-all-forms' ),
-				)
-			);
-		}
-
-		// Get whitelisting parameters. Consistent with Message_Page::save_pattern_callback():
-		// wp_unslash() before sanitize; guard against a blank line, which would make
-		// Option::get_rows() build "WHERE  GROUP BY" (empty OR-list) and throw a SQL error
-		// on every message page.
-		$pattern  = isset( $_POST['key'] ) ? sanitize_text_field( wp_unslash( $_POST['key'] ) ) : '';
-		$standard = isset( $_POST['standard'] ) ? filter_var( wp_unslash( $_POST['standard'] ), FILTER_VALIDATE_BOOLEAN ) : false;
-
-		if ( '' === $pattern ) {
-			wp_send_json_error( array( 'error_message' => __( 'Empty pattern.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
-			exit;
-		}
-
-		$existing_option = null;
-		if ( $standard ) {
-			$existing_option = get_option( Option::POW_EXPLICIT_ACTION );
-		} else {
-			$existing_option = get_option( Option::POW_PARAMETER_PATTERN );
-		}
-		$existing_lines = preg_split( "/\r\n|\n|\r/", $existing_option );
-
-		// Check, whether the whitelisting-parameter already exists
-		if ( ! in_array( $pattern, $existing_lines, true ) ) {
-			// If not add the new parameter
-			$existing_lines[] = $pattern;
-
-			// Transform to String again
-			$updated_option = implode( "\n", $existing_lines );
-
-			// Save the option
-			if ( $standard ) {
-				update_option( Option::POW_EXPLICIT_ACTION, $updated_option );
-				$property = __( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' );
-			} else {
-				update_option( Option::POW_PARAMETER_PATTERN, $updated_option );
-				$property = __( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' );
-			}
-
-			/* translators: %s is the settings-page property name ("Apply on actions" or "Apply on pattern") the entry was saved under. */
-			wp_send_json_success( array( 'message' => sprintf( __( 'Submission type added successfully. You can find and change it on the plugins settings page under the tab "Scope", in the property "%s".', 'gdpr-compliant-recaptcha-for-all-forms' ), $property ) ) );
-		} else {
-			// Pattern already in place
-			wp_send_json_error( array( 'error_message' => __( 'Submission type already exists.', 'gdpr-compliant-recaptcha-for-all-forms' ) ) );
-		}
-
-		exit;
 	}
 
 	/** Enqueue the direct-analysis overlay.
@@ -246,7 +142,7 @@ class Analysis {
 					'guideActionSaved'      => __( 'Action saved', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'guideSavedSubtitle'    => __( 'This submission type is now covered.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'guideHintPattern'      => __( 'Select the attributes that identify this form, then click Save pattern.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-					'guideHintAction'       => __( 'Click Save action to add this submission type to the spam check.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+					'guideHintAction'       => __( 'Click Save action to add this submission type to the spam check. If a plugin sends both visitor and admin traffic under the same action name, tick further fields below to narrow it to specific field values instead.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 					'restRouteLabel'        => __( 'Route:', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				),
 			)
@@ -490,7 +386,7 @@ class Analysis {
 	 * itself after a page navigation instead of losing captured submissions.
 	 *
 	 * Also opportunistically purges direct_analysis rows older than 24h first.
-	 * RCM_Main::delete_old_messages() (recaptcha-gdpr-compliant.php) only iterates
+	 * Message_Cleanup::delete_old_messages() (includes/class-message-cleanup.php) only iterates
 	 * rgm_type 1-3 (Inbox/Spam/Trash) — Typ 4 ("Analyse") has no cron coverage at all,
 	 * so without this the direct-analysis rows would accumulate forever. This callback
 	 * doubles as that missing cleanup.

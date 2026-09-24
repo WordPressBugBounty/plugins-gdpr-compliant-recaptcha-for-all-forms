@@ -21,6 +21,7 @@ class Settings_Menu {
 	// sein (require_once-Reihenfolge in recaptcha-gdpr-compliant.php). Schnittlinie und
 	// Begruendung stehen im Kopf jeder Trait-Datei.
 	use Settings_Default_Actions;
+	use Settings_Default_Actions_Wave2;
 	use Settings_Default_Patterns;
 	use Settings_Default_Routes;
 	use Settings_Options;

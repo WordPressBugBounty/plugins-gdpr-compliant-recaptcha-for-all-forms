@@ -56,7 +56,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Detail-Doku (Methodenebene): handbuch/echo.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -552,9 +552,18 @@ final class Echo_Values {
 	 *                                  keep working inside the envelope, which is
 	 *                                  everything the echo lock ever effectively had
 	 *                                  there.
+	 * @param bool     $long_text     Whether the long-text hash is emitted AT ALL — the
+	 *                                same value type $no_text_roots switches off per
+	 *                                subtree, switched off for the whole submission. A
+	 *                                FIFTH defense line, needed because $no_text_roots
+	 *                                only ever covered a builder's unpacked envelopes
+	 *                                while an ORDINARY field carries a per-form constant
+	 *                                just as easily. Passed false by Echo_Store::record()
+	 *                                for every `no_pow` verdict — the WHY and the price
+	 *                                are at Classification_Reason::seeds_long_text().
 	 * @return string[] Unique SHA-256 hashes.
 	 */
-	public static function build_echo_set( $fields, $own_domains = array(), $excluded_hashes = array(), $no_text_roots = array() ) {
+	public static function build_echo_set( $fields, $own_domains = array(), $excluded_hashes = array(), $no_text_roots = array(), $long_text = true ) {
 		$hashes = array();
 		foreach ( self::partition_by_roots( $fields, $no_text_roots ) as $with_text => $part ) {
 			foreach ( self::collect_content_strings( $part ) as $value ) {
@@ -571,7 +580,7 @@ final class Echo_Values {
 				if ( null !== $phone ) {
 					$hashes[ self::hash_value( $phone ) ] = true;
 				}
-				$text = $with_text ? self::normalize_text( $value ) : null;
+				$text = ( $long_text && $with_text ) ? self::normalize_text( $value ) : null;
 				if ( null !== $text ) {
 					$hashes[ self::hash_value( $text ) ] = true;
 				}

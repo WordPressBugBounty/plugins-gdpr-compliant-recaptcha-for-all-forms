@@ -17,27 +17,45 @@ class Uninstall {
 	public static function run() {
 		require_once __DIR__ . '/includes/class-option.php';
 
-		$constants = ( new \ReflectionClass( Option::class ) )->getConstants();
-
-		foreach ( $constants as $constant ) {
-			$const_prefix = substr( $constant, 0, strlen( Option::PREFIX ) );
-
-			if ( Option::PREFIX === $const_prefix ) {
-				delete_option( $constant );
-			}
-		}
-
-		// Options whose Option constant is gone because the feature was removed. The
-		// loop above only sees existing constants, so without this list an old install
-		// would keep a stray row in wp_options for good.
-		// - gdpr_pow_pow_apply_rest: the "Apply on REST-API" switch, removed in 5.3.0
-		//   together with the client-forgeable referer exemption it gated.
-		$legacy_options = array( 'gdpr_pow_pow_apply_rest' );
-		foreach ( $legacy_options as $legacy_option ) {
-			delete_option( $legacy_option );
-		}
-
 		global $wpdb;
+
+		// Delete every option whose NAME carries our prefix, instead of reflecting over
+		// Option::class's own constants. The old reflection loop only ever saw a
+		// constant that happened to be declared ON Option itself -- a constant like
+		// Gibberish_Notice::PENDING (same 'gdpr_pow_' prefix, different owning class)
+		// was invisible to it and leaked a row in wp_options forever (ISSUES.md,
+		// "Deinstallation laesst Options-Zeilen zurueck"). A prefix match does not care
+		// which class owns the constant, so it also makes the manually maintained
+		// legacy-options list this file used to carry obsolete: every option a removed
+		// feature ever wrote (e.g. the old "Apply on REST-API" switch,
+		// gdpr_pow_pow_apply_rest, dropped in 5.3.0) already carries the prefix and is
+		// caught the same way -- no per-removed-feature bookkeeping needed anymore.
+		// tests/unit/OptionPrefixCoverageTest.php is the guard that every option name
+		// this plugin actually reads/writes really does carry the prefix, which is what
+		// this query depends on.
+		//
+		// Not multisite-relevant: nothing here is ever stored as a site option, only as
+		// a per-site option (confirmed by grep across plugin/includes/ — no
+		// add_site_option()/update_site_option() call exists), so a single wp_options
+		// query is enough; WP_UNINSTALL_PLUGIN with 'delete_plugins' already runs this
+		// file once per site on a multisite uninstall.
+		$wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->options, not user input; the LIKE value itself IS passed through prepare().
+				$wpdb->esc_like( Option::PREFIX ) . '%'
+			)
+		);
+
+		// Transients this plugin sets (…_echo_values, …_scope_added, the review-request
+		// "seen" cache, the overbroad-pattern-save marker, the credential-cleanup lock,
+		// the fp/no-pow health buckets) are DELIBERATELY left alone here. WordPress
+		// stores a transient's row under "_transient_<name>"/"_transient_timeout_<name>"
+		// — never under the bare 'gdpr_pow_...' name itself — so the LIKE query above
+		// never touches them anyway, and every one of them carries a short, finite TTL
+		// (minutes, at most a day for the review-request cache). They expire and clean
+		// themselves up on the next read regardless of whether the plugin is still
+		// installed; adding a second LIKE query for '_transient_gdpr_pow_%' /
+		// '_transient_timeout_gdpr_pow_%' would only save that brief, harmless wait.
 		$table_name_mail    = $wpdb->prefix . 'recaptcha_gdpr_message_rgm';
 		$table_name_details = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';
 		$table_name_stamp   = $wpdb->prefix . 'recaptcha_gdpr_stamp_rgs';

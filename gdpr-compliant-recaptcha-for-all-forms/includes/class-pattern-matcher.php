@@ -2,7 +2,7 @@
 /**
  * Pure, WordPress-independent matching of an admin-configured FIELD PATTERN against a
  * request's field map — the second signature class alongside admin-ajax actions
- * (Explicit mode) and REST routes (RestRoute). See handbuch/gate.md.
+ * (Explicit mode) and REST routes (RestRoute). See handbuch/matchers.md.
  *
  * WHY THIS CLASS EXISTS AT ALL — it holds no new logic. matches() is the former
  * Stamp::check_pattern() moved here VERBATIM, and Stamp::check_existing_patterns() now
@@ -105,7 +105,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/gate.md.
+// Detail-Doku (Methodenebene): handbuch/matchers.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -152,7 +152,7 @@ final class Pattern_Matcher {
 	 * overbroad_lines() to answer one question at save time: would this pattern line
 	 * also match a request wp-admin itself sends?
 	 *
-	 * WHY THIS IS NEEDED (handbuch/gate.md, "Der eine Fall, in dem es doch beisst"):
+	 * WHY THIS IS NEEDED (handbuch/matchers.md, "Der eine Fall, in dem es doch beisst"):
 	 * the constructor gate does not distinguish frontend from backend traffic, so a
 	 * pattern generic enough to match a core screen turns that screen's save into a spam
 	 * verdict — and with POW_BLOCK on by default the save is discarded. The admin cannot
@@ -165,7 +165,10 @@ final class Pattern_Matcher {
 	 * (`{"action":"update"}`), and that comparison is strict, so a key-only catalog
 	 * would silently miss exactly the patterns that name a core value. Every $_REQUEST
 	 * value really is a string, and the catalog has to be shaped like the thing it
-	 * stands in for.
+	 * stands in for. THE ONE EXCEPTION is `wp_screen_options`, which core renders as
+	 * `wp_screen_options[option]`/`wp_screen_options[value]` and PHP therefore parses
+	 * into a NESTED ARRAY — writing it flat would describe a request that does not
+	 * exist, and `{"wp_screen_options":null}` would then go unwarned.
 	 *
 	 * Field names verified against the WordPress core sources in the wp-env cache, not
 	 * recalled: wp-admin/user-edit.php, wp-admin/options-general.php (+ settings_fields()
@@ -173,6 +176,12 @@ final class Pattern_Matcher {
 	 * (+ the `save` submit button and the `excerpt` box in wp-admin/includes/meta-boxes.php),
 	 * user-new.php and edit-form-comment.php. `_wpnonce`/`_wp_http_referer` come from
 	 * wp_nonce_field()'s defaults; user-new names its nonce field explicitly.
+	 * `_wp_original_http_referer` comes from wp_original_referer_field( true, 'previous' ),
+	 * called by edit-form-advanced.php and edit-form-comment.php (and always emitted, with
+	 * an empty value when there is no referer at all). The screen-options panel is
+	 * WP_Screen::render_screen_options()/render_per_page_options() in
+	 * wp-admin/includes/class-wp-screen.php, read back by set_screen_options() in
+	 * wp-admin/includes/misc.php; all four names were also read off a live edit.php.
 	 *
 	 * DELIBERATELY NOT IN THIS CATALOG: backend saves that travel over admin-ajax
 	 * (Heartbeat, inline "quick edit", plugin updates, the block editor's autosave …).
@@ -190,7 +199,7 @@ final class Pattern_Matcher {
 	 * must not translate. The settings page turns them into a human, translated screen
 	 * name when it renders the warning.
 	 *
-	 * @var array<string, array<string, string>>
+	 * @var array<string, array<string, string|array<string, string>>>
 	 */
 	const CORE_BACKEND_SIGNATURES = array(
 		// wp-admin/user-edit.php and profile.php — "Profile" / "Edit user".
@@ -238,20 +247,21 @@ final class Pattern_Matcher {
 		),
 		// wp-admin/edit-form-advanced.php, submitted to post.php — the classic editor.
 		'post-editor'     => array(
-			'action'               => 'editpost',
-			'originalaction'       => 'editpost',
-			'post_type'            => 'post',
-			'post_ID'              => '42',
-			'post_author'          => '1',
-			'user_ID'              => '1',
-			'original_post_status' => 'draft',
-			'post_title'           => 'Hello world',
-			'content'              => 'The post body.',
-			'excerpt'              => '',
-			'referredby'           => 'https://example.com/wp-admin/edit.php',
-			'save'                 => 'Update',
-			'_wpnonce'             => 'ffffffffff',
-			'_wp_http_referer'     => '/wp-admin/post.php',
+			'action'                    => 'editpost',
+			'originalaction'            => 'editpost',
+			'post_type'                 => 'post',
+			'post_ID'                   => '42',
+			'post_author'               => '1',
+			'user_ID'                   => '1',
+			'original_post_status'      => 'draft',
+			'post_title'                => 'Hello world',
+			'content'                   => 'The post body.',
+			'excerpt'                   => '',
+			'referredby'                => 'https://example.com/wp-admin/edit.php',
+			'save'                      => 'Update',
+			'_wpnonce'                  => 'ffffffffff',
+			'_wp_http_referer'          => '/wp-admin/post.php',
+			'_wp_original_http_referer' => 'https://example.com/wp-admin/',
 		),
 		// wp-admin/user-new.php — "Add new user".
 		'user-new'        => array(
@@ -271,21 +281,38 @@ final class Pattern_Matcher {
 		),
 		// wp-admin/edit-form-comment.php, submitted to comment.php — "Edit comment".
 		'comment-edit'    => array(
-			'action'                  => 'editedcomment',
-			'comment_ID'              => '7',
-			'comment_post_ID'         => '42',
-			'newcomment_author'       => 'Jane Doe',
-			'newcomment_author_email' => 'jane@example.com',
-			'newcomment_author_url'   => 'https://example.com',
-			'content'                 => 'A comment body.',
-			'comment_status'          => '1',
-			'c'                       => '7',
-			'p'                       => '42',
-			'referredby'              => 'https://example.com/wp-admin/edit-comments.php',
-			'noredir'                 => '1',
-			'save'                    => 'Update',
-			'_wpnonce'                => 'ffffffffff',
-			'_wp_http_referer'        => '/wp-admin/comment.php',
+			'action'                    => 'editedcomment',
+			'comment_ID'                => '7',
+			'comment_post_ID'           => '42',
+			'newcomment_author'         => 'Jane Doe',
+			'newcomment_author_email'   => 'jane@example.com',
+			'newcomment_author_url'     => 'https://example.com',
+			'content'                   => 'A comment body.',
+			'comment_status'            => '1',
+			'c'                         => '7',
+			'p'                         => '42',
+			'referredby'                => 'https://example.com/wp-admin/edit-comments.php',
+			'noredir'                   => '1',
+			'save'                      => 'Update',
+			'_wpnonce'                  => 'ffffffffff',
+			'_wp_http_referer'          => '/wp-admin/comment.php',
+			'_wp_original_http_referer' => 'https://example.com/wp-admin/',
+		),
+		// The "Screen Options" panel of every list table (wp-admin/edit.php,
+		// users.php, upload.php, …), posted back to the screen it sits on. The panel
+		// is its own <form id="adv-settings">, so it carries NONE of the other
+		// screens' fields — not even _wp_http_referer, because its nonce is rendered
+		// with $referer = false. Deliberately only the three names that are the same
+		// on every screen: the per-screen column-hide checkboxes (`date-hide`, …) and
+		// the post-list `mode` are screen-specific, and listing them would flag
+		// patterns that no core screen would really collide with.
+		'screen-options'  => array(
+			'wp_screen_options'    => array(
+				'option' => 'edit_post_per_page',
+				'value'  => '20',
+			),
+			'screenoptionnonce'    => 'ffffffffff',
+			'screen-options-apply' => 'Apply',
 		),
 	);
 

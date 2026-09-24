@@ -460,6 +460,52 @@ final class Classification_Reason {
 	}
 
 	/**
+	 * Whether a submission classified with this reason may seed the auto-echo lock with
+	 * its LONG-TEXT hash, on top of seeds_echo_values() deciding whether it may seed at
+	 * all. False for the whole `no_pow` family, true for everything else.
+	 *
+	 * WHY A SECOND, NARROWER PREDICATE. The long-text hash is the one echo value a form
+	 * can carry WITHOUT anyone having typed it. Echo_Values hashes every content value
+	 * from TEXT_HASH_MIN_LENGTH (40 normalized characters) upwards, and plenty of forms
+	 * post a value that is identical in every single submission: a consent label, a long
+	 * dropdown option, a required-field error message, a builder's configuration text. A
+	 * sender address, a domain or a phone number cannot be constant like that — those a
+	 * visitor supplies.
+	 *
+	 * So one genuine spam submission seeds that constant value, and from then on every
+	 * legitimate submission of the same form carries it too and comes back as "Known
+	 * spam value" — on a global store, so any other form posting the same text is caught
+	 * with it. Two things that look like caps do not close it: the 36h TTL is refreshed
+	 * by every further `no_pow` hit, so a form that is spammed daily never gets out of
+	 * the window; and the $no_text_roots list only covers the unpacked envelopes of a
+	 * form builder (Echo_Values::build_echo_set()), never an ordinary field.
+	 *
+	 * THE CUT: a `no_pow` verdict says the handshake failed and nothing about what was
+	 * submitted — the same reasoning NON_SEEDING_REASONS already applies to its three
+	 * infrastructure-shaped sub-cases, here extended to the one value type that can be
+	 * form furniture rather than content. The deterministic content verdicts (gibberish,
+	 * blocklist) keep seeding long text unchanged: those DID look at the text.
+	 *
+	 * THE PRICE, real and knowingly paid: cross-form text matching for TOKENLESS spam is
+	 * gone. `no_pow:no_token` is the echo lock's main food source (see
+	 * seeds_echo_values()), so the store now learns only address, domain and phone from
+	 * it. What that gave up is the bot that posts the same body text again later WITH a
+	 * valid proof of work — it is no longer caught by its text. Accepted because the
+	 * failure it removes is worse than the catch it loses: a self-inflicted lock takes a
+	 * working form offline for everybody, while the missed repeat still has to pay the
+	 * proof of work and still faces the gibberish and blocklist checks.
+	 *
+	 * Error direction is the same as seeds_echo_values(): anything not recognised as
+	 * `no_pow` seeds. Pinned in tests/unit/ClassificationReasonTest.php.
+	 *
+	 * @param mixed $reason Reason string, or null (any input accepted defensively).
+	 * @return bool True when the submission's long-text hash may be recorded.
+	 */
+	public static function seeds_long_text( $reason ) {
+		return self::CODE_NO_POW !== self::code( $reason );
+	}
+
+	/**
 	 * The code part of a reason string: everything before the first colon (the whole
 	 * string for codes that carry no detail).
 	 *

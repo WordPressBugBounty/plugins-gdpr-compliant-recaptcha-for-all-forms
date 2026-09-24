@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 6.0.0
+	 * Version: 6.1.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '6.0.0';
+	const VERSION = '6.1.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -51,6 +51,13 @@ class RCM_Main {
 
 	/** Holding an instance of the class Dashboard_Widget */
 	private $dashboard_widget;
+
+	/** Holding an instance of the class Message_Cleanup — kept because deactivate()
+	 * needs exactly THIS instance to unregister what its constructor registered.
+	 *
+	 * @var Message_Cleanup
+	 */
+	private $instance_message_cleanup;
 
 	/** Holding an instance of the class Analysis */
 	private $instance_analysis;
@@ -87,7 +94,6 @@ class RCM_Main {
 			add_action( 'wp_enqueue_scripts', array( $this, 'warning_simulation' ) );
 			add_action( 'admin_notices', array( $this, 'warning_simulation_notice' ) );
 		}
-		add_action( 'admin_init', array( $this, 'gdpr_compliant_recaptcha_state_assets' ), 10, 1 );
 		add_action( 'activated_plugin', array( $this, 'activated' ) );
 		$this->instance_message_page  = new Message_Page();
 		$this->instance_settings_menu = new Settings_Menu();
@@ -97,6 +103,15 @@ class RCM_Main {
 		// Same idiom: the one-off notice telling an upgraded installation that gibberish
 		// detection is now selection-based and therefore off until fields are picked.
 		( new Gibberish_Notice() )->run();
+		// Same idiom: the one-off request for a wordpress.org review, shown on this
+		// plugin's own admin screens only, once the installation has stood for a month
+		// and sorted enough spam to have an opinion (handbuch/admin.md).
+		( new Review_Request() )->run();
+		// Same idiom: the deactivation feedback box on plugins.php — the only place in
+		// this plugin that talks to a server other than the site's own, which is why
+		// the endpoint, the disclosure and every string of it live in one class
+		// (handbuch/feedback.md) instead of inside the script.
+		( new Deactivation_Feedback() )->run();
 		// Same idiom: registers the credential-field proposal notice, its two
 		// one-click handlers and the message-inbox rescue ajax endpoint.
 		new Credential_Learning();
@@ -116,9 +131,9 @@ class RCM_Main {
 			// in main plugin file
 			define( 'GDPR_COMPLIANT_RECAPTCHA', plugin_basename( __FILE__ ) );
 		}
-		add_action( 'wp', array( $this, 'schedule_message_deletion' ) );
-		// Hook the function to the scheduled event with parameters
-		add_action( 'delete_old_messages_event', array( $this, 'delete_old_messages' ), 10 );
+		// Its constructor registers the daily schedule and the 'delete_old_messages_event'
+		// callback; stored because deactivate() has to unregister that same instance.
+		$this->instance_message_cleanup = new Message_Cleanup();
 	}
 
 	public function warning_simulation_notice() {
@@ -129,89 +144,10 @@ class RCM_Main {
 			<?php
 	}
 
-	/** Include the Javascript for proof of work calculation on the client-side
-	 */
-	public function gdpr_compliant_recaptcha_state_assets() {
-		global $pagenow;
-
-		if ( 'plugins.php' === $pagenow ) {
-			wp_enqueue_script( 'wp-deactivation-message', plugins_url( '/scripts/recaptcha-gdpr-pro-state.js', __FILE__ ), array(), '1.0.0', true );
-		}
-	}
-
 	/** Initialize the admin area*/
 	public function warning_simulation() {
 		//Registers the stly for the message_page but don't enqueue it yet
 		wp_enqueue_style( 'gdprCompliantWarningStyle', plugin_dir_url( __FILE__ ) . '/css/style_warning_simulation.css', array(), '1.0.2' );
-	}
-
-	// Function to delete old messages based on days to keep and rgm_type
-	public function delete_old_messages() {
-		global $wpdb;
-		$days_to_keep[0] = 0;
-		$days_to_keep[1] = get_option( Option::POW_CRON_DELETE_INBOX );
-		$days_to_keep[2] = get_option( Option::POW_CRON_DELETE_SPAM );
-		$days_to_keep[3] = get_option( Option::POW_CRON_DELETE_TRASH );
-
-		foreach ( $days_to_keep as $key => $value ) {
-			if ( $value ) {
-				global $wpdb;
-				$rgm_type = $key;
-				$days     = $days_to_keep[ $key ];
-				// Calculate the date threshold (older than X days).
-				//
-				// The threshold has to be built from current_time(), because that is the
-				// clock rgm_date was WRITTEN with (current_time('mysql'), i.e. the site's
-				// local time). Computing it from UTC instead — as this line did — put the
-				// cutoff off by the site's UTC offset, so messages were kept a few hours
-				// too long or deleted a few hours too early. Same defect class as the
-				// stamp-row one (HANDBUCH.md §12 cause 8), a milder dose: the reader has
-				// to use the writer's clock. Note that no assertion catches this half of
-				// the rule — see tests/unit/OneClockTest.php.
-				$threshold_date = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) - $days * DAY_IN_SECONDS ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
-
-				// Define the table names
-				$message_table = $wpdb->prefix . 'recaptcha_gdpr_message_rgm';
-				$details_table = $wpdb->prefix . 'recaptcha_gdpr_details_rgd';
-
-				// Get message IDs based on the WHERE condition
-				$message_ids = $wpdb->get_col(
-					$wpdb->prepare(
-						"SELECT rgm_id FROM $message_table WHERE rgm_date < %s AND rgm_type = %d", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->prefix, not user input.
-						$threshold_date,
-						$rgm_type
-					)
-				);
-
-				if ( ! empty( $message_ids ) ) {
-					// Build an IN(...) placeholder list matching the number of IDs found.
-					$id_placeholders = implode( ',', array_fill( 0, count( $message_ids ), '%d' ) );
-
-					// Delete related details from the details table
-					$wpdb->query(
-						$wpdb->prepare(
-							"DELETE FROM $details_table WHERE rgm_id IN ($id_placeholders)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- table name from $wpdb->prefix, not user input; $id_placeholders is a dynamically built '%d' list matching count($message_ids), spread as prepare() args below.
-							...$message_ids
-						)
-					);
-
-					// Delete old messages from the main message table
-					$wpdb->query(
-						$wpdb->prepare(
-							"DELETE FROM $message_table WHERE rgm_id IN ($id_placeholders)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- table name from $wpdb->prefix, not user input; $id_placeholders is a dynamically built '%d' list matching count($message_ids), spread as prepare() args below.
-							...$message_ids
-						)
-					);
-				}
-			}
-		}
-	}
-
-	// Schedule the function to check for messages that shall be deleted
-	public function schedule_message_deletion() {
-		if ( ! wp_next_scheduled( 'delete_old_messages_event' ) ) {
-			wp_schedule_event( time(), 'daily', 'delete_old_messages_event' );
-		}
 	}
 
 	/** Activation of the plugin */
@@ -228,6 +164,11 @@ class RCM_Main {
 
 			// Only here is the PREVIOUSLY stored version still known (see Gibberish_Notice).
 			Gibberish_Notice::remember_upgrade( $current_version );
+
+			// The starting point of the standing time behind the review request. Writes
+			// only if absent, so an existing installation starts counting from this
+			// upgrade — the plugin never knew the real date and must not invent one.
+			Review_Request::remember_install_date();
 
 			//Create tables to save messages
 			global $wpdb;
@@ -614,9 +555,7 @@ class RCM_Main {
 
 	/** Deactivation of the plugin */
 	public function deactivate() {
-		// Unschedule the event and remove the hooks
-		wp_clear_scheduled_hook( 'delete_old_messages_event' );
-		remove_action( 'delete_old_messages_event', array( $this, 'delete_old_messages' ), 10 );
+		$this->instance_message_cleanup->deactivate();
 	}
 
 	/** On activation go to settings menu*/

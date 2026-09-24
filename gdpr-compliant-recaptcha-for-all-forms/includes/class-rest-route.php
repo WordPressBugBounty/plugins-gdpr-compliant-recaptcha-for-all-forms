@@ -2,7 +2,7 @@
 /**
  * Pure, WordPress-independent extraction and pattern-matching of the REST route a
  * request targets — the third signature class alongside admin-ajax actions
- * (Explicit mode) and field patterns (see class-stamp.php / handbuch/gate.md).
+ * (Explicit mode) and field patterns (see class-stamp.php / handbuch/matchers.md).
  *
  * A REST submission carries neither an `action` parameter nor (usually) a field
  * pattern the plugin already knows, so builders that submit over the REST API
@@ -43,7 +43,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/gate.md.
+// Detail-Doku (Methodenebene): handbuch/matchers.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.

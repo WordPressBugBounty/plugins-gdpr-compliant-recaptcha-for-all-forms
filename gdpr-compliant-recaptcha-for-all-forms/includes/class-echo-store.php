@@ -35,7 +35,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Detail-Doku (Methodenebene): handbuch/echo.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -163,13 +163,20 @@ final class Echo_Store {
 	 * @param string[] $no_text_roots Top-level names whose subtree contributes no
 	 *                                long-text hash — the unpacked envelopes of a form
 	 *                                builder, see Echo_Values::build_echo_set().
+	 * @param bool     $long_text     Whether this verdict may contribute a long-text hash
+	 *                                at all (Classification_Reason::seeds_long_text() —
+	 *                                false for the whole `no_pow` family). Deliberately
+	 *                                NOT mirrored in matches(): the asymmetry is the
+	 *                                point. A constant per-form value must never be
+	 *                                LEARNED from a failed handshake, but a text hash a
+	 *                                content verdict did learn must keep catching.
 	 * @return void
 	 */
-	public static function record( $fields, $no_text_roots = array() ) {
+	public static function record( $fields, $no_text_roots = array(), $long_text = true ) {
 		if ( ! self::is_enabled() ) {
 			return;
 		}
-		$hashes = Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes(), $no_text_roots );
+		$hashes = Echo_Values::build_echo_set( $fields, self::site_domains(), self::user_email_hashes(), $no_text_roots, $long_text );
 		if ( empty( $hashes ) ) {
 			return;
 		}

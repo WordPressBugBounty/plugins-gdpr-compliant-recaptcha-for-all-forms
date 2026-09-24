@@ -1,0 +1,94 @@
+/*
+ * The deactivation feedback dialog on wp-admin's plugins screen.
+ * Rendered by scripts/recaptcha-gdpr-pro-state.js; documented in handbuch/feedback.md.
+ *
+ * Deliberately plain: this box appears at the moment somebody has already decided to
+ * leave, so it borrows wp-admin's own shapes (its button classes, its border colour,
+ * its spacing) instead of announcing itself. Its predecessor had a yellow background
+ * and looked like a warning about something the reader had done wrong.
+ */
+
+.gdpr-deactivate-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba( 0, 0, 0, .5 );
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100050;
+	padding: 20px;
+}
+
+.gdpr-deactivate-box {
+	background: #fff;
+	color: #1d2327;
+	border-radius: 4px;
+	box-shadow: 0 3px 30px rgba( 0, 0, 0, .3 );
+	padding: 24px 26px 20px;
+	max-width: 33em;
+	width: 100%;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+
+.gdpr-deactivate-box h2 {
+	margin: 0 0 .4em;
+	font-size: 1.3em;
+	line-height: 1.4;
+}
+
+.gdpr-deactivate-intro {
+	margin: 0 0 1.2em;
+	color: #50575e;
+}
+
+.gdpr-deactivate-label {
+	display: block;
+	margin-bottom: .4em;
+	font-weight: 600;
+}
+
+.gdpr-deactivate-box textarea {
+	width: 100%;
+	resize: vertical;
+}
+
+/* The disclosure. Smaller than the rest, but never hidden behind a toggle: it is the
+   sentence that makes the transmission legitimate, so it has to be on screen when the
+   button is pressed. */
+.gdpr-deactivate-notice {
+	margin: .9em 0 1.4em;
+	font-size: 12px;
+	line-height: 1.6;
+	color: #646970;
+}
+
+.gdpr-deactivate-actions {
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+}
+
+.gdpr-deactivate-cancel {
+	margin-left: auto;
+	color: #646970;
+}
+
+@media screen and ( max-width: 480px ) {
+	.gdpr-deactivate-actions {
+		display: block;
+	}
+
+	.gdpr-deactivate-actions .button {
+		display: block;
+		width: 100%;
+		margin-bottom: 8px;
+		text-align: center;
+	}
+
+	.gdpr-deactivate-cancel {
+		margin-left: 0;
+	}
+}

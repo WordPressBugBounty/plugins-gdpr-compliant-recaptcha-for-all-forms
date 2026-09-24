@@ -193,7 +193,7 @@ trait Ability_Actions {
 	 * The live monitored scope, and optionally a coverage answer.
 	 *
 	 * Blocked values are counted but never listed. They carry values an admin blocked by
-	 * hand — real senders' email addresses and domains (handbuch/detection.md). That is
+	 * hand — real senders' email addresses and domains (handbuch/echo.md). That is
 	 * personal data about third parties, and an MCP client is typically an external
 	 * service, so listing them would quietly turn a "what do you monitor" question into a
 	 * data transfer.

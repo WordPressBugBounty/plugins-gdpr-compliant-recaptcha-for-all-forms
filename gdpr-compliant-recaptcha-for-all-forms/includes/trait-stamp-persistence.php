@@ -356,22 +356,22 @@ trait Stamp_Persistence {
 	 *   - save_for_analysis() already passes whole_request_data to save_message(), so the
 	 *     analysis path has always read $_REQUEST here. The live path was the outlier;
 	 *     this unifies the two rather than adding a third behaviour.
-	 *   - The monitored SCOPE stays as it is, because the MATCHER is not touched here.
-	 *     Narrowing that one to $_POST would be a coverage decision, not a fix — owner's
-	 *     call, own BACKLOG item ("Methoden-Gate für Muster- und Action-Abgleich").
+	 *   - The monitored SCOPE stayed as it was, because the MATCHER was not touched here;
+	 *     narrowing that one was a coverage decision, taken on 2026-08-28 (gate.md).
 	 *
 	 * THE SIDE EFFECT, named rather than hidden: with the option OFF, a spam POST that
 	 * carries `add-to-cart` only in its query string is no longer stored either. The
 	 * VERDICT does not change — save_message() governs persistence, never block/no-block.
-	 * WARNING for whoever adds WooCommerce's default ajax path (`wc-ajax=add_to_cart`)
-	 * to the monitored scope: it would run PAST this exemption, carrying neither
-	 * `add-to-cart` nor `update_cart`. That shape has to be learnt here at the same time.
+	 * THE THIRD SHAPE, `wc-ajax=add_to_cart`, is the default ajax button, seeded since
+	 * 2026-08-28 (seeds.md); its body carries neither other key. Value-pinned like the
+	 * seed: `wc-ajax=checkout` is deliberately not cart noise, the read-only ones are not.
 	 *
 	 * @return bool True if this request is WooCommerce cart activity.
 	 */
 	private function is_shopping_cart_request() {
 		$request = is_array( $this->whole_request_data ) ? $this->whole_request_data : array();
 		return isset( $request['add-to-cart'] )
+			|| ( isset( $request['wc-ajax'] ) && 'add_to_cart' === $request['wc-ajax'] )
 			|| ( isset( $request['update_cart'] ) && isset( $request['woocommerce-cart-nonce'] ) );
 	}
 

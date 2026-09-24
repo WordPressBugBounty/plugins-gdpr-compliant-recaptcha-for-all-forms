@@ -2,9 +2,9 @@
 /**
  * The two halves that make an OVER-BROAD field pattern survivable: a warning with a
  * confirmation when it is saved, and a plain statement afterwards when one has already
- * discarded an admin's own save. See handbuch/admin.md.
+ * discarded an admin's own save. See handbuch/overbroad.md.
  *
- * THE COST CASE (handbuch/gate.md, "Der eine Fall, in dem es doch beisst"): the
+ * THE COST CASE (handbuch/matchers.md, "Der eine Fall, in dem es doch beisst"): the
  * constructor gate does not tell frontend from backend traffic, so a pattern generic
  * enough to match a wp-admin screen — `{"email":null}` is the measured example — turns
  * that screen's save into a spam verdict. POW_BLOCK is on by default, so the save is
@@ -116,7 +116,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Detail-Doku (Methodenebene): handbuch/overbroad.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -249,6 +249,56 @@ final class Overbroad_Pattern_Guard {
 	}
 
 	/**
+	 * May this request leave the after-the-fact MARKER, even though it is not a screen?
+	 *
+	 * 2026-08-28 (ISSUES.md, "Auf admin-post.php warnt der Muster-Guard weder vorher noch
+	 * nachher"). is_core_admin_screen_post() answers `false` for admin-post.php on
+	 * purpose — it is a dispatch endpoint with a `nopriv` half, not a screen a human is
+	 * looking at, and the edit_posts screen exemption above must stay off it (our own
+	 * MailPoet seed expects to keep evaluating bots there, see handbuch/seeds.md). That
+	 * correctness had a cost nobody named: record_backend_block() asked the very same
+	 * question, so a pattern that discards an admin-post.php-based backend form (a
+	 * third-party plugin's own submission handler) produced neither the save-time warning
+	 * (out of reach anyway — the field matcher does not know that plugin's screens) nor
+	 * this notice. The symptom then pointed nowhere at all, worse than the screen case
+	 * this whole file exists for.
+	 *
+	 * So this is a SECOND, wider question, asked only where the marker is written: true
+	 * wherever is_core_admin_screen_post() is already true, OR when the request is a
+	 * plain (non-ajax) POST whose script is admin-post.php. It does NOT feed the screen
+	 * exemption, the fail2ban exclusion, or CORE_BACKEND_SIGNATURES — is_core_admin_screen_post()
+	 * stays byte-for-byte what it was, still the only answer those three ask.
+	 *
+	 * Same segment-wise comparison as is_core_admin_screen_post() (no suffix/symlink/case
+	 * spelling gets past it) and the same error direction for an empty SCRIPT_FILENAME:
+	 * false — a missing marker costs a diagnosis, a wrongly written one accuses an
+	 * innocent pattern.
+	 *
+	 * @param bool   $is_admin        is_admin() — WP_ADMIN, set before wp-load runs.
+	 * @param bool   $doing_ajax      wp_doing_ajax() / the DOING_AJAX constant.
+	 * @param string $script_filename $_SERVER['SCRIPT_FILENAME'], raw.
+	 * @return bool
+	 */
+	public static function is_backend_post_for_marker( bool $is_admin, bool $doing_ajax, string $script_filename ): bool {
+		if ( self::is_core_admin_screen_post( $is_admin, $doing_ajax, $script_filename ) ) {
+			return true;
+		}
+		if ( ! $is_admin || $doing_ajax ) {
+			return false;
+		}
+		$path = strtolower( trim( str_replace( '\\', '/', $script_filename ) ) );
+		if ( '' === $path ) {
+			return false;
+		}
+		foreach ( explode( '/', $path ) as $segment ) {
+			if ( 'admin-post.php' === trim( $segment ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * The bare script name of a request path, for display in the notice ("profile.php").
 	 *
 	 * Reduced to a conservative character set and length because it ends up in rendered
@@ -318,7 +368,10 @@ final class Overbroad_Pattern_Guard {
 		}
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set path, only compared against a fixed list of file names and reduced to a file-name shape before display (screen_file()).
 		$script = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
-		if ( ! self::is_core_admin_screen_post( is_admin(), wp_doing_ajax(), $script ) ) {
+		// is_backend_post_for_marker(), NOT is_core_admin_screen_post(): the marker's
+		// question is wider than the screen exemption's (2026-08-28, see that method's
+		// docblock) — admin-post.php stays outside the exemption but gets its notice.
+		if ( ! self::is_backend_post_for_marker( is_admin(), wp_doing_ajax(), $script ) ) {
 			return;
 		}
 		// The site's own domains, so a blocked value is judged here exactly as the live
@@ -533,6 +586,7 @@ final class Overbroad_Pattern_Guard {
 			'post-editor'     => __( 'Post editor', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'user-new'        => __( 'Add new user', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			'comment-edit'    => __( 'Edit comment', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'screen-options'  => __( 'Screen Options panel', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 	}
 }

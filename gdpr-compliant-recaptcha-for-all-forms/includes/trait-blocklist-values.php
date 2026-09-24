@@ -19,7 +19,7 @@
  * and string_hits() are shared by "does anything match at all?"
  * (matches_wildcard_values()), "which addresses did the matching?" (blocked_emails(),
  * i.e. the login exemption) and "does this ONE field match?" (blocked_entry_matches(),
- * the value half of a field-bound rule). handbuch/detection.md says "genau einmal" about
+ * the value half of a field-bound rule). handbuch/echo.md says "genau einmal" about
  * that in three places, and a second class would have meant either moving those three
  * privates away from one of their callers or repeating them. A trait is compiled into
  * Echo_Values at compile time: all three still live in one file, every caller still
@@ -42,7 +42,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Detail-Doku (Methodenebene): handbuch/echo.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse (Traits
 // bekommen keine eigene Indexzeile; sie sind Teil ihrer Klasse).
 

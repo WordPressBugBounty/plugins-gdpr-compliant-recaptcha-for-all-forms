@@ -12,15 +12,17 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 /**
  * Trait Settings_Default_Actions: der admin-ajax-Seed — welche Actions eine frische
  * Installation ueberwacht (get_default_ajax_actions()). Seed-Liste und Produkt-Zaehlung:
- * handbuch/gate.md.
+ * handbuch/seeds.md (bis 2026-08-26 in handbuch/gate.md, dort herausgeschnitten, als die
+ * Bereichsdatei ihren Deckel erreichte; gate.md beschreibt weiterhin, WELCHER Zweig die
+ * Liste ueberhaupt liest).
  *
  * SCHNITTLINIE (Welle 3, PLAN-DATEIGROESSE.md): Settings_Menu war eine Datei mit
  * 2592 Zeilen. Sie ist entlang ihrer Sektionen aufgeteilt:
  *   - class-settings-menu.php             — Konstruktion, Hooks, Menue, Selbsttest,
  *                                           prepare_options() und der Proxy-Vorschlag.
- *   - trait-settings-default-actions.php  — get_default_ajax_actions() (handbuch/gate.md).
- *   - trait-settings-default-patterns.php — get_default_recognition_patterns() (handbuch/gate.md).
- *   - trait-settings-default-routes.php   — get_default_rest_routes() (handbuch/gate.md).
+ *   - trait-settings-default-actions.php  — get_default_ajax_actions() (handbuch/seeds.md).
+ *   - trait-settings-default-patterns.php — get_default_recognition_patterns() (handbuch/seeds.md).
+ *   - trait-settings-default-routes.php   — get_default_rest_routes() (handbuch/seeds.md).
  *   - trait-settings-options.php          — Options-Matrix, Teil 1 (Reiter "Most relevant",
  *                                           "Spam Processing").
  *   - trait-settings-options-storage.php  — Options-Matrix, Teil 2 (Reiter "Saving Messages",
@@ -37,12 +39,22 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * weiter aufgeteilt in trait-settings-default-actions.php (DIESE Datei) /
  * trait-settings-default-patterns.php / trait-settings-default-routes.php.
  *
- * DREI TRAITS DIREKT, KEIN SAMMEL-TRAIT: Settings_Menu bindet alle drei (und die uebrigen
- * fuenf Sektionen) direkt per `use` ein, statt ueber einen vierten Trait, der die drei
+ * DRITTER SCHNITT (Welle 3 der Seed-Ausweitung, 2026-08-28): diese Datei allein hielt
+ * nach Welle 2 keine weitere Welle mehr (517 Zeilen, Deckel 600) — Teilen statt den Deckel
+ * heben, wie CLAUDE.md ("Dateigroessen") es verlangt. Geschnitten entlang der Wellen
+ * selbst, nicht nach Zeilenzahl: der urspruengliche Bestand bis einschliesslich YITH
+ * WooCommerce Wishlist bleibt HIER, in wave_1_ajax_actions(); wpDiscuz und alles ab Welle 2
+ * (Kadence Blocks, Essential Blocks, Popup Maker, MailPoet, Newsletter, CoBlocks, Popup
+ * Builder) liegt in trait-settings-default-actions-wave2.php,
+ * Settings_Default_Actions_Wave2::wave_2_ajax_actions(). get_default_ajax_actions() bleibt
+ * die einzige oeffentliche Methode und komponiert beide Haelften — kein Aufrufer, kein
+ * Hook und keine Sichtbarkeit aendert sich, reiner Umzug.
+ *
+ * DREI TRAITS DIREKT, KEIN SAMMEL-TRAIT: Settings_Menu bindet alle traits (und die
+ * uebrigen Sektionen) direkt per `use` ein, statt ueber einen Sammel-Trait, der sie
  * seinerseits `use`t. Ein Sammel-Trait waere dieselbe Kompilierzeit-Kopie mit einer
  * zusaetzlichen Indirektionsstufe, die man beim Lesen erst aufloesen muesste, ohne dass
- * dafuer irgendein Aufrufer, Hook oder eine Sichtbarkeit gewinnt — Settings_Menu bindet
- * mit dieser Aenderung acht statt sechs Traits direkt ein, kein Bruch mit dem Bestand.
+ * dafuer irgendein Aufrufer, Hook oder eine Sichtbarkeit gewinnt.
  *
  * Traits statt zweiter Klassen, und zwar bewusst: diese Methoden sind als
  * `array( $this, ... )`-Hooks registriert, lesen `$this->options`/`$this->plugin_name`
@@ -54,9 +66,33 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
 trait Settings_Default_Actions {
 	public static function get_default_ajax_actions() {
 		include_once ABSPATH . 'wp-admin/includes/plugin.php';
-		$actions           = array();
 		$installed_plugins = get_plugins();
-		$installed_themes  = wp_get_themes();
+
+		return implode(
+			"\n",
+			array_merge(
+				self::wave_1_ajax_actions( $installed_plugins ),
+				self::wave_2_ajax_actions( $installed_plugins )
+			)
+		);
+	}
+
+	/**
+	 * Welle 1: der urspruengliche Bestand bis einschliesslich YITH WooCommerce Wishlist,
+	 * samt der Korrekturen aus ERHEBUNG-BUILDER.md §3.2 (Jetpack, WP User Frontend).
+	 * Welle 2 und alles danach: Settings_Default_Actions_Wave2::wave_2_ajax_actions()
+	 * in trait-settings-default-actions-wave2.php.
+	 *
+	 * NUR $installed_plugins, kein $installed_themes: keine Action in dieser Liste (in
+	 * keiner Welle) erkennt ein Theme statt eines Plugins — anders als die Muster-Liste
+	 * (Divi). Ein unbenutzter Parameter waere totes Gewicht, das jede neue Welle nur
+	 * mitschleppt.
+	 *
+	 * @param array<string, mixed> $installed_plugins get_plugins() — file => header data.
+	 * @return string[] Action lines, unindexed.
+	 */
+	private static function wave_1_ajax_actions( array $installed_plugins ): array {
+		$actions = array();
 
 		// *** Thrive Architect Forms (custom submission method) ***
 		if ( array_key_exists( 'thrive-architect/thrive-architect.php', $installed_plugins ) ) {
@@ -200,6 +236,35 @@ trait Settings_Default_Actions {
 			self::display_admin_notice( __( 'Elementor Pro Forms detected – added action: elementor_pro_forms_send_form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
-		return implode( "\n", $actions );
+		// *** YITH WooCommerce Wishlist (uses WordPress AJAX). Verified against the wp.org
+		// zip, YITH WooCommerce Wishlist 4.18.0, BOTH halves: server side
+		// includes/class-yith-wcwl-ajax-handler.php:26-27 registers
+		// `wp_ajax_add_to_wishlist` AND `wp_ajax_nopriv_add_to_wishlist`; client side
+		// assets/js/unminified/jquery.yith-wcwl.js:25 posts
+		// `action: yith_wcwl_l10n.actions.add_to_wishlist_action`, and that value is the
+		// literal string `add_to_wishlist` (includes/class-yith-wcwl-frontend.php:726).
+		//
+		// WHY IT IS SEEDED NOW. It was already being watched — but only through the
+		// defect in Stamp::check_explicit_actions(), whose second term compared the
+		// REQUEST's action against the field names instead of the configured line, so
+		// every `action=X` carrying a field `X` was evaluated no matter what the list
+		// said. YITH's ajax body carries both (`add_to_wishlist: product_id`, same JS
+		// line 28). Fixing that term removes the accidental coverage, so the product
+		// gets the regular entry it should have had all along.
+		//
+		// CHECKED AGAINST THE PRODUCT'S OWN BACKEND (CLAUDE.md, four-point duty (d)):
+		// `add_to_wishlist` appears in no admin request of the plugin. Its settings
+		// panel saves through plugin-fw, and the only actions its admin JS sends are
+		// `yith_wcwl_save_email_settings` and `yith_wcwl_save_mail_status`
+		// (assets/js/admin/yith-wcwl.min.js). The JS-less fallback — the button's
+		// `href` with `?add_to_wishlist=<id>` (templates/add-to-wishlist-button.php:51)
+		// — is a GET without an `action` parameter and stays unevaluated, because
+		// check_explicit_actions() returns early when the request carries no action.
+		if ( array_key_exists( 'yith-woocommerce-wishlist/init.php', $installed_plugins ) ) {
+			$actions[] = 'add_to_wishlist';
+			self::display_admin_notice( __( 'YITH WooCommerce Wishlist detected – added action: add_to_wishlist', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		return $actions;
 	}
 }

@@ -4,7 +4,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/detection.md.
+// Detail-Doku (Methodenebene): handbuch/gibberish.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -120,7 +120,7 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * ordinary word suppresses the solo rule (the STRONG-token rule above closes that
  * last one for strong signals only). Its value lies with blind mass spam, not with
  * targeted adversaries — those are what the proof of work is for, which raises the
- * COST of a submission rather than relying on a secret. See handbuch/detection.md "Grenzen
+ * COST of a submission rather than relying on a secret. See handbuch/gibberish.md "Grenzen
  * der Gibberish-Erkennung".
  *
  * No WordPress dependencies (no options, no $wpdb, no hooks) → deterministically

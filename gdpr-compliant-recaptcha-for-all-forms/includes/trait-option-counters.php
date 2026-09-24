@@ -240,10 +240,7 @@ trait Option_Counters {
 	 * row (the #1 support case, see HANDBUCH §12). Feeds the health counter in the
 	 * settings status strip and the dashboard widget.
 	 *
-	 * The query filters on rgd_attribute equality + a rgd_value prefix LIKE, which the
-	 * existing composite index idx_rgd_attribute_value on (rgd_attribute(255),
-	 * rgd_value(255)) covers — no new index needed. No rgm_type filter: a no-stamp
-	 * submission counts regardless of which folder it landed in.
+	 * Query, index and clock: count_reason_rows_since_hours() below.
 	 *
 	 * NB: this only sees *stored* messages. With POW_SAVE_SPAM disabled nothing is
 	 * persisted and the counter reads 0 — see HANDBUCH §12.
@@ -252,11 +249,55 @@ trait Option_Counters {
 	 * @return int
 	 */
 	public static function count_no_pow_reasons_since_hours( $hours ) {
+		// Underscore escaped: `_` is a single-character SQL wildcard, and the prefix must
+		// match literally even if a future reason code differs only in that position.
+		return self::count_reason_rows_since_hours( 'no\_pow:%', $hours );
+	}
+
+	/**
+	 * Count submissions classified `echo_lock` — refused because a core value repeated
+	 * one remembered from a recent spam message — within the last $hours hours.
+	 *
+	 * WHY THIS EXISTS. The cure for a wrongly held value has been there all along (the
+	 * "Release" button on the Diagnostics tab), but nothing told the operator WHEN to
+	 * press it: a lock that catches legitimate senders looks exactly like a quiet form.
+	 * This number is what turns "my contact form went silent" into something visible on
+	 * the same row as the button that fixes it.
+	 *
+	 * DERIVED, not counted: the refused submissions are already stored with their reason,
+	 * so no new write happens on the submission path for this. The price of deriving it
+	 * is that it only sees *stored* messages — with "Save spam messages" off it reads 0,
+	 * exactly like count_no_pow_reasons_since_hours(). The help text on the row says so.
+	 *
+	 * @param int $hours Lookback window in hours.
+	 * @return int
+	 */
+	public static function count_echo_lock_reasons_since_hours( $hours ) {
+		// `echo_lock` carries no detail, so this is an exact value — the underscore is
+		// still escaped, for the same reason as above.
+		return self::count_reason_rows_since_hours( 'echo\_lock', $hours );
+	}
+
+	/**
+	 * Shared body of the two reason counters: `_gdpr_reason` detail rows whose value
+	 * matches $like, on messages stored within the last $hours hours.
+	 *
+	 * ONE CLOCK: rgm_date is written via current_time('mysql') (WP local time); NOW()
+	 * reads the MySQL SESSION's timezone instead, so on a host where the two differ the
+	 * count would drift. The threshold is computed in PHP and bound as a ready-made
+	 * literal, so MySQL never evaluates "now" itself (tests/unit/OneClockTest.php).
+	 *
+	 * The query filters on rgd_attribute equality + a rgd_value LIKE, which the existing
+	 * composite index idx_rgd_attribute_value on (rgd_attribute(255), rgd_value(255))
+	 * covers — no new index needed. No rgm_type filter: the verdict counts regardless of
+	 * which folder the message landed in.
+	 *
+	 * @param string $like  LIKE pattern for rgd_value, wildcards already escaped.
+	 * @param int    $hours Lookback window in hours.
+	 * @return int
+	 */
+	private static function count_reason_rows_since_hours( $like, $hours ) {
 		global $wpdb;
-		// rgm_date is written via current_time('mysql') (WP local time); NOW() reads the
-		// MySQL SESSION's timezone instead, so on a host where that differs from WordPress's
-		// the count would drift. Threshold computed in PHP from current_time() and passed as
-		// a ready-made literal via prepare(), so MySQL never evaluates "now" itself.
 		$threshold = gmdate( 'Y-m-d H:i:s', current_time( 'timestamp' ) - $hours * HOUR_IN_SECONDS ); // phpcs:ignore WordPress.DateTime.CurrentTimeTimestamp.Requested -- intentional: matches current_time('mysql')-written rgm_date, see comment above
 		$count     = $wpdb->get_var(
 			$wpdb->prepare(
@@ -264,10 +305,7 @@ trait Option_Counters {
 				. ' INNER JOIN ' . $wpdb->prefix . 'recaptcha_gdpr_message_rgm rgm ON rgm.rgm_id = rgd.rgm_id'
 				. ' WHERE rgd.rgd_attribute = %s AND rgd.rgd_value LIKE %s AND rgm.rgm_date >= %s',
 				'_gdpr_reason',
-				// Underscore escaped: `_` is a single-character SQL wildcard, and the
-				// prefix must match literally even if a future reason code differs only
-				// in that position.
-				'no\_pow:%',
+				$like,
 				$threshold
 			)
 		);

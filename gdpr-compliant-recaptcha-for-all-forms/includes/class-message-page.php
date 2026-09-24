@@ -4,7 +4,7 @@ namespace VENDOR\RECAPTCHA_GDPR_COMPLIANT;
 
 defined( 'ABSPATH' ) || die( 'Are you ok?' );
 
-// Detail-Doku (Methodenebene): handbuch/admin.md.
+// Detail-Doku (Methodenebene): handbuch/messages.md.
 // Index/Absprungstelle: HANDBUCH.md — dort steht nur EINE Zeile je Klasse.
 // Aenderst du das Verhalten hier, gehoert die Beschreibung in die Bereichsdatei oben,
 // nicht in den Index.
@@ -259,6 +259,17 @@ class Message_Page {
 			true
 		);
 		wp_localize_script( 'gdpr-recaptcha-messages', 'gdprMsg', self::script_data( $message_type, $titles ) );
+		// The one-click actions (saveListParameter/savePattern/blockValue/monitorRoute/
+		// toggleGibberishField/treatAsCredential), split out under PLAN-OFFENE-PUNKTE.md V4.
+		// Depends on the script above so it loads after it and can use `gdprMsg` plus its
+		// helpers (showSpinner/hideSpinner/showAlert/showSuccess/collectFilters).
+		wp_enqueue_script(
+			'gdpr-recaptcha-message-actions',
+			plugins_url( '/scripts/recaptcha-gdpr-message-actions.js', __DIR__ ),
+			array( 'gdpr-recaptcha-messages' ),
+			RCM_Main::VERSION,
+			true
+		);
 	}
 
 	public function render_message() {

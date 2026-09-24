@@ -425,6 +425,16 @@ class Option {
 	const POW_STORE_LAST_ERROR = self::PREFIX . 'pow_store_last_error';
 
 	/**
+	 * The three keys of the one-off review request (Review_Request, handbuch/admin.md):
+	 * bookkeeping, not settings, hence absent from prepare_options()/activate().
+	 * POW_FIRST_SEEN_AT is a unix TIMESTAMP — NOT the boolean POW_INSTALLED further up,
+	 * which only records that the tables were created.
+	 */
+	const POW_FIRST_SEEN_AT       = self::PREFIX . 'pow_first_seen_at';
+	const POW_SPAM_HIGH_WATER     = self::PREFIX . 'pow_spam_high_water';
+	const POW_REVIEW_REQUEST_DONE = self::PREFIX . 'pow_review_request_done';
+
+	/**
 	 * Lookback window (hours) of the "submissions without a stamp row" health counter.
 	 *
 	 * @var int
