@@ -48,6 +48,12 @@ class Deactivation_Feedback {
 	 */
 	const ENDPOINT = 'https://programmiere.de/GDPRCompliantRecaptcha/update.php';
 
+	/**
+	 * Das Support-Forum auf wp.org. Ziel des Hinweises bei den zwei behebbaren
+	 * Gruenden — der eine Weg, auf dem ein Problem eine Antwort bekommt.
+	 */
+	const SUPPORT_URL = 'https://wordpress.org/support/plugin/gdpr-compliant-recaptcha-for-all-forms/';
+
 	/** The privacy notice the dialog links to — what is stored, for how long, by whom. */
 	const PRIVACY_URL = 'https://programmiere.de/GDPRCompliantRecaptcha/';
 
@@ -117,16 +123,16 @@ class Deactivation_Feedback {
 	 */
 	public static function script_data() {
 		return array(
-			'slug'      => self::SLUG,
-			'plugin'    => self::SLUG,
-			'version'   => RCM_Main::VERSION,
-			'endpoint'  => self::ENDPOINT,
-			'maxChars'  => self::MAX_CHARS,
-			'privacy'   => self::PRIVACY_URL,
+			'slug'             => self::SLUG,
+			'plugin'           => self::SLUG,
+			'version'          => RCM_Main::VERSION,
+			'endpoint'         => self::ENDPOINT,
+			'maxChars'         => self::MAX_CHARS,
+			'privacy'          => self::PRIVACY_URL,
 			/* translators: dialog heading shown when the plugin is being deactivated. */
-			'heading'   => __( 'Before you go — what went wrong?', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'intro'     => __( 'If something did not work, a sentence about it is worth more than any statistic. It is optional.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'label'     => __( 'What happened?', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'heading'          => __( 'Before you go — what went wrong?', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'intro'            => __( 'If something did not work, a sentence about it is worth more than any statistic. It is optional.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'label'            => __( 'What happened?', 'gdpr-compliant-recaptcha-for-all-forms' ),
 			// The disclosure. Names the recipient, names what is kept, names what is
 			// not, and says how to send nothing — in that order, because that is the
 			// order in which the questions occur to the person reading it.
@@ -145,11 +151,63 @@ class Deactivation_Feedback {
 			// more revealing wp-admin URL. The receiver writes neither to disk. Claiming
 			// the domain is never transmitted would therefore have been a sentence this
 			// plugin cannot keep, in the one place where it must.
-			'notice'    => __( 'Your message goes to the plugin author at programmiere.de and is kept for 90 days. The plugin name and version number travel with it, so a message can be told apart from one about a different plugin. Nothing else is stored with your message — not your IP address, not your site address, nothing from your forms. Deactivate without sending to transmit nothing at all.', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'privacyOf' => __( 'Privacy notice', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'send'      => __( 'Send and deactivate', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'skip'      => __( 'Deactivate without sending', 'gdpr-compliant-recaptcha-for-all-forms' ),
-			'cancel'    => __( 'Cancel', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'notice'           => __( 'Your message goes to the plugin author at programmiere.de and is kept for 90 days. The plugin name and version number travel with it. Nothing else is stored with your message — not your IP address, not your site address, nothing from your forms. Technical details are only sent if you tick the box, and you can read them first. Deactivate without sending to transmit nothing at all.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'privacyOf'        => __( 'Privacy notice', 'gdpr-compliant-recaptcha-for-all-forms' ),
+
+			// DIE GRUENDE ZUM ANKLICKEN. Anlass: die ersten elf Eingaenge nach dem
+			// Scharfschalten des Empfaengers waren „eee" (zweimal), „just a test",
+			// „don't work", „Does not work" — ein leeres Freitextfeld erntet leere
+			// Antworten. Wer nichts tippt, hinterlaesst mit einem Klick trotzdem eine
+			// Kategorie, und aus „don't work" wird eine zaehlbare Klasse.
+			//
+			// KEIN PFLICHTFELD: die Auswahl darf leer bleiben, sonst wird aus einer
+			// freiwilligen Rueckmeldung eine Huerde vor dem Deaktivieren.
+			'reasonLabel'      => __( 'Why are you deactivating?', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'reasons'          => array(
+				array(
+					'value' => 'not_working',
+					'label' => __( 'It did not work', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				),
+				array(
+					'value' => 'false_positives',
+					'label' => __( 'It blocked real visitors', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				),
+				array(
+					'value' => 'too_complicated',
+					'label' => __( 'Too complicated to set up', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				),
+				array(
+					'value' => 'other_plugin',
+					'label' => __( 'I found another plugin', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				),
+				array(
+					'value' => 'temporary',
+					'label' => __( 'Only temporarily — I will be back', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				),
+			),
+
+			// DER EIGENTLICHE HEBEL, und er schickt Leute WEG von diesem Dialog: „it did
+			// not work" ist kein Feedback, sondern ein ungeloester Supportfall, der
+			// gerade das Plugin verlaesst. Ein geloester Forenthread haelt den Nutzer,
+			// ist oeffentlich sichtbar und kann eine Bewertung werden — eine
+			// Deaktivierungs-Meldung kann nichts davon. Deshalb erscheint dieser Hinweis
+			// genau bei den zwei Gruenden, die sich beheben lassen.
+			'supportFor'       => array( 'not_working', 'false_positives' ),
+			'supportHint'      => __( 'This is usually fixable, and faster than you think. If you post it in the support forum, you get an answer — this box cannot reply to you.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'supportLabel'     => __( 'Open the support forum', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'supportUrl'       => self::SUPPORT_URL,
+
+			// DER TECHNISCHE ABZUG. Er faehrt NUR mit gesetztem Haken mit, und der
+			// Absender sieht vorher woertlich, was das ist — `diagnostics` ist genau der
+			// String, der auf die Leitung geht, keine Beschreibung davon
+			// (Deactivation_Diagnostics::as_plain_text(), dort auch die drei Regeln,
+			// was niemals hineingehoert).
+			'diagnostics'      => Deactivation_Diagnostics::as_plain_text(),
+			'diagnosticsLabel' => __( 'Also send technical details (versions, active plugins, my settings)', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'diagnosticsShow'  => __( 'Show exactly what that is', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'send'             => __( 'Send and deactivate', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'skip'             => __( 'Deactivate without sending', 'gdpr-compliant-recaptcha-for-all-forms' ),
+			'cancel'           => __( 'Cancel', 'gdpr-compliant-recaptcha-for-all-forms' ),
 		);
 	}
 }

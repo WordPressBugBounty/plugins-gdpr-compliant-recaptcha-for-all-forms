@@ -66,7 +66,19 @@ trait Settings_Save {
 					// bug would reappear the moment one does).
 					$post_value = filter_input( INPUT_POST, $key, FILTER_DEFAULT, FILTER_REQUIRE_ARRAY );
 					$post_value = $post_value ? array_map( 'sanitize_text_field', $post_value ) : array();
-				} elseif ( Option::TEXT === $type || Option::STRING === $type ) {
+				} elseif ( Option::TEXT === $type ) {
+					// Rule/list textareas are stored AS TYPED. wp_kses_post() used to run
+					// here too and turned `=>` into `=&gt;` and `&` into `&amp;` — every
+					// save of this page broke gibberish lines and rule lines with `&` or
+					// `<…>` (forum report). These values are never HTML; every output point
+					// escapes for its own context. Why, and what is still removed:
+					// Text_Option_Value (handbuch/admin.md).
+					// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized by Text_Option_Value::clean() (invalid UTF-8 and control characters removed); nonce and capability verified above.
+					$raw_text   = isset( $_POST[ $key ] ) ? wp_unslash( $_POST[ $key ] ) : null;
+					$post_value = is_string( $raw_text ) ? Text_Option_Value::clean( $raw_text ) : null;
+				} elseif ( Option::STRING === $type ) {
+					// STRING stays on wp_kses_post(): the error message is shown to
+					// visitors as HTML.
 					$post_value = isset( $_POST[ $key ] ) ? wp_kses_post( wp_unslash( $_POST[ $key ] ) ) : null;
 				} else {
 					// For single values, apply the specified filter

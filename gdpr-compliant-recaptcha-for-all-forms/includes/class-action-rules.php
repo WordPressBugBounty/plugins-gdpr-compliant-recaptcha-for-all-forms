@@ -122,6 +122,32 @@ final class Action_Rules {
 	}
 
 	/**
+	 * Does ONE line of the action list (POW_EXPLICIT_ACTION) match this request? Both
+	 * line forms, the whole interpretation — moved here from Stamp::check_explicit_actions()
+	 * (2026-09-25) so Risk_Signatures can ask the same question without a second copy.
+	 *
+	 * A rule line goes through line_matches(). A plain line matches in two readings: as
+	 * the action VALUE, or as a top-level FIELD NAME (the line, never $action). Neither
+	 * reading applies to a request without an action — the caller's early return,
+	 * kept here so the helper cannot be asked a question production never asks.
+	 *
+	 * @param string $raw_line One line of the action list.
+	 * @param string $action   The request's `action` value, sanitized; '' if none.
+	 * @param mixed  $request  The whole request field map.
+	 * @return bool
+	 */
+	public static function list_line_matches( string $raw_line, string $action, $request ): bool {
+		if ( '' === $action ) {
+			return false;
+		}
+		if ( self::is_rule_line( $raw_line ) ) {
+			return self::line_matches( $raw_line, $request );
+		}
+		$line = trim( $raw_line );
+		return $line === $action || ( is_array( $request ) && isset( $request[ $line ] ) );
+	}
+
+	/**
 	 * SAVE-TIME DIAGNOSIS for POW_EXPLICIT_ACTION: which lines look like a rule but can
 	 * never match, because they pin no action name?
 	 *

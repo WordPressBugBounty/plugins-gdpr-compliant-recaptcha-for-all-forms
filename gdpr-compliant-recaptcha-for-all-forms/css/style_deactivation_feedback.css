@@ -92,3 +92,55 @@
 		margin-left: 0;
 	}
 }
+
+/* Gruende zum Anklicken. Ein fieldset ohne Rahmen: die Gruppe braucht ihre
+   Legende fuer Screenreader, aber keine Kastenoptik im Dialog. */
+.gdpr-deactivate-reasons {
+	border: 0;
+	margin: 0 0 12px;
+	padding: 0;
+}
+
+.gdpr-deactivate-reasons legend {
+	font-weight: 600;
+	padding: 0 0 4px;
+}
+
+.gdpr-deactivate-reason {
+	display: block;
+	margin: 2px 0;
+}
+
+/* Der Hinweis aufs Forum. Erscheint nur bei den zwei behebbaren Gruenden und soll
+   auffallen, ohne zu schreien. */
+.gdpr-deactivate-support {
+	background: #f0f6fc;
+	border-left: 4px solid #72aee6;
+	margin: 0 0 12px;
+	padding: 8px 12px;
+}
+
+/* Der technische Abzug. Der Klartext steht in einem scrollbaren Block, damit eine
+   lange Plugin-Liste den Dialog nicht auseinanderzieht — sichtbar bleibt er
+   trotzdem vollstaendig, das ist der Punkt der Freigabe. */
+.gdpr-deactivate-diagnostics {
+	margin: 0 0 12px;
+}
+
+.gdpr-deactivate-diagnostics summary {
+	cursor: pointer;
+	margin: 4px 0 0 24px;
+}
+
+.gdpr-deactivate-diagnostics-text {
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	font-size: 12px;
+	margin: 6px 0 0 24px;
+	max-height: 160px;
+	overflow: auto;
+	padding: 8px;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+

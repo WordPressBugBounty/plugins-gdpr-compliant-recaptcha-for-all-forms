@@ -256,6 +256,8 @@ class Support_Report {
 			'echo_lock_enabled'            => Echo_Store::is_enabled(),
 			'block_enabled'                => (bool) get_option( Option::POW_BLOCK ),
 			'block_login_enabled'          => (bool) get_option( Option::POW_BLOCK_LOGIN ),
+			'block_checkout_forms_enabled' => (bool) get_option( Option::POW_BLOCK_CHECKOUT_FORMS ),
+			'block_registration_enabled'   => (bool) get_option( Option::POW_BLOCK_REGISTRATION_FORMS ),
 			'flag_spam_enabled'            => (bool) get_option( Option::POW_FLAG_SPAM ),
 			'flag_save_enabled'            => (bool) get_option( Option::POW_FLAG_SAVE ),
 			'save_spam_enabled'            => (bool) get_option( Option::POW_SAVE_SPAM ),

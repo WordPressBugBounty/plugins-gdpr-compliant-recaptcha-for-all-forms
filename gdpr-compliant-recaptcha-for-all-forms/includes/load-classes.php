@@ -29,8 +29,11 @@ require_once __DIR__ . '/class-option.php';
 require_once __DIR__ . '/class-proof-of-work.php';
 // Das Wartebudget des Zeilen-Polls (Stamp::poll_for_row()) — rein, s. handbuch/pow.md.
 require_once __DIR__ . '/class-poll-budget.php';
+// Die Antwort auf eine geblockte Einsendung (Status 422, Rumpf) — s. handbuch/detection.md.
+require_once __DIR__ . '/class-block-response.php';
 // Die ausgelagerte Blocklisten-Haelfte von Echo_Values (Welle 4, s.u.).
 require_once __DIR__ . '/trait-blocklist-values.php';
+require_once __DIR__ . '/trait-echo-normalizers.php';
 require_once __DIR__ . '/class-echo-values.php';
 require_once __DIR__ . '/class-echo-store.php';
 // Die zwei ausgelagerten Haelften von Message_Page (Welle 3, PLAN-DATEIGROESSE.md).
@@ -61,6 +64,10 @@ require_once __DIR__ . '/class-credential-suggestion-ledger.php';
 require_once __DIR__ . '/class-credential-learning.php';
 require_once __DIR__ . '/class-credential-cleanup.php';
 require_once __DIR__ . '/class-blocked-values-migration.php';
+// Store-as-typed fuer TEXT-Optionen samt einmaliger Entity-Reparatur (RCM_Main::activate()).
+require_once __DIR__ . '/class-text-option-value.php';
+// Einmaliges Entfernen der frueher geseedeten WooCommerce-Warenkorbzeilen (RCM_Main::activate()).
+require_once __DIR__ . '/class-cart-seed-removal.php';
 require_once __DIR__ . '/class-pattern-matcher.php';
 // Die JSON-Regelzeilen der Action-Liste (2026-08-28). Delegiert jeden Feldvergleich an
 // Pattern_Matcher, steht deshalb dahinter.
@@ -69,11 +76,17 @@ require_once __DIR__ . '/class-action-rules.php';
 require_once __DIR__ . '/trait-overbroad-blame.php';
 require_once __DIR__ . '/trait-overbroad-save-warning.php';
 require_once __DIR__ . '/class-overbroad-pattern-guard.php';
+// Die Risikoklasse (PLAN-RISIKOKLASSE.md): Katalog, Klassifikation, Schalter — s. handbuch/detection.md.
+require_once __DIR__ . '/class-risk-catalog.php';
+require_once __DIR__ . '/class-risk-signatures.php';
+require_once __DIR__ . '/class-risk-enforcement.php';
 // Die zwei ausgelagerten Haelften von Stamp (PLAN-DATEIGROESSE.md) — Traits vor der Klasse.
 require_once __DIR__ . '/class-field-envelopes.php';
 require_once __DIR__ . '/trait-stamp-capture.php';
+require_once __DIR__ . '/trait-stamp-fail2ban.php';
 require_once __DIR__ . '/trait-stamp-persistence.php';
 require_once __DIR__ . '/trait-stamp-triage.php';
+require_once __DIR__ . '/trait-stamp-risk.php';
 require_once __DIR__ . '/class-stamp.php';
 // Support-Report (Diagnostics-Reiter): liest Option/ProofOfWork/Stamp/Echo_Store,
 // muss also nach allen vieren stehen.
@@ -86,7 +99,11 @@ require_once __DIR__ . '/trait-settings-default-actions.php';
 // Seed-Ausweitung), weil trait-settings-default-actions.php keine weitere Welle mehr
 // hielt. Muss VOR class-settings-menu.php stehen wie jeder Trait.
 require_once __DIR__ . '/trait-settings-default-actions-wave2.php';
+// Welle 4 (2026-09-24) traegt eine dritte Action- und eine zweite Musterdatei — beide
+// abgespalten, weil ihre Vorgaenger am 600-Zeilen-Deckel standen.
+require_once __DIR__ . '/trait-settings-default-actions-wave3.php';
 require_once __DIR__ . '/trait-settings-default-patterns.php';
+require_once __DIR__ . '/trait-settings-default-patterns-wave2.php';
 require_once __DIR__ . '/trait-settings-default-routes.php';
 require_once __DIR__ . '/trait-settings-options.php';
 require_once __DIR__ . '/trait-settings-options-storage.php';
@@ -106,6 +123,7 @@ require_once __DIR__ . '/trait-ability-actions.php';
 require_once __DIR__ . '/class-abilities.php';
 // Der Deaktivierungs-Dialog auf plugins.php. Braucht nur RCM_Main::VERSION, steht
 // deshalb ohne Reihenfolge-Zwang hier.
+require_once __DIR__ . '/class-deactivation-diagnostics.php';
 require_once __DIR__ . '/class-deactivation-feedback.php';
 require_once __DIR__ . '/class-dashboard-widget.php';
 // get_patterns()/save_pattern_callback() (Dateigroessen-Schnitt 2026-08-28), muss vor

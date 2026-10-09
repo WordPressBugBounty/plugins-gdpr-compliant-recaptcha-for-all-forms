@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.1
-Stable tag: 6.1.0
+Stable tag: 6.2.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -76,11 +76,15 @@ And they all share one structural limit: they protect the forms they ship an int
 
 **WordPress:** Login, Password Reset, Comments
 
-**WooCommerce:** Cart, Checkout, Login, Password Reset, Product Reviews
+**WooCommerce:** Checkout, Login, Password Reset, Product Reviews (the shopping cart is deliberately not checked)
 
-**Form and page builders:** Contact Form 7, WPForms, Elementor Pro Forms, Ninja Forms, Fluent Forms, Forminator, Gravity Forms, Formidable Forms, Everest Forms, WS Form, SureForms, MetForm, JetFormBuilder, Otter Blocks, Spectra, Kadence Blocks, Essential Blocks, Divi Forms, MW WP Form, Jetpack Forms, Mailchimp for WordPress, MailPoet, WP User Frontend, wpDiscuz, bbPress (topics & replies), Thrive Architect, Thrive Leads, Thrive Apprentice, Thrive Quiz Builder, Thrive Comments, UserFeedback, Popup Maker (subscription form), YITH WooCommerce Wishlist, Newsletter (subscription forms), CoBlocks, Popup Builder
+**Form and page builders:** Contact Form 7, WPForms, Elementor Pro Forms, Ninja Forms, Fluent Forms, Forminator, Gravity Forms, Formidable Forms, Everest Forms, WS Form, SureForms, MetForm, JetFormBuilder, Otter Blocks, Spectra, Kadence Blocks, Essential Blocks, Divi Forms, MW WP Form, Jetpack Forms, Mailchimp for WordPress, MailPoet, WP User Frontend, wpDiscuz, bbPress (topics & replies), Thrive Architect, Thrive Leads, Thrive Apprentice, Thrive Quiz Builder, Thrive Comments, UserFeedback, Popup Maker (subscription form), YITH WooCommerce Wishlist, Newsletter (subscription forms), CoBlocks, Popup Builder, Hustle, MailerLite, Email Subscribers, Quiz and Survey Master, WP-Polls, Form Maker, Gutena Forms, Happyforms, Brevo, Mailchimp List Subscribe, Calculated Fields Form, Crowdsignal Forms (NPS & feedback), Pirate Forms, Hostinger Reach, FormLayer, My Sticky Elements, Cool FormKit, Visual Form Builder, Royal Elementor Addons (forms), Happy Addons (Mailchimp form), Chaty (contact form), Jeg Kit (Mailchimp form), Element Pack Lite (contact form), Depicter (lead forms), Hello Plus (forms), PopupKit (subscription form)
 
-**Added in under a minute, without code** — switch on direct analysis mode, submit the form once, click save: registration forms (WordPress and WooCommerce), Ultimate Member, BuddyPress, BuddyForms, MemberPress, Paid Memberships Pro, WP-Members, Easy Digital Downloads, CheckoutWC & Flux Checkout, Quform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, SiteOrigin Page Builder, Calculated Fields Form, weForms, Responsive Contact Form Builder, Smart Forms, Kali Forms, Happyforms, ApplyOnline, FormCraft, CRM Perks Forms, Tripetto, Easy Form Builder, SimpleForm — and any hand-coded or custom form.
+**Reviews and testimonials:** Customer Reviews for WooCommerce, Strong Testimonials, Site Reviews, WP Ultimate Review
+
+**Checkout and registration forms (recognised and recorded; blocking them is a separate switch, off by default):** BuddyPress (registration), WP-Members (registration), ProfilePress (registration & checkout), Easy Digital Downloads (checkout), CartFlows (checkout login), Amelia (booking), Bookly (booking)
+
+**Added in under a minute, without code** — switch on direct analysis mode, submit the form once, click save: registration forms (WordPress and WooCommerce), Ultimate Member, BuddyForms, MemberPress, Paid Memberships Pro, CheckoutWC & Flux Checkout, Quform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, SiteOrigin Page Builder, Calculated Fields Form, weForms, Responsive Contact Form Builder, Smart Forms, Kali Forms, Happyforms, ApplyOnline, FormCraft, CRM Perks Forms, Tripetto, Easy Form Builder, SimpleForm — and any hand-coded or custom form.
 
 One honest limit: a form that is hosted elsewhere and only embedded on your page (Typeform, Jotform, Zoho Forms, HubSpot, OptinMonster and the like) sends its data straight to that service. The submission never reaches WordPress, so no WordPress plugin — this one included — can check it.
 
@@ -98,7 +102,7 @@ One honest limit: a form that is hosted elsewhere and only embedded on your page
 Yes. For the kind of spam that plagues almost every site — automated, mass-sent — the typical experience after activation is that it simply stops: every message now costs the sender real computing power, which breaks the economics of sending thousands of them. That result has held up across years of production use. And the protection is actively maintained: when a new generation of protocol-aware bots learned to reuse a solved challenge across many submissions, version 5.0 closed that route with single-use, signed tokens. For the rare rest — targeted spam written by humans — the flag-and-inbox workflow keeps you in control instead of promising magic.
 
 = Will my visitors notice anything? =
-No. There is nothing to see, click or solve. The proof-of-work runs in the background while the visitor fills in the form and is typically finished in milliseconds — long before they hit *Send*.
+No. There is nothing to see, click or solve. The proof-of-work starts in the background as soon as the page has loaded and is typically finished within a second or two — long before they hit *Send*.
 
 = Do I need an account or API keys? =
 No. Unlike reCAPTCHA, hCaptcha or Turnstile the spam protection involves no external service at all — no keys, no registration, no third-party scripts, no rate limits.
@@ -116,7 +120,7 @@ All public forms — including hand-coded and custom ones. The plugin recognizes
 Everything the spam protection touches stays on your server: no cookies, no sessions, no tracking, no external requests. IP addresses are only stored as SHA-256 hashes, and password fields are never stored with saved messages. That means no consent banner is needed for the spam protection — friendly to GDPR (DSGVO, RGPD) and similar privacy laws. The one thing that can leave your server is a message you type yourself when deactivating the plugin — see the next question.
 
 = Does the plugin send anything to an external service? =
-The spam protection: never. There is exactly one exception, and it only happens if you make it happen. When you deactivate the plugin, a box asks what went wrong. If you type something and press *Send and deactivate*, that text is sent to the plugin author's server at programmiere.de and kept for 90 days. The plugin's name and version number travel with it, so a message can be told apart from one about a different plugin. Nothing else is stored with it — no IP address, no address of your site, no referring page, no browser details, and nothing from your forms. Press *Deactivate without sending*, or leave the box empty, and nothing at all is transmitted. Full details: https://programmiere.de/GDPRCompliantRecaptcha/
+The spam protection: never. There is exactly one exception, and it only happens if you make it happen. When you deactivate the plugin, a box asks what went wrong. If you type something and press *Send and deactivate*, that text is sent to the plugin author's server at programmiere.de and kept for 90 days. The plugin's name and version number travel with it. Nothing else is stored with it — no IP address, no address of your site, no referring page, no browser details, and nothing from your forms. Press *Deactivate without sending*, or leave the box empty, and nothing at all is transmitted. Full details: https://programmiere.de/GDPRCompliantRecaptcha/
 
 = Does it protect WooCommerce? =
 Yes: checkout, login, registration, password reset, comments and product reviews are covered out of the box.
@@ -163,6 +167,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.2.0 =
+Shoppers are no longer blocked: the WooCommerce cart is not checked any more, the invisible check starts when the page loads, and the server waits up to 5 seconds for slow devices. Also fixes a fatal error on uninstall and settings lines with => or &. Many more form plugins detected.
 = 6.1.0 =
 Fixes the deactivation feedback box: messages never reached anyone, and it now says where a message goes. Adds out-of-the-box detection for many more form plugins. Note: plain GET requests are no longer checked, so ?add-to-cart= links no longer reach the inbox; the ajax cart button now does.
 = 6.0.0 =
@@ -198,6 +204,36 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.2.0 =
+* Fixed: The repeat-sender lock no longer remembers numbers, so order, product, event or phone numbers lock out no one.
+* Changed: The server now waits up to 5 seconds for a slow device to finish its check before rejecting a submission.
+* Changed: The invisible check now starts once the page has loaded, so visitors who submit quickly are no longer rejected.
+* Fixed: One rejected cart request could block other shoppers of the same product for 36 hours.
+* Fixed: The Add to Cart button could be rejected as spam; WooCommerce cart requests are no longer checked.
+* Fixed: Saving the settings broke rule lines with => or & (they were stored HTML-encoded); such lines are repaired on update.
+* Fixed: Deleting the plugin failed with a fatal error and left its tables and settings behind.
+* Fixed: Sites that already monitored a checkout or registration form keep blocking spam on it after this update.
+* Added: Out-of-the-box detection for Royal Elementor Addons, Happy Addons, Chaty, Jeg Kit and Element Pack Lite.
+* Added: Out-of-the-box detection for Depicter, Hello Plus, PopupKit and Strong Testimonials.
+* Added: Out-of-the-box detection for Customer Reviews for WooCommerce, Site Reviews and WP Ultimate Review.
+* Added: Registration forms of BuddyPress, WP-Members and ProfilePress are recognised.
+* Added: Checkouts and bookings of EDD, ProfilePress, CartFlows, Amelia and Bookly are recognised.
+* Security: Password fields of Easy Digital Downloads, GiveWP and ProfilePress are no longer stored.
+* Added: Checkout and registration forms are recognised and recorded; blocking them is a separate switch, off by default.
+* Added: The WooCommerce block checkout (Store API) is recognised and recorded.
+* Security: Card numbers, CVCs and IBANs are no longer stored in the spam folder.
+* Fixed: REST submissions are judged by the method WordPress runs them as, so a header can no longer disguise one.
+* Fixed: A blocked submission now answers HTTP 422, not 200, so forms no longer show success for a refused entry.
+* Security: Card numbers are no longer hashed into the repeat-sender store as if they were phone numbers.
+* Changed: The "Works with" list in the readme is grouped by kind instead of one long line.
+* Added: Out-of-the-box detection for Hostinger Reach, FormLayer, My Sticky Elements and Visual Form Builder.
+* Added: Out-of-the-box detection for Cool FormKit, including Elementor's newer atomic form action.
+* Added: The deactivation box now offers five reasons to click, and points to the support forum.
+* Added: The deactivation box can attach technical details (versions, plugins) if you tick the box.
+* Added: Out-of-the-box detection for Hustle, Brevo, MailerLite, Mailchimp List Subscribe and Email Subscribers.
+* Added: Out-of-the-box detection for Quiz and Survey Master, WP-Polls, Form Maker, Gutena Forms and Happyforms.
+* Added: Out-of-the-box detection for Calculated Fields Form, Pirate Forms and Crowdsignal Forms (NPS and feedback).
+* Changed: The deactivation box no longer explains the plugin name and version with a second plugin that no longer exists.
 = 6.1.0 =
 * Changed: The deactivation box and the readme now also name what travels with a message: the plugin name and version.
 * Note: Tested up to WordPress 7.1.

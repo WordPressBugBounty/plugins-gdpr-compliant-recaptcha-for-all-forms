@@ -223,6 +223,122 @@ trait Settings_Default_Routes {
 			self::display_admin_notice( __( 'UserFeedback detected – added REST route: userfeedback/v1/surveys/*/responses', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
+		// CROWDSIGNAL FORMS (crowdsignal-forms, 200.000) — BEWUSSTER HALBSCHUTZ,
+		// Owner-Entscheid vom 2026-09-24.
+		//
+		// Das Produkt hat vier Formulartypen und zerfaellt sauber in zwei Haelften. Poll
+		// und Applause senden direkt an `polls.polldaddy.com` (wortwoertlich in
+		// `build/vote.js`, `build/poll.js`, `build/applause.js`) — sie erreichen diese
+		// Installation nie und sind konstruktiv unschuetzbar, wie das bereits verworfene
+		// Schwesterprodukt Crowdsignal Dashboard. NPS und Feedback dagegen laufen ueber
+		// echte REST-Routen dieser Installation, die serverseitig weiterproxyen.
+		//
+		//   server: `includes/rest-api/controllers/class-nps-controller.php` und
+		//           `class-feedback-controller.php`, beide `WP_REST_Server::EDITABLE` mit
+		//           `permission_callback` konstant true — fuer anonyme Besucher offen.
+		//   client: `build/nps.js` / `build/feedback.js` per apiFetch POST, Body JSON.
+		//
+		// ZWEI EINZELNE ROUTEN, NICHT `crowdsignal-forms/v1/*`: der Namensraum traegt auch
+		// die GET-Endpunkte (Poll-Liste, Account-Info), die bei jedem Seitenaufruf mit
+		// einem Block feuern. Eine Wildcard ueber den ganzen Namensraum wuerde sie
+		// mitfangen.
+		//
+		// CHECKED AGAINST THE PRODUCT'S OWN BACKEND: `editor.js` ruft nur
+		// `crowdsignal-forms/v1/polls/` und `…/account/info` — nie die `/response`-Pfade.
+		// Unter diesen Pfaden ist ausschliesslich EDITABLE registriert, kein GET.
+		if ( array_key_exists( 'crowdsignal-forms/crowdsignal-forms.php', $installed_plugins ) ) {
+			$routes[] = 'crowdsignal-forms/v1/nps/*/response';
+			$routes[] = 'crowdsignal-forms/v1/feedback/*/response';
+			self::display_admin_notice( __( 'Crowdsignal Forms detected – added REST routes for NPS and feedback (poll and applause submit to polldaddy.com and cannot be protected)', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// PIRATE FORMS, Contact Form & SMTP by Themeisle (pirate-forms, 30.000).
+		//   server: kein `wp_ajax_nopriv_*` in der ganzen Zip — alle vier `wp_ajax_*`-Hooks
+		//           sind Backend-only. Der Besucherweg ist die REST-Route
+		//           `pirate-forms/v1/send_email/`, registriert OHNE `permission_callback`
+		//           (`public/class-pirateforms-public.php:1598-1605`), was WordPress als
+		//           offen behandelt.
+		//   client: `public/js/scripts.js` sendet per FormData an diese Route.
+		//
+		// DER ZWEITE WEG BLEIBT UNGEDECKT, und das gehoert benannt: ohne den
+		// Ajax-Knopf postet das Formular klassisch auf die eigene Seite und wird von
+		// `template_redirect` verarbeitet. Ein Muster dafuer waere das Pflichtfeld
+		// `honeypot` — ein Name, den unzaehlige fremde Formulare ebenfalls tragen. Diese
+		// Zeile waere zu breit, um sie zu verantworten, und ist deshalb bewusst NICHT
+		// geseedet.
+		if ( array_key_exists( 'pirate-forms/pirate-forms.php', $installed_plugins ) ) {
+			$routes[] = 'pirate-forms/v1/send_email';
+			self::display_admin_notice( __( 'Pirate Forms detected – added REST route: pirate-forms/v1/send_email', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// HOSTINGER REACH (hostinger-reach, 1.000.000 Installationen) — Welle 5, und mit
+		// Abstand das groesste Produkt dieser Runde.
+		//   server: `register_rest_route( 'hostinger-reach/v1', 'contact', [ 'methods' =>
+		//           'POST', 'permission_callback' => '__return_true' ] )`,
+		//           src/Api/Routes/ReachRoutes.php:27-33. Echt oeffentlich.
+		//   client: der Subscription-Block rendert ein eigenes Formular und postet per
+		//           fetch() JSON gegen genau diese Route (`rest_url() .
+		//           'hostinger-reach/v1/contact'`).
+		//
+		// BEMERKENSWERT, WEIL ANDERS ALS ERWARTET: bei einem Hosting-eigenen Plugin lag die
+		// Vermutung nahe, dass es wie HubSpot bei fremdem Origin sendet und damit
+		// ausscheidet. Es sendet an die eigene Installation — geprueft, nicht vermutet.
+		//
+		// CHECKED AGAINST THE PRODUCT'S OWN BACKEND: Route und Handler kommen in der ganzen
+		// Zip je einmal vor, kein Admin-Bundle ruft sie.
+		if ( array_key_exists( 'hostinger-reach/hostinger-reach.php', $installed_plugins ) ) {
+			$routes[] = 'hostinger-reach/v1/contact';
+			self::display_admin_notice( __( 'Hostinger Reach detected – added REST route: hostinger-reach/v1/contact', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** Welle 6 (2026-09-25), ERHEBUNG-BUILDER-2.md ***
+		// POPUPKIT (popup-builder-block 2.3.6, 70.000): POST pbb/v1/subscribers
+		// (includes/Routes/Subscribers.php:17-20, wp_rest-Nonce :94-96, anonym erfuellbar),
+		// Client apiFetch JSON (build/blocks/form/frontend.js). Das Dashboard nutzt dieselbe
+		// Route per GET/DELETE — DELETE kommt ueber apiFetch als POST mit Override-Header
+		// und wird seit RestRoute::effective_method() nicht bewertet.
+		if ( array_key_exists( 'popup-builder-block/popup-builder-block.php', $installed_plugins ) ) {
+			$routes[] = 'pbb/v1/subscribers';
+			self::display_admin_notice( __( 'PopupKit detected – added REST route: pbb/v1/subscribers', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+		// SITE REVIEWS 8.3.2: der Standardweg ist REST (RestSubmissionController.php:37-49,
+		// assets/scripts/site-reviews.js); Ajax und klassischer POST s. die anderen Getter.
+		if ( array_key_exists( 'site-reviews/site-reviews.php', $installed_plugins ) ) {
+			$routes[] = 'site-reviews/v1/submissions';
+			self::display_admin_notice( __( 'Site Reviews detected – added REST route: site-reviews/v1/submissions', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** WooCommerce — the Store API cart: DELIBERATELY NOT SEEDED (measured) ***
+		// `wc/store/v1/cart/add-item` was seeded for one day and removed after the live
+		// case (tests/integration/cases/woocommerce-store-api.mjs, WooCommerce 11.1.2 in a
+		// real browser): NO shipped frontend POSTs it directly. The add-to-cart FORM block
+		// renders the classic PHP form (`add-to-cart` field — the pattern line covers it);
+		// the product button and the cart store batch it into `wc/store/v1/batch`, which
+		// must not be seeded (it carries the automatic cart updates). A line that matches
+		// no real visitor request looks like protection and is none. Never `cart/items`
+		// (the PayPal button's payment flow), never `wc/store/v1/*`. The block CHECKOUT is
+		// in the risk class (Risk_Catalog).
+
+		// *** Risk class (checkout/registration): lines live ONCE, in Risk_Catalog ***
+		$routes = array_merge( $routes, self::risk_lines( Risk_Signatures::KIND_ROUTE, $installed_plugins ) );
+
 		return implode( "\n", $routes );
+	}
+
+	/**
+	 * The risk-class lines of one kind for the installed products, with the usual
+	 * detection notice. Shared by all three getters so the catalog string exists once
+	 * (Risk_Signatures). Recorded, not enforced, until the operator arms the class.
+	 *
+	 * @param string               $kind              Risk_Signatures::KIND_*.
+	 * @param array<string, mixed> $installed_plugins get_plugins().
+	 * @return string[]
+	 */
+	private static function risk_lines( string $kind, array $installed_plugins ): array {
+		foreach ( Risk_Signatures::products( $kind, $installed_plugins ) as $product => $lines ) {
+			/* translators: 1: product name, 2: the added lines */
+			self::display_admin_notice( sprintf( __( '%1$s detected – added (recorded, not blocked until you enable it): %2$s', 'gdpr-compliant-recaptcha-for-all-forms' ), $product, implode( ', ', $lines ) ) );
+		}
+		return Risk_Signatures::lines( $kind, $installed_plugins );
 	}
 }

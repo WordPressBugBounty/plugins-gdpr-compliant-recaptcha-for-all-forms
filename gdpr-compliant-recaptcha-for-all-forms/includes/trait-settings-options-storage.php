@@ -199,10 +199,10 @@ trait Settings_Options_Storage {
 				__( 'Save WooCommerce shopping carts', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
-				__( 'If you get too many messages from shopping carts, you can disable this option.', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				__( 'Shopping carts are not checked out of the box: a false block there costs a sale. This option only matters if you added a cart pattern yourself — then it decides whether that cart activity is saved as messages.', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				__( 'Saving Messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				'🛒',
-				__( 'Saves WooCommerce shopping cart activity as messages in the inbox.', 'gdpr-compliant-recaptcha-for-all-forms' )
+				__( 'Saves cart activity from a cart pattern you added yourself as messages.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 			Option::POW_CRON_DELETE_INBOX          => new Option(
 				__( 'Automatic Message Deletion Interval', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -441,7 +441,7 @@ trait Settings_Options_Storage {
 				Option::BOOL,
 				true,
 				__(
-					'<strong>What it does:</strong> Whenever a submission is classified as spam, the echo lock briefly remembers its core values (sender email, linked domain, phone number, and the hash of a long message body) as one-way hashes with a short lifetime. A later submission carrying the same value — on <em>any</em> form and from <em>any</em> IP — is then caught as well, so a returning spammer is stopped even after switching forms or rotating addresses.
+					'<strong>What it does:</strong> Whenever a submission is classified as spam, the echo lock briefly remembers its core values (sender email, linked domain, and the hash of a long message body — never a bare number such as a phone, order or product number) as one-way hashes with a short lifetime. A later submission carrying the same value — on <em>any</em> form and from <em>any</em> IP — is then caught as well, so a returning spammer is stopped even after switching forms or rotating addresses.
 					<br>
 					<br><strong>Just a bonus layer:</strong> this only <em>adds</em> to the proof-of-work check; it never replaces it. Values are stored as hashes only (never in plain text) and expire on their own after about a day and a half.
 					<br>

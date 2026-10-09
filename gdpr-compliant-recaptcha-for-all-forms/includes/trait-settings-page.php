@@ -66,6 +66,8 @@ trait Settings_Page {
 		return array(
 			Option::POW_BLOCK                      => $warn,
 			Option::POW_BLOCK_LOGIN                => $warn,
+			Option::POW_BLOCK_CHECKOUT_FORMS       => $warn,
+			Option::POW_BLOCK_REGISTRATION_FORMS   => $warn,
 			Option::POW_ABILITIES_WRITE            => array(
 				'class' => 'gdpr-badge gdpr-badge-warn',
 				'text'  => __( 'Agent can change monitoring', 'gdpr-compliant-recaptcha-for-all-forms' ),

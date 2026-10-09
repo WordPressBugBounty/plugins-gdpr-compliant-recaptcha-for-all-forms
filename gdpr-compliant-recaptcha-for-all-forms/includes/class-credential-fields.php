@@ -32,7 +32,7 @@
  * path never gains a new abort branch.
  *
  * The `hashPWFields` marker stays as an ADDITIONAL signal: the client
- * (`scripts/recaptcha-gdpr-pow.js`, `addFirstStamp()`) collects each
+ * (`scripts/recaptcha-gdpr-pow.js`, `harvestPasswordFields()`) collects each
  * `input[type=password]` name through `fieldNameToNestedObject()` and posts
  * `btoa(JSON.stringify([ <nested object per password field> ]))`, i.e. a list of
  * single-key chains whose key sequence IS the field path (`a[b][c]` →
@@ -65,7 +65,13 @@ final class Credential_Fields {
 
 	/**
 	 * Exact key names that are credentials (twin of the JS regex
-	 * `/^(pwd|passwd|pass|pass1|pass2|user_pass)$/`).
+	 * `/^(pwd|passwd|pass|pass1|pass2|user_pass|…)$/`, the same list).
+	 *
+	 * The product names at the end (2026-09-25, PLAN-RISIKOKLASSE.md "Zahlungsdaten"
+	 * point 3) end in `_pass` and carry no `password` substring, so the heuristic missed
+	 * them: EDD's checkout/registration (`edd_user_pass`, `…2`, `…_confirm`), GiveWP's
+	 * donation form (`give_user_pass`, `…_confirm`), ProfilePress' member form
+	 * (`ppmb_user_pass`) — read from each product's source.
 	 *
 	 * Deliberately NOT included: `pass1-text` (WP < 5.3 wp-admin profile only —
 	 * that path bails out via is_admin() long before persistence), so the twin
@@ -73,7 +79,7 @@ final class Credential_Fields {
 	 *
 	 * @var string[]
 	 */
-	private const EXACT_KEYS = array( 'pwd', 'passwd', 'pass', 'pass1', 'pass2', 'user_pass' );
+	private const EXACT_KEYS = array( 'pwd', 'passwd', 'pass', 'pass1', 'pass2', 'user_pass', 'edd_user_pass', 'edd_user_pass2', 'edd_user_pass_confirm', 'give_user_pass', 'give_user_pass_confirm', 'ppmb_user_pass' );
 
 	/**
 	 * Substrings that make a key a credential (twin of the JS
@@ -82,6 +88,21 @@ final class Credential_Fields {
 	 * @var string[]
 	 */
 	private const SUBSTRINGS = array( 'password', 'passwort' );
+
+	/**
+	 * Payment field names — the SECOND name family, redacted exactly like a password
+	 * (PLAN-RISIKOKLASSE.md, "Zahlungsdaten" point 2; twin of the JS `isPaymentKey()`
+	 * in scripts/recaptcha-gdpr-analysis.js). Matched after lower-casing and turning
+	 * `-` into `_`, either exactly or as the tail after a gateway prefix: WooCommerce's
+	 * classic card form names its inputs `<gateway>-card-number` / `-card-expiry` /
+	 * `-card-cvc` (WC_Payment_Gateway_CC::form()), EDD and GiveWP `card_number` /
+	 * `card_cvc` / `card_exp_month` / `card_exp_year`.
+	 *
+	 * Not here: the cardholder name (`card_name`) — personal data, not a payment secret.
+	 *
+	 * @var string[]
+	 */
+	private const PAYMENT_NAMES = array( 'card_number', 'cardnumber', 'cc_number', 'card_cvc', 'card_cvv', 'cvc', 'cvv', 'cvv2', 'card_expiry', 'card_exp_month', 'card_exp_year', 'exp_month', 'exp_year', 'iban' );
 
 	/** Separator used in persisted `rgd_attribute` paths (Stamp::generate_paths()). */
 	private const PATH_SEPARATOR = '->';
@@ -120,6 +141,69 @@ final class Credential_Fields {
 	}
 
 	/**
+	 * Does this field name denote a payment secret (card number, CVC, expiry, IBAN)?
+	 * Exact name, or the tail after a gateway prefix (`stripe_card_number`,
+	 * `wc-gateway-card-cvc`). Never throws; non-scalar keys return false.
+	 *
+	 * @param mixed $key Candidate field-name segment.
+	 * @return bool
+	 */
+	public static function is_payment_key( $key ): bool {
+		if ( ! is_scalar( $key ) ) {
+			return false;
+		}
+		$name = str_replace( '-', '_', strtolower( (string) $key ) );
+		foreach ( self::PAYMENT_NAMES as $payment ) {
+			if ( $name === $payment || self::ends_with( $name, '_' . $payment ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Is this value a payment card number — 13 to 19 digits (spaces and dashes allowed
+	 * as separators) with a valid Luhn checksum? THE Luhn check of the plugin; the echo
+	 * normalizer asks here too, so there is one definition.
+	 *
+	 * @param mixed $value Candidate value.
+	 * @return bool
+	 */
+	public static function is_card_number( $value ): bool {
+		if ( ! is_string( $value ) && ! is_int( $value ) ) {
+			return false;
+		}
+		$digits = str_replace( array( ' ', '-' ), '', (string) $value );
+		$len    = strlen( $digits );
+		if ( $len < 13 || $len > 19 || ! ctype_digit( $digits ) ) {
+			return false;
+		}
+		$sum    = 0;
+		$double = false;
+		for ( $i = $len - 1; $i >= 0; $i-- ) {
+			$d = (int) $digits[ $i ];
+			if ( $double ) {
+				$d *= 2;
+				if ( $d > 9 ) {
+					$d -= 9;
+				}
+			}
+			$sum   += $d;
+			$double = ! $double;
+		}
+		return 0 === $sum % 10;
+	}
+
+	/**
+	 * @param string $haystack Subject.
+	 * @param string $needle   Suffix.
+	 * @return bool
+	 */
+	private static function ends_with( string $haystack, string $needle ): bool {
+		return strlen( $haystack ) > strlen( $needle ) && substr( $haystack, -strlen( $needle ) ) === $needle;
+	}
+
+	/**
 	 * Does a persisted `rgd_attribute` path point at a credential?
 	 *
 	 * The stored attribute is the `->`-joined key chain of a nested field
@@ -132,7 +216,9 @@ final class Credential_Fields {
 	 */
 	public static function is_password_path( string $path ): bool {
 		foreach ( explode( self::PATH_SEPARATOR, $path ) as $segment ) {
-			if ( self::is_password_key( $segment ) ) {
+			// Payment secrets count too (2026-09-25): every reader of this — the agent
+			// filter, the retroactive cleanup, the message view — must hide them alike.
+			if ( self::is_password_key( $segment ) || self::is_payment_key( $segment ) ) {
 				return true;
 			}
 		}
@@ -165,9 +251,13 @@ final class Credential_Fields {
 	 * @param mixed $fields        The submission's field map.
 	 * @param array $marker_paths  Segment paths from marker_paths_from_raw().
 	 * @param array $learned_names Admin-confirmed credential field names.
+	 * @param bool  $card_values   Also redact any VALUE that is_card_number(), whatever
+	 *                             the field is called. Only for a risk-class submission
+	 *                             (checkout/registration): on a contact form it would
+	 *                             hit every Luhn-valid long phone number.
 	 * @return mixed Redacted copy (non-arrays returned unchanged).
 	 */
-	public static function redact( $fields, array $marker_paths = array(), array $learned_names = array() ) {
+	public static function redact( $fields, array $marker_paths = array(), array $learned_names = array(), bool $card_values = false ) {
 		if ( ! is_array( $fields ) ) {
 			return $fields;
 		}
@@ -194,7 +284,7 @@ final class Credential_Fields {
 			}
 		}
 
-		return self::redact_level( $fields, $marker_index, $learned_index, array(), 0 );
+		return self::redact_level( $fields, $marker_index, $learned_index, array(), 0, $card_values );
 	}
 
 	/**
@@ -208,7 +298,7 @@ final class Credential_Fields {
 	 * @return bool
 	 */
 	private static function is_credential_key( $key, array $learned_index ): bool {
-		if ( self::is_password_key( $key ) ) {
+		if ( self::is_password_key( $key ) || self::is_payment_key( $key ) ) {
 			return true;
 		}
 		if ( 0 === count( $learned_index ) || ! is_scalar( $key ) ) {
@@ -305,9 +395,10 @@ final class Credential_Fields {
 	 * @param array $learned_index Lookup set of lower-cased learned names.
 	 * @param array $path          Key segments walked so far.
 	 * @param int   $depth         Current nesting depth.
+	 * @param bool  $card_values   See redact().
 	 * @return array Redacted copy of this level.
 	 */
-	private static function redact_level( array $data, array $marker_index, array $learned_index, array $path, int $depth ): array {
+	private static function redact_level( array $data, array $marker_index, array $learned_index, array $path, int $depth, bool $card_values = false ): array {
 		$result = array();
 
 		foreach ( $data as $key => $value ) {
@@ -326,7 +417,7 @@ final class Credential_Fields {
 					$result[ $key ] = self::REDACTED_VALUE;
 					continue;
 				}
-				$result[ $key ] = self::redact_level( $value, $marker_index, $learned_index, $child_path, $depth + 1 );
+				$result[ $key ] = self::redact_level( $value, $marker_index, $learned_index, $child_path, $depth + 1, $card_values );
 				continue;
 			}
 
@@ -335,7 +426,7 @@ final class Credential_Fields {
 				continue;
 			}
 
-			$result[ $key ] = $value;
+			$result[ $key ] = ( $card_values && self::is_card_number( $value ) ) ? self::REDACTED_VALUE : $value;
 		}
 
 		return $result;

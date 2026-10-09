@@ -102,7 +102,7 @@ trait Settings_Options {
 			'</a>'
 		);
 		return array(
-			Option::POW_DIRECT_ANALYSIS_MODE => new Option(
+			Option::POW_DIRECT_ANALYSIS_MODE     => new Option(
 				__( 'Direct analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -125,7 +125,7 @@ trait Settings_Options {
 				'🕵️',
 				__( 'Adds an inline helper to your live forms so you can teach the spam check about them without leaving the page.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ANALYSIS_MODE        => new Option(
+			Option::POW_ANALYSIS_MODE            => new Option(
 				__( 'Analysis mode', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -153,7 +153,7 @@ trait Settings_Options {
 				'🔍',
 				__( 'Records every incoming POST submission so you can add unrecognized form types to the spam check.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_EXPLICIT_ACTION      => new Option(
+			Option::POW_EXPLICIT_ACTION          => new Option(
 				__( 'Apply on actions', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_ajax_actions(),
@@ -185,7 +185,7 @@ trait Settings_Options {
 				'⚙️✔️',
 				__( 'Names the specific AJAX/form actions that the spam check should apply to when running in Explicit mode.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_PARAMETER_PATTERN    => new Option(
+			Option::POW_PARAMETER_PATTERN        => new Option(
 				__( 'Apply on pattern', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_recognition_patterns(),
@@ -218,7 +218,7 @@ trait Settings_Options {
 				'🔍✔️',
 				__( 'Defines field/value patterns that identify a submission type so the spam check applies to it.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_REST_ROUTES          => new Option(
+			Option::POW_REST_ROUTES              => new Option(
 				__( 'Apply on REST routes', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				self::get_default_rest_routes(),
@@ -237,7 +237,7 @@ trait Settings_Options {
 				'🧭✔️',
 				__( 'Names the REST API routes that the spam check should apply to, for builders that submit over REST.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK_LOGIN          => new Option(
+			Option::POW_BLOCK_LOGIN              => new Option(
 				__( 'Apply for WordPress-Login', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -253,7 +253,7 @@ trait Settings_Options {
 				'🔒',
 				__( 'Applies the proof-of-work check to the WordPress login form in addition to your other forms.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCK                => new Option(
+			Option::POW_BLOCK                    => new Option(
 				__( 'Block spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				true,
@@ -262,7 +262,27 @@ trait Settings_Options {
 				'⛔', // Blocking
 				__( 'Blocks submissions classified as spam instead of letting them through.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_BLOCKED_VALUES       => new Option(
+			// The risk class (PLAN-RISIKOKLASSE.md): recognised from the start, rejected
+			// only once armed — with the evidence next to the switch.
+			Option::POW_BLOCK_CHECKOUT_FORMS     => new Option(
+				__( 'Block spam on checkout and donation forms', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				self::risk_switch_help( Risk_Signatures::CHECKOUT ),
+				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'🛒',
+				__( 'Rejects spam on recognised checkout and donation forms. Off by default: until then such submissions are only recorded.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_BLOCK_REGISTRATION_FORMS => new Option(
+				__( 'Block spam on registration forms', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				Option::BOOL,
+				false,
+				self::risk_switch_help( Risk_Signatures::REGISTRATION ),
+				__( 'Spam Processing', 'gdpr-compliant-recaptcha-for-all-forms' ),
+				'👤',
+				__( 'Rejects spam on recognised account registration forms. Off by default: until then such submissions are only recorded.', 'gdpr-compliant-recaptcha-for-all-forms' )
+			),
+			Option::POW_BLOCKED_VALUES           => new Option(
 				__( 'Blocked values', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -303,7 +323,7 @@ trait Settings_Options {
 				'🚫',
 				__( 'Values that mark a submission as spam outright: sender addresses, sender domains (@domain), link domains, or exact field text — one per line, optionally bound to one field or one form.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_GIBBERISH_FIELDS     => new Option(
+			Option::POW_GIBBERISH_FIELDS         => new Option(
 				__( 'Gibberish detection', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -329,7 +349,7 @@ trait Settings_Options {
 				'🔤',
 				__( 'Checks the fields you list for random-looking text. Empty means the check is off — set it up per field from a stored message.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SPAM            => new Option(
+			Option::POW_FLAG_SPAM                => new Option(
 				__( 'Flag spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -338,7 +358,7 @@ trait Settings_Options {
 				'🚩',
 				__( 'Lets spam through but marks it so your mail client can filter it into a spam folder.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_SUFFIXES        => new Option(
+			Option::POW_FLAG_SUFFIXES            => new Option(
 				__( 'Fieldname:prefix to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -347,7 +367,7 @@ trait Settings_Options {
 				'_*',
 				__( 'Adds a text prefix such as [spam] to a chosen field when a message is flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FLAG_TAGS            => new Option(
+			Option::POW_FLAG_TAGS                => new Option(
 				__( 'New "POST" field to flag spam', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -373,7 +393,7 @@ trait Settings_Options {
 				'+',
 				__( 'Adds a brand-new field with a fixed value to messages that are flagged as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_ERROR_MESSAGE        => new Option(
+			Option::POW_ERROR_MESSAGE            => new Option(
 				__( 'Error message', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::STRING,
 				__( 'Your message has been classified as spam! If you are a human, we are very sorry. Please give us notice via email.', 'gdpr-compliant-recaptcha-for-all-forms' ),
@@ -389,7 +409,7 @@ trait Settings_Options {
 				'❌',
 				__( 'Sets the message shown to visitors on the frontend when their submission is blocked as spam.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_SIMULATE_SPAM        => new Option(
+			Option::POW_SIMULATE_SPAM            => new Option(
 				__( 'Simulate spam messages', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::BOOL,
 				false,
@@ -401,7 +421,7 @@ trait Settings_Options {
 				'📈',
 				__( 'Treats every incoming submission as spam so you can safely test blocking and flagging before going live.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
-			Option::POW_FAIL_2_BAN_PATH      => new Option(
+			Option::POW_FAIL_2_BAN_PATH          => new Option(
 				__( 'Path to save spam approaches to syslog', 'gdpr-compliant-recaptcha-for-all-forms' ),
 				Option::TEXT,
 				'',
@@ -429,5 +449,26 @@ trait Settings_Options {
 				__( 'Writes failed logins and spam attempts to log files that tools like Fail2Ban can monitor.', 'gdpr-compliant-recaptcha-for-all-forms' )
 			),
 		);
+	}
+
+	/**
+	 * Help text of a risk-class switch, with the evidence the operator decides on: how
+	 * many submissions of the last 30 days WOULD have been rejected (Risk_Enforcement).
+	 *
+	 * @param string $risk_class Risk_Signatures::CHECKOUT or ::REGISTRATION.
+	 * @return string
+	 */
+	private static function risk_switch_help( string $risk_class ): string {
+		$count = Risk_Enforcement::observed_count( $risk_class );
+		return sprintf(
+			/* translators: %d: number of submissions */
+			_n(
+				'<strong>%d submission</strong> of the last 30 days would have been rejected.',
+				'<strong>%d submissions</strong> of the last 30 days would have been rejected.',
+				$count,
+				'gdpr-compliant-recaptcha-for-all-forms'
+			),
+			$count
+		) . '<br><br>' . __( 'A false rejection here costs a purchase, a donation or an account, not a message — and a rejected order cannot be rescued from the spam folder. While this is off, such submissions are classified and, with <em>Save spam messages</em> on, stored and marked <em>Not blocked</em>, but they go through: no block, no echo lock, no fail2ban line. Look at those messages, then decide. Only forms this plugin recognises are affected; the classic WooCommerce checkout and the WordPress login keep their own settings.', 'gdpr-compliant-recaptcha-for-all-forms' );
 	}
 }

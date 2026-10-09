@@ -5,7 +5,7 @@
  * SCHNITTLINIE (Welle 4, PLAN-DATEIGROESSE.md): class-echo-values.php was one file of
  * 1026 lines. It is split along the seam its own head docblock already names:
  *   - class-echo-values.php      — the EXTRACTION half: what a submission contains
- *                                  (content-string walk, email/URL/phone/text
+ *                                  (content-string walk, email/URL/text
  *                                  normalisation, registrable domain, build_echo_set()).
  *   - trait-blocklist-values.php — THIS file: the BLOCKLIST half. Reading the option's
  *                                  lines (partition_blocklist_lines() and the two

@@ -18,7 +18,7 @@
  *   leading "@" ({"*":"@spam.tld"}) is instead a SENDER-DOMAIN blocklist entry and
  *   takes part only in that one comparison — see matches_wildcard_values().
  * - Auto-echo lock: build_echo_set() extracts the "core values" of a submission
- *   (sender email, payload domain, phone, long-text hash), returns them as SHA-256
+ *   (sender email, payload domain, long-text hash — no numbers), returns them as SHA-256
  *   hashes only (GDPR: never store the plaintext of a personally-identifiable
  *   value), and Echo_Store persists/looks them up with a TTL.
  * - Reading the blocklist option: partition_blocklist_lines() says what each line IS —
@@ -65,6 +65,10 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * Stateless value extraction / normalization for the value-based spam patterns.
  */
 final class Echo_Values {
+
+	// Die Wert-Normalisierer liegen seit 2026-09-24 in trait-echo-normalizers.php —
+	// Schnittlinie und Grund stehen dort im Kopf.
+	use Echo_Normalizers;
 
 	/**
 	 * The blocklist half of this class: reading the option's lines and matching them.
@@ -157,15 +161,12 @@ final class Echo_Values {
 	 */
 	const TEXT_HASH_MIN_LENGTH = 40;
 
-	/** Minimum digit count for a value to be treated as a phone number. */
-	const PHONE_MIN_DIGITS = 7;
-
 	/** Recursion depth cap for the field walk (defensive; forms rarely nest deep). */
 	const MAX_DEPTH = 6;
 
 	/**
 	 * SHA-256 of a value (lower-case hex, 64 chars). All echo values are stored and
-	 * compared ONLY as this hash (GDPR: no plaintext of an email/phone/text).
+	 * compared ONLY as this hash (GDPR: no plaintext of an email/domain/text).
 	 *
 	 * @param string $value Input.
 	 * @return string 64-char lower-case hex digest.
@@ -432,55 +433,6 @@ final class Echo_Values {
 		return $domain;
 	}
 
-	/**
-	 * Normalize a value to a bare phone digit-string, or null when it is not
-	 * phone-shaped. Value-based (not field-name-based) detection is deliberate: the
-	 * field name varies across form builders (the very problem this feature solves),
-	 * so a shape guard on the value is more robust. A leading "+" becomes a "00"
-	 * prefix; the value must carry at least PHONE_MIN_DIGITS digits so arbitrary
-	 * numbers (order totals, years) are not mistaken for phone numbers.
-	 *
-	 * @param string $value Value.
-	 * @return string|null Digit string, or null.
-	 */
-	public static function normalize_phone( $value ) {
-		$value = trim( (string) $value );
-		if ( '' === $value ) {
-			return null;
-		}
-		// Shape guard: only phone-plausible characters.
-		if ( 1 !== preg_match( '#^\+?[0-9 ()/.\-]{6,}$#', $value ) ) {
-			return null;
-		}
-		$has_plus = 0 === strpos( $value, '+' );
-		$digits   = (string) preg_replace( '/\D+/', '', $value );
-		if ( strlen( $digits ) < self::PHONE_MIN_DIGITS ) {
-			return null;
-		}
-		return $has_plus ? '00' . $digits : $digits;
-	}
-
-	/**
-	 * Normalize a text value (lower-case, strip everything but letters/digits) for
-	 * the exact-resend text hash, or null when it is shorter than
-	 * TEXT_HASH_MIN_LENGTH normalized characters. Deliberately exact, not fuzzy.
-	 *
-	 * @param string $value Value.
-	 * @return string|null Normalized text, or null.
-	 */
-	public static function normalize_text( $value ) {
-		$value = (string) $value;
-		if ( '' === $value || 1 !== preg_match( '//u', $value ) ) {
-			return null;
-		}
-		$lower      = function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
-		$normalized = (string) preg_replace( '/[^\p{L}\p{N}]+/u', '', $lower );
-		$length     = function_exists( 'mb_strlen' ) ? mb_strlen( $normalized, 'UTF-8' ) : strlen( $normalized );
-		if ( $length < self::TEXT_HASH_MIN_LENGTH ) {
-			return null;
-		}
-		return $normalized;
-	}
 
 	/**
 	 * Split a field map into the part that contributes a long-text hash and the part
@@ -512,9 +464,17 @@ final class Echo_Values {
 
 	/**
 	 * Build the set of echo hashes for a submission: the SHA-256 of every extracted
-	 * core value (sender email, payload domain/path-identity, phone, long-text). The
-	 * site's own registrable domain(s) are excluded from URL extraction. The result
-	 * contains ONLY 64-char hex hashes — never a plaintext value (GDPR).
+	 * core value (sender email, payload domain/path-identity, long-text). The site's
+	 * own registrable domain(s) are excluded from URL extraction. The result contains
+	 * ONLY 64-char hex hashes — never a plaintext value (GDPR).
+	 *
+	 * NO NUMBERS (2026-10, owner decision). Until then every value shaped like a phone
+	 * number (7+ digits) was hashed too. A number alone is no reliable spam marker, and
+	 * the lock acts across every form for 36 h: a hidden `event_id=2026101`, an EAN
+	 * product SKU, an order or customer number — or the site's own hotline, scraped by
+	 * a spammer — locked out every later sender who carried the same digits. Removed
+	 * from the automatic set entirely; what an administrator blocks by hand is not
+	 * touched by this (handbuch/echo.md).
 	 *
 	 * @param mixed    $fields          Field map (user-content extraction; technical keys skipped).
 	 * @param string[] $own_domains     Registrable domains of the site itself, excluded.
@@ -527,7 +487,7 @@ final class Echo_Values {
 	 *                                  lock, so submitting spam with a user's address cannot
 	 *                                  lock that user out at login/password-reset.
 	 * @param string[] $no_text_roots   Top-level field names whose subtree contributes
-	 *                                  EMAIL, DOMAIN and PHONE hashes as usual but NO
+	 *                                  EMAIL and DOMAIN hashes as usual but NO
 	 *                                  long-text hash. The unpacked JSON envelopes of a
 	 *                                  form builder (Field_Envelopes::unpack(), passed in
 	 *                                  by Echo_Store) — a FOURTH defense line, and the one
@@ -548,7 +508,7 @@ final class Echo_Values {
 	 *                                  Nothing is lost by skipping it: before unpacking,
 	 *                                  the envelope was ONE value whose text hash differed
 	 *                                  per submission and therefore never matched anything
-	 *                                  anyway. Sender address, payload domain and phone
+	 *                                  anyway. Sender address and payload domain
 	 *                                  keep working inside the envelope, which is
 	 *                                  everything the echo lock ever effectively had
 	 *                                  there.
@@ -575,10 +535,6 @@ final class Echo_Values {
 					if ( null !== $domain ) {
 						$hashes[ self::hash_value( $domain ) ] = true;
 					}
-				}
-				$phone = self::normalize_phone( $value );
-				if ( null !== $phone ) {
-					$hashes[ self::hash_value( $phone ) ] = true;
 				}
 				$text = ( $long_text && $with_text ) ? self::normalize_text( $value ) : null;
 				if ( null !== $text ) {

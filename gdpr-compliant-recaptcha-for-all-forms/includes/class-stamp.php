@@ -25,8 +25,8 @@ class Stamp {
 
 	// Die PERSISTENZ-Haelfte dieser Klasse steht seit Dateigroessen-Welle 5b
 	// (PLAN-DATEIGROESSE.md) in trait-stamp-persistence.php: save_for_analysis(),
-	// save_message() samt Feldbaum-Abflachung, die Analyse-Urteil-Upserts und
-	// log_fail2ban_event(). Dort steht auch, warum ein Trait und keine zweite Klasse.
+	// save_message() samt Feldbaum-Abflachung, die Analyse-Urteil-Upserts (und ueber
+	// Stamp_Fail2ban log_fail2ban_event()). Dort steht auch, warum ein Trait und keine zweite Klasse.
 	// Ein Trait wird zur Kompilierzeit hineinkopiert — $this->save_message() & Co.
 	// bleiben unveraendert Methoden von Stamp, mit denselben Eigenschaften.
 	use Stamp_Persistence;
@@ -43,6 +43,7 @@ class Stamp {
 	// JSON-Envelope-Feldern (Field_Envelopes) und den zwei Zugriffen auf das, was das
 	// Auspacken hinterlaesst — steht in trait-stamp-capture.php.
 	use Stamp_Capture;
+	use Stamp_Risk; // Die RISIKOKLASSE: "aufzeichnen, nicht durchsetzen" — trait-stamp-risk.php.
 
 	/**
 	 * Maximum submissions a single solved PoW token may pay for (AP3 submission-
@@ -229,6 +230,7 @@ class Stamp {
 		// and the boolean is reused in triage_request() instead of calling the method a
 		// second time.
 		$this->route_found = $this->check_rest_routes();
+		$this->classify_request_risk(); // Stamp_Risk; before save_for_analysis() below.
 
 		$this->save_for_analysis();
 
@@ -482,7 +484,7 @@ class Stamp {
 	 * @return bool
 	 */
 	private function check_rest_routes() {
-		if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || 'POST' !== $_SERVER['REQUEST_METHOD'] ) {
+		if ( 'POST' !== RestRoute::effective_method( $_SERVER, $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the dispatched method, read like WP_REST_Server does; nothing stored.
 			return false;
 		}
 		if ( ! isset( $_SERVER['REQUEST_URI'] ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
@@ -881,6 +883,7 @@ class Stamp {
 		$this->classification_reason = null;
 		$this->clean_scoring         = null;
 		$this->pow_probe             = null;
+		$this->evaluate_risk_class( $hook_name, $origin ); // Before any stage can feed a counter.
 
 		// The classification chain. Its ORDER IS THE SEMANTICS ("first cause wins"): each
 		// stage below records a reason only if no earlier one did, so moving a stage would
@@ -932,10 +935,10 @@ class Stamp {
 		// classified as spam it will land in the spam folder — remember its core values
 		// (hashed, TTL) so the same sender/domain/text is caught on any form / any IP
 		// within the window. Never in simulation mode (everything is "spam" there, which
-		// would poison the store with legitimate submissions).
+		// would poison the store with legitimate submissions), never a cart request (echo_lock_applies()).
 		//
 		// THREE CARVE-OUTS from one rule: the store holds CONTENT (sender email, payload
-		// domain, phone, long-text hash) for 36h across every form and every address, so
+		// domain, long-text hash; no numbers) for 36h across every form and every address, so
 		// only a verdict that says something about the content may fill it.
 		//  a) The under-attack quarantine ($quarantine_only_spam, exception #2 above):
 		//     grey-zone submissions are presumed innocent and must not seed values that
@@ -950,13 +953,13 @@ class Stamp {
 		//     Classification_Reason::seeds_long_text(). It is the one echo value a form
 		//     can carry without anyone typing it (a consent label, a dropdown option), so
 		//     one spam hit locked the form for everybody. Price named there: cross-form
-		//     TEXT matching for tokenless spam is gone; address/domain/phone still seed.
+		//     TEXT matching for tokenless spam is gone; address/domain still seed.
 		if (
 			$gdpr_fields
 			&& $this->plugin_spam
 			&& ! $quarantine_only_spam
 			&& Classification_Reason::seeds_echo_values( $this->classification_reason )
-			&& ! get_option( Option::POW_SIMULATE_SPAM )
+			&& $this->side_effects_allowed() && $this->echo_lock_applies()
 		) {
 			Echo_Store::record(
 				self::strip_plugin_fields( $gdpr_fields ),
@@ -976,7 +979,7 @@ class Stamp {
 
 		if ( $gdpr_fields ) {
 			// If message shall be flagged and message is spam
-			if ( get_option( Option::POW_FLAG_SPAM ) && $this->plugin_spam ) {
+			if ( get_option( Option::POW_FLAG_SPAM ) && $this->plugin_spam && $this->enforcement_allowed() ) {
 				// Line by line for prefixes
 				$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_FLAG_SUFFIXES ), -1, PREG_SPLIT_NO_EMPTY );
 				if ( count( $lines ) > 0 ) {
@@ -984,8 +987,8 @@ class Stamp {
 						// Add the prefix to the respective posted technical field in order to flag this message as spam
 						$args = explode( ':', $line );
 						if ( 2 === count( $args ) ) {
-							$field_link = &$this->access_object_or_array( $gdpr_fields, html_entity_decode( $args[0] ) );
-							$post_link  = &$this->access_object_or_array( $this->request_data, html_entity_decode( $args[0] ) );
+							$field_link = &$this->access_object_or_array( $gdpr_fields, $args[0] );
+							$post_link  = &$this->access_object_or_array( $this->request_data, $args[0] );
 							// is_scalar, nicht nur isset: seit Field_Envelopes kann ein Feldname
 							// auf eine Struktur zeigen — Prefix davor waere eine Warnung.
 							if ( isset( $field_link ) && is_scalar( $field_link ) ) {
@@ -1041,11 +1044,13 @@ class Stamp {
 			$this->print_debug_information( 'Message saved' );
 		}
 
+		$this->record_risk_observation();
+
 		// If the spam check is called by a filter
 		if ( 'hook' === $form_builder ) {
 			$return_value = array(
 				'isSpam'    => $this->plugin_spam,
-				'blockSpam' => get_option( Option::POW_BLOCK ),
+				'blockSpam' => get_option( Option::POW_BLOCK ) && $this->enforcement_allowed(),
 				'fields'    => $gdpr_fields,
 			);
 			return $return_value;
@@ -1094,7 +1099,7 @@ class Stamp {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated -- server-set path, only compared against a fixed list of file names inside is_core_admin_screen_post(); never stored, never printed.
 		$fail2ban_script    = isset( $_SERVER['SCRIPT_FILENAME'] ) ? (string) $_SERVER['SCRIPT_FILENAME'] : '';
 		$backend_screen_hit = Overbroad_Pattern_Guard::is_core_admin_screen_post( is_admin(), wp_doing_ajax(), $fail2ban_script );
-		if ( $this->plugin_spam && ! $quarantine_only_spam && ! $backend_screen_hit ) {
+		if ( $this->plugin_spam && ! $quarantine_only_spam && ! $backend_screen_hit && $this->enforcement_allowed() ) {
 			// Hook into failed login attempts in WordPress. The $origin leg is additive:
 			// it also catches minimal login POSTs that carry neither `wp-submit` nor the
 			// classic log/pwd pair, which the two request-data probes alone would miss.
@@ -1123,7 +1128,7 @@ class Stamp {
 		// the gibberish check above) — blocked messages were already saved to the
 		// spam folder before this gate, so false positives stay rescuable, and the
 		// error message below tells a genuine sender how to reach the site.
-		if ( get_option( Option::POW_BLOCK ) && $this->plugin_spam ) {
+		if ( get_option( Option::POW_BLOCK ) && $this->plugin_spam && $this->enforcement_allowed() ) {
 			// PURE OBSERVATION, and the ONE reference to the over-broad-pattern marker in
 			// this file. It records "a wp-admin screen save was just discarded because a
 			// configured field pattern matched it" so the administrator can be told
@@ -1145,17 +1150,8 @@ class Stamp {
 			if ( ! $error_message ) {
 				$error_message = __( 'Your message has been classified as spam! If you are a human, we are very sorry. Please give us notice via email.', 'gdpr-compliant-recaptcha-for-all-forms' );
 			}
-			// block spam
-			if ( ( isset( $_SERVER['HTTP_ACCEPT'] ) && stripos( $_SERVER['HTTP_ACCEPT'], 'application/json' ) !== false ) || $ajax || isset( $_SERVER['HTTP_X_REQUESTED_WITH'] ) ) { //unknown editor but is ajax
-				$response = array(
-					'gdpr_error_message' => $error_message,
-				);
-				wp_send_json_error( $response );
-				exit;
-			} else {
-				echo esc_html( $error_message );
-				exit;
-			}
+			// block spam — status and body: Block_Response (why 422 and not 200: there).
+			Block_Response::send( $error_message, $ajax );
 		}
 
 		// Let WordPress do further processing
@@ -1188,7 +1184,9 @@ class Stamp {
 			$this->pow_probe = $this->measure_pow_probe( $this->pow_token );
 			// Site-wide spam-rate metric feeding is_under_attack() (AP4) — only for
 			// genuine PoW/token failures, never for the simulation mode below.
-			$this->increment_spam_counter();
+			if ( $this->enforcement_allowed() ) { // Unarmed risk request: no counter (Stamp_Risk).
+				$this->increment_spam_counter();
+			}
 			// Health counter for the #1 support case ("everything is spam"), counted
 			// HERE and not where check_request() sets pow_fail_reason: that method
 			// records a reason on every failing path it takes, including ones whose IP
@@ -1203,7 +1201,9 @@ class Stamp {
 			// gated by POW_SAVE_SPAM. On a site with spam storage off it therefore
 			// reads 0 forever, and 0 reads like "healthy" precisely where the operator
 			// can see nothing else either. This one is storage-independent.
-			Option::increment_no_pow_health_counter();
+			if ( $this->enforcement_allowed() ) {
+				Option::increment_no_pow_health_counter();
+			}
 		}
 	}
 
@@ -1248,11 +1248,11 @@ class Stamp {
 	 */
 	private function classify_echo_lock( $gdpr_fields, $content_fields ) {
 		// (1) Auto-echo lock: an incoming submission whose core values (sender email,
-		//     payload domain, phone, long-text hash) match a value auto-recorded from
+		//     payload domain, long-text hash) match a value auto-recorded from
 		//     a recent spam-folder message — catches the same sender/domain on ANY
 		//     form / ANY IP within the TTL window (would have caught field datum #2).
 		//     Cheap: one get_transient() + hash lookups.
-		if ( $gdpr_fields && ! $this->plugin_spam && Echo_Store::matches( $content_fields, $this->envelope_roots() ) ) {
+		if ( $gdpr_fields && ! $this->plugin_spam && $this->echo_lock_applies() && Echo_Store::matches( $content_fields, $this->envelope_roots() ) ) {
 			$this->print_debug_information( 'Echo value match' );
 			$this->plugin_spam           = true;
 			$this->classification_reason = Classification_Reason::CODE_ECHO_LOCK;
@@ -1263,7 +1263,7 @@ class Stamp {
 			// detection signal so a determined echo/wildcard spammer also trips
 			// is_under_attack(). Wildcard hits are the same deterministic value-based
 			// class as echo, so both feed the counter.
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+			if ( $this->side_effects_allowed() ) {
 				$this->increment_spam_counter();
 			}
 		}
@@ -1307,7 +1307,7 @@ class Stamp {
 			$this->classification_reason = Classification_Reason::CODE_WILDCARD;
 			// Feed the wave counter too — same deterministic value class as the echo
 			// hit above (see that comment). Additive only; not in simulation mode.
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+			if ( $this->side_effects_allowed() ) {
 				$this->increment_spam_counter();
 			}
 		}
@@ -1384,7 +1384,7 @@ class Stamp {
 			// $this->plugin_spam is still false here for the wp_authenticate_user hook
 			// the simulation branch above deliberately excludes, so this check is not
 			// redundant with the "still false" guard above.)
-			if ( ! get_option( Option::POW_SIMULATE_SPAM ) ) {
+			if ( $this->side_effects_allowed() ) {
 				$this->increment_spam_counter();
 			}
 		}
@@ -2198,7 +2198,7 @@ class Stamp {
 	 * the token it belongs to — that exposed §12 cause 8.
 	 *
 	 * Cost: at most three SELECTs, only ever on the already-slow spam path (which has
-	 * just spent up to 2 seconds polling), never on a clean submission.
+	 * just spent up to 5 seconds polling), never on a clean submission.
 	 *
 	 * @param string $token The sanitized token check_request() evaluated ('' when none).
 	 * @return string Classification_Reason::pow_probe() string.

@@ -72,7 +72,11 @@ trait Settings_Default_Actions {
 			"\n",
 			array_merge(
 				self::wave_1_ajax_actions( $installed_plugins ),
-				self::wave_2_ajax_actions( $installed_plugins )
+				self::wave_2_ajax_actions( $installed_plugins ),
+				self::wave_3_ajax_actions( $installed_plugins ),
+				self::wave_6_ajax_actions( $installed_plugins ),
+				// Risk class: once, in Risk_Catalog (helper: trait-settings-default-routes.php).
+				self::risk_lines( Risk_Signatures::KIND_ACTION, $installed_plugins )
 			)
 		);
 	}

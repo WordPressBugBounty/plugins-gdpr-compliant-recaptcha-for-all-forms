@@ -412,7 +412,7 @@ final class Classification_Reason {
 	 * its CONTENT values (Stamp::check_submit() → Echo_Store::record()).
 	 *
 	 * WHY THIS EXISTS. The echo lock remembers the core values of a spam submission —
-	 * sender email, payload domain, phone number, long-text hash — for 36 hours, across
+	 * sender email, payload domain, long-text hash (no numbers since 2026-10) — for 36 hours, across
 	 * every form and every address. That is the right response to "this content is spam"
 	 * and the wrong response to "the handshake failed": a `no_pow` verdict says nothing
 	 * whatsoever about what was submitted. The three NON_SEEDING_REASONS presented a
@@ -469,7 +469,7 @@ final class Classification_Reason {
 	 * from TEXT_HASH_MIN_LENGTH (40 normalized characters) upwards, and plenty of forms
 	 * post a value that is identical in every single submission: a consent label, a long
 	 * dropdown option, a required-field error message, a builder's configuration text. A
-	 * sender address, a domain or a phone number cannot be constant like that — those a
+	 * sender address or a domain cannot be constant like that — those a
 	 * visitor supplies.
 	 *
 	 * So one genuine spam submission seeds that constant value, and from then on every
@@ -488,7 +488,7 @@ final class Classification_Reason {
 	 *
 	 * THE PRICE, real and knowingly paid: cross-form text matching for TOKENLESS spam is
 	 * gone. `no_pow:no_token` is the echo lock's main food source (see
-	 * seeds_echo_values()), so the store now learns only address, domain and phone from
+	 * seeds_echo_values()), so the store now learns only address and domain from
 	 * it. What that gave up is the bot that posts the same body text again later WITH a
 	 * valid proof of work — it is no longer caught by its text. Accepted because the
 	 * failure it removes is worse than the catch it loses: a self-inflicted lock takes a

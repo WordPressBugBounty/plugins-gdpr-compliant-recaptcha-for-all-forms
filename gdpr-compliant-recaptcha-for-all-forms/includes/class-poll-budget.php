@@ -27,12 +27,22 @@ final class Poll_Budget {
 	 * A POST may still be racing the handshake that writes its row.
 	 *
 	 * check_stamp() lands the row from a separate ajax call, so at the moment a form
-	 * POST arrives the row can legitimately be seconds old or not yet written at all.
-	 * 20 attempts at the 100ms interval, check-before-sleep, means a worst case of
-	 * 19 * 100ms ≈ 2s of waiting — the value this path has carried since the poll was
-	 * cut down from 5s.
+	 * POST arrives the row can legitimately be seconds old or not yet written at all —
+	 * on a slow device the visitor can submit before his proof of work has finished.
+	 * 51 attempts at the 100ms interval, check-before-sleep, means a worst case of
+	 * 50 * 100ms = 5s of waiting.
+	 *
+	 * 5s IS AN OWNER DECISION (2026-10), and it restores the original value. The poll
+	 * began as 5 * 1s = 5s, chosen as the tolerance for slow devices; AP1 (2026-07-15,
+	 * c6663c2) cut it to 20 * 100ms ≈ 2s with the argument that a spam flood holds a PHP
+	 * worker 5s per request. The owner rejects that trade: a false block is the worst
+	 * error this plugin can make, and a real visitor on a slow phone is exactly who the
+	 * shorter window threw out. The price is named and accepted — a tokenless flood now
+	 * holds a worker up to 5s per request; the Under-Attack mode (handbuch/pow.md) is
+	 * the answer to a flood, not a shorter wait for everybody. The 100ms interval and
+	 * check-before-sleep stay, so a row that is already there costs no wait at all.
 	 */
-	const ATTEMPTS_POST = 20;
+	const ATTEMPTS_POST = 51;
 
 	/**
 	 * Anything that is not a POST cannot be racing anything, so it waits almost not at all.
@@ -57,10 +67,9 @@ final class Poll_Budget {
 	 * Not zero, for that reason: check-before-sleep means the first attempt happens
 	 * regardless, and 3 leaves ~0.2s in which a row landing concurrently is still seen.
 	 *
-	 * THE ONE NAMED PRICE, known and accepted by the owner: the rescue window for the
-	 * organic WooCommerce GET cart shrinks from 2s to ~0.3s. That reaches shops which
-	 * switched the ajax option off, and only on a visitor's very first click, before the
-	 * page's own PoW has produced a row.
+	 * The one price once named here — a shorter rescue window for the organic
+	 * WooCommerce GET cart — no longer exists: the cart is not checked at all since
+	 * 2026-10-09 (handbuch/seeds.md).
 	 */
 	const ATTEMPTS_NON_POST = 3;
 

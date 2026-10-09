@@ -142,8 +142,10 @@ class Option {
 	/** @var bool */
 	const POW_BLOCK_LOGIN = self::PREFIX . 'pow_block_login';
 
-	/** @var bool */
-	const POW_BLOCK = self::PREFIX . 'pow_block';
+	/** @var bool The two after it are bools too: the risk-class switches (Risk_Enforcement), default OFF. */
+	const POW_BLOCK                    = self::PREFIX . 'pow_block';
+	const POW_BLOCK_CHECKOUT_FORMS     = self::PREFIX . 'pow_block_checkout_forms';
+	const POW_BLOCK_REGISTRATION_FORMS = self::PREFIX . 'pow_block_registration_forms';
 
 	/** @var bool */
 	const POW_SAVE_SPAM = self::PREFIX . 'pow_save_spam';

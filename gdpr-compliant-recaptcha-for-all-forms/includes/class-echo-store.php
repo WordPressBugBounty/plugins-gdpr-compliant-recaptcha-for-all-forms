@@ -24,7 +24,7 @@
  *   a lost concurrent write only drops an echo value, which the next spam landing
  *   re-records — acceptable for a best-effort heuristic.
  *
- * GDPR: only SHA-256 hashes are stored (never the plaintext email/phone/text), and
+ * GDPR: only SHA-256 hashes are stored (never the plaintext email/domain/text), and
  * the TTL is short — sender emails are forgeable, so a value must not stay blocked
  * for long.
  *

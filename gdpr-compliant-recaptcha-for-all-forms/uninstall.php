@@ -15,6 +15,14 @@ class Uninstall {
 	 * @return void
 	 */
 	public static function run() {
+		// Option composes Option_Counters since Welle 4 (PLAN-DATEIGROESSE.md), and a
+		// trait must be loaded before the class that uses it — same order as
+		// includes/load-classes.php. Without this line every uninstall died with a fatal
+		// "Trait Option_Counters not found", WordPress refused to delete the plugin, and
+		// the tables and options stayed behind (forum report 2026-10-01).
+		// tests/unit/UninstallTest.php runs this file for real, so the next split of
+		// Option fails there instead of on a user's site.
+		require_once __DIR__ . '/includes/trait-option-counters.php';
 		require_once __DIR__ . '/includes/class-option.php';
 
 		global $wpdb;
@@ -34,11 +42,11 @@ class Uninstall {
 		// this plugin actually reads/writes really does carry the prefix, which is what
 		// this query depends on.
 		//
-		// Not multisite-relevant: nothing here is ever stored as a site option, only as
-		// a per-site option (confirmed by grep across plugin/includes/ — no
-		// add_site_option()/update_site_option() call exists), so a single wp_options
-		// query is enough; WP_UNINSTALL_PLUGIN with 'delete_plugins' already runs this
-		// file once per site on a multisite uninstall.
+		// Nothing here is ever stored as a network option, only as a per-site option
+		// (confirmed by grep across plugin/includes/ — no add_site_option()/
+		// update_site_option() call exists). On multisite WordPress runs this file ONCE,
+		// in the context of the main site, so only the main site's wp_options rows and
+		// tables are removed; other sites keep theirs (ISSUES.md, "Multisite-Uninstall").
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->options, not user input; the LIKE value itself IS passed through prepare().

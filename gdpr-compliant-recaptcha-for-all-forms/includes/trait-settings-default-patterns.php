@@ -105,96 +105,33 @@ trait Settings_Default_Patterns {
 			self::display_admin_notice( __( 'Contact Form 7 detected – added recognition pattern: {"_wpcf7":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
-		// *** WooCommerce ***
-		// `add-to-cart` is the ONE real request key of the ten that stood here until
-		// 2026-08-19, verified against the wp.org zip 11.0.1: read in
-		// includes/class-wc-form-handler.php:914 (`$_REQUEST['add-to-cart']`), rendered
-		// by templates/single-product/add-to-cart/simple.php:49, grouped.php:132 and
-		// variation-add-to-cart-button.php:35.
+		// *** WooCommerce: the CART IS DELIBERATELY NOT SEEDED (owner decision 2026-10) ***
+		// Until then two lines stood here: `{"add-to-cart":null}` (the classic product-page
+		// form, read in class-wc-form-handler.php:914) and
+		// `{"wc-ajax":"add_to_cart","product_id":null}` (the default ajax button,
+		// assets/js/frontend/add-to-cart.js:107-109; body product_id/product_sku/quantity,
+		// no `add-to-cart` field). Both were correct signatures — and both blocked real
+		// shoppers: on a slow device the visitor clicks "Add to cart" before the proof of
+		// work has finished, gets HTTP 422 plus the spam overlay, and the sale is gone
+		// (measured, handbuch/seeds.md "Der Warenkorb wird nicht geprüft"). A false block
+		// is the worst error this plugin can make, a cart carries no free text worth
+		// classifying, so the cart is not checked at all and there is no switch for it.
+		// Existing installations lose the two lines once (Cart_Seed_Removal); Scope_Sync
+		// never re-adds them. An operator may still add a cart line by hand — then
+		// POW_SAVE_CART decides storage and the repeat-sender lock ignores the request.
 		//
-		// The nine removed entries could never match (ERHEBUNG-BUILDER.md §3.1):
-		// `woocommerce_payment_complete` (class-wc-order.php:186) and
-		// `woocommerce_created_customer` (wc-user-functions.php:198) are `do_action()`
-		// hooks that fire on the SERVER after processing and can structurally never
-		// appear in $_REQUEST; `woocommerce_checkout` is a shortcode name plus a
-		// Customizer section id; `woocommerce_order`, `woocommerce_login`,
-		// `woocommerce_review` and `woocommerce_comment` occur ZERO times in the zip;
-		// `remove-from-cart` and `update-cart` carry the wrong separator.
+		// What the old research established, kept because it still guards future edits:
+		// NEVER seed `{"wc-ajax":null}` (the dispatcher of ALL WooCommerce frontend
+		// endpoints; get_refreshed_fragments/get_cart_totals/get_variation fire on plain
+		// page views) nor `{"product_id":null}` (read top-level by the product editor's
+		// load_variations/save_variations/bulk_edit_variations in wp-admin). Both pinned
+		// negatively in WooCommerceCartSeedTest. The nine older WooCommerce entries removed
+		// on 2026-08-19 (`woocommerce_payment_complete`, `woocommerce_checkout`, …) were hook,
+		// shortcode or Customizer names that never occur in a request (ERHEBUNG-BUILDER.md).
 		//
-		// NO REPLACEMENT for `update-cart`, deliberately. The real field IS `update_cart`
-		// (class-wc-form-handler.php:702, templates/cart/cart.php:190) — but the cart
-		// update is ALREADY hard-wired into the constructor triage and checked more
-		// NARROWLY there: trait-stamp-triage.php:322-327 requires `update_cart` AND `cart`
-		// AND `woocommerce-cart-nonce` together (plus `wc-ajax=checkout` for the checkout).
-		// A `{"update_cart":null}` pattern would be redundant AND broader than the
-		// existing check, because it lacks those two extra conditions.
-		//
-		// NO REPLACEMENT for `remove-from-cart` either: the real `remove_item`
-		// (class-wc-form-handler.php:718) is a nonce-protected GET link — no free text,
-		// no spam vector. Since 2026-08-28 a GET is not even read by this matcher any
-		// more (Stamp::signature_matching_applies(), handbuch/gate.md), so such a pattern
-		// would now be plain dead weight; before that date it also imported a real
-		// false-block risk on a link click.
-		//
-		// NO REPLACEMENT for `woocommerce_checkout` / `woocommerce_login`: checkout and
-		// login are the risk class (payment data, credentials) and stay outside the
-		// shipped seed lists by plan (PLAN-BUILDER-SEED.md).
-		//
-		// *** THE SECOND WooCommerce LINE, added 2026-08-28: the ajax add-to-cart button.
-		// `{"add-to-cart":null}` above covers the classic product-page FORM and the
-		// archive LINK — but on a default installation neither is how a visitor fills a
-		// cart. `woocommerce_enable_ajax_add_to_cart` ships as `yes`
-		// (includes/admin/settings/class-wc-settings-products.php:104-108), and then the
-		// archive button sends a POST to the home URL with the query variable
-		// `wc-ajax=add_to_cart` (assets/js/frontend/add-to-cart.js:107-109 via
-		// WC_AJAX::get_endpoint(), class-wc-ajax.php:51-53), carrying the button's
-		// data-attributes as its body — `product_id`, `product_sku`
-		// (wc-template-functions.php:1475-1479) and `quantity`, rendered as `data-quantity`
-		// by templates/loop/add-to-cart.php:29. That body contains NO field `add-to-cart`
-		// and no nonce, so it matched no seed at all: the main door of the cart stood open on
-		// every default shop.
-		// All of it verified against the wp.org zip of WooCommerce 11.0.1, both halves.
-		//
-		// A SEED LINE AND NOT A HARD-WIRED TERM next to the `wc-ajax=checkout` one in
-		// Stamp::__construct(), for three reasons that all point the same way: the line
-		// is VISIBLE and switchable for the operator, Scope_Sync carries it into existing
-		// installations with a notice, and it is reachable for the blame diagnosis
-		// (Overbroad_Pattern_Guard::blaming_lines()) and the save guard. A constructor
-		// term is invisible at all three places. The checkout term stays where it is —
-		// checkout is the risk class, not a seed subject.
-		//
-		// THE VALUE PIN `add_to_cart` IS THE ENTRY, not spelling detail. `wc-ajax` is the
-		// dispatcher for every one of WooCommerce's own frontend endpoints, and the
-		// read-only ones fire on ordinary page views: `get_refreshed_fragments`
-		// (class-wc-ajax.php:262), `get_cart_totals` (:361), `get_variation` (:607),
-		// `get_customer_location` (:637). A bare `{"wc-ajax":null}` would monitor every
-		// one of them. Strict comparison in Pattern_Matcher::matches() keeps them out.
-		//
-		// `product_id` IS AND-ED, and it must never stand alone. It is the field the
-		// server requires (class-wc-ajax.php:513, `if ( ! isset( $_POST['product_id'] ) )
-		// return;`), which is what makes it the right second half — but the same
-		// top-level name is read by three wp-admin handlers of the product editor:
-		// load_variations() (:2630), save_variations() (:2681) and
-		// bulk_edit_variations() (:3215), and by the frontend's own `get_variation`
-		// (:611). A `{"product_id":null}` seed would put the product editor into the
-		// scope of a plugin that blocks by default, on screens that never receive the
-		// PoW script. Same shape and same reason as Formidable's
-		// `{"frm_action":"create","item_meta":null}` above.
-		//
-		// BACKEND CHECKED (CLAUDE.md, mandatory since 2026-08-19): the string `wc-ajax`
-		// occurs ZERO times under includes/admin/, assets/js/admin/ and templates/ — the
-		// value pin therefore cannot reach any admin request at all.
-		//
-		// THE NAMED LIMIT: this line does not cover the BLOCK cart. That one adds items
-		// through the Store API, `POST /wp-json/wc/store/v1/cart/add-item`
-		// (src/StoreApi/Routes/V1/CartAddItem.php, permission_callback __return_true) —
-		// REST, i.e. a different signature class, and a candidate of its own.
-		if ( array_key_exists( 'woocommerce/woocommerce.php', $installed_plugins ) ) {
-			$patterns[] = '{"add-to-cart":null}';
-			self::display_admin_notice( __( 'WooCommerce detected – added recognition pattern: {"add-to-cart":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-			$patterns[] = '{"wc-ajax":"add_to_cart","product_id":null}';
-			self::display_admin_notice( __( 'WooCommerce detected – added recognition pattern: {"wc-ajax":"add_to_cart","product_id":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
-		}
+		// The CHECKOUT is untouched by all of this: the classic `wc-ajax=checkout` term in
+		// the constructor triage and the block checkout (Risk_Catalog) are the risk class,
+		// not seeds (PLAN-RISIKOKLASSE.md).
 
 		// *** Gravity Forms (custom submission method) ***
 		// `gform_submit` is rendered unconditionally (form_display.php:1927 and :5130)
@@ -529,6 +466,10 @@ trait Settings_Default_Patterns {
 		// Do not add a seed by analogy to the other foreign-origin rejections above: the
 		// verification standard this survey exists to uphold is "checked", not "probably
 		// the same as its siblings" — this comment IS that check, and it came back empty.
+		$patterns = array_merge( $patterns, self::wave_2_recognition_patterns( $installed_plugins ) );
+		// Risk class: the lines live once, in Risk_Catalog (helper: trait-settings-default-routes.php).
+		$patterns = array_merge( $patterns, self::risk_lines( Risk_Signatures::KIND_PATTERN, $installed_plugins ) );
+
 		return implode( "\n", $patterns );
 	}
 }

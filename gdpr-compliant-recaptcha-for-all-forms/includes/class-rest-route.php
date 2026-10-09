@@ -211,6 +211,40 @@ final class RestRoute {
 	}
 
 	/**
+	 * The method WordPress' REST server will DISPATCH this request as — which is not
+	 * always the one on the wire.
+	 *
+	 * WP_REST_Server::serve_request() (wp-includes/rest-api/class-wp-rest-server.php,
+	 * measured on 7.1) overrides the wire method with `$_GET['_method']`, else with the
+	 * `X-HTTP-Method-Override` header, and upper-cases it. `wp.apiFetch` uses that for
+	 * every PUT and DELETE: they travel as POST with the header (Gutenberg api-fetch
+	 * http-v1). Reading only REQUEST_METHOD therefore had two faults at once:
+	 * - a POST that WordPress runs as PUT — the WooCommerce Checkout block's automatic
+	 *   draft save every 1.5 s — was evaluated like a submission, spending token uses;
+	 * - a PUT that WordPress runs as POST was NOT evaluated, although it reaches the
+	 *   seeded POST handler.
+	 * Deciding by the dispatched method fixes both. It opens nothing: a request that is
+	 * no longer evaluated is one WordPress hands to a non-POST handler, which a real
+	 * PUT/DELETE could always reach unevaluated.
+	 *
+	 * A non-string override (`_method[]=x`) is not a method WordPress could set; the
+	 * wire method stands then, i.e. the request stays evaluated if it is a POST.
+	 *
+	 * @param array<string, mixed> $server $_SERVER.
+	 * @param array<string, mixed> $get    $_GET.
+	 * @return string Upper-case method, '' if none is known.
+	 */
+	public static function effective_method( array $server, array $get ): string {
+		$method = isset( $server['REQUEST_METHOD'] ) && is_string( $server['REQUEST_METHOD'] ) ? $server['REQUEST_METHOD'] : '';
+		if ( isset( $get['_method'] ) ) {
+			$method = is_string( $get['_method'] ) ? $get['_method'] : $method;
+		} elseif ( isset( $server['HTTP_X_HTTP_METHOD_OVERRIDE'] ) && is_string( $server['HTTP_X_HTTP_METHOD_OVERRIDE'] ) ) {
+			$method = $server['HTTP_X_HTTP_METHOD_OVERRIDE'];
+		}
+		return strtoupper( $method );
+	}
+
+	/**
 	 * SAVE-TIME GUARD against the administrator locking themselves out of their own
 	 * wp-admin (REST_ROUTES_PLAN.md AP6 failure mode, made unreachable here rather
 	 * than only warned about in the option's help text).

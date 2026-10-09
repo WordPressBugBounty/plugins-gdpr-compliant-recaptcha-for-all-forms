@@ -300,6 +300,24 @@ var gdpr_compliant_recaptcha = {
 		}, 1000);
 	},
 
+	// The operator's block message if `raw` (string or parsed JSON) is our block answer,
+	// else null. One reader for fetch and XHR; pure, exported for tests/js.
+	blockMessageOf : function (raw) {
+		var data = raw;
+		if (typeof raw === 'string') {
+			try {
+				data = JSON.parse(raw);
+			} catch (e) {
+				return null;
+			}
+		}
+		if (!data || typeof data !== 'object' || data.success === true || !data.data) {
+			return null;
+		}
+		var message = data.data.gdpr_error_message;
+		return (typeof message === 'string' && message !== '') ? message : null;
+	},
+
 	// Function to handle fetch response
 	handleFetchResponse: function (input, init) {
 		// Store method and URL
@@ -324,21 +342,22 @@ var gdpr_compliant_recaptcha = {
 				if (!isPluginCall && method === 'POST') {
 					gdpr_compliant_recaptcha.scheduleRenew();
 				}
-				// Check for an error response
-				if (response.ok && method === 'POST') {
-					// Parse the response JSON
+				// Our block answer is HTTP 422 since 2026-09-25 (Block_Response), so the
+				// body is read on EVERY status, not only on response.ok.
+				if (method === 'POST') {
 					return response.text().then(function (responseData) {
-						var data = responseData;
-						if (gdpr_compliant_recaptcha.isValidJson(responseData)) {
-							data = JSON.parse(responseData);
+						var message = gdpr_compliant_recaptcha.blockMessageOf(responseData);
+						if (message) {
+							gdpr_compliant_recaptcha.displayErrorMessage(message);
+							// A 200 block (pre-422 server) must not reach the caller's
+							// success path. A 422 does: the caller's own error path is
+							// the right reaction, and rejecting here would turn it into
+							// a network error ("You are probably offline" in apiFetch).
+							if (response.ok) {
+								gdpr_compliant_recaptcha.abortController.abort();
+								return Promise.reject(new Error('Request aborted'));
+							}
 						}
-						// Check if the gdpr_error_message parameter is present
-						if (data.data && data.data.gdpr_error_message) {
-							gdpr_compliant_recaptcha.displayErrorMessage(data.data.gdpr_error_message);
-							gdpr_compliant_recaptcha.abortController.abort();
-							return Promise.reject(new Error('Request aborted'));
-						}
-						// Return the original response for non-error cases
 						return clonedResponse;
 					});
 				}
@@ -803,50 +822,53 @@ var gdpr_compliant_recaptcha = {
 		}, 5000);
 	},
 
-	addFirstStamp : function(e){
+	// Marks the password fields of `root` (one form) or of every POST form in a hidden
+	// `hashPWFields` input, once per form; at start AND on submit, so a form rendered after
+	// `load` is covered too (handbuch/pow.md). Never throws — must not starve the wrappers.
+	harvestPasswordFields : function ( root ) {
+		try {
+			var forms = root && root.tagName === 'FORM' ? [ root ] : document.querySelectorAll('form');
+			Array.prototype.forEach.call(forms, function (form) {
+				// Skip GET forms — a hidden hashPWFields on one would leak into the
+				// URL just like the token would (see isGetForm()).
+				if (gdpr_compliant_recaptcha.isGetForm(form) || form.querySelector('input.hashPWFields')) {
+					return;
+				}
+				var passwordInputs = form.querySelectorAll("input[type='password']");
+				var hashPWFields = [];
+				Array.prototype.forEach.call(passwordInputs, function (input) {
+					hashPWFields.push(gdpr_compliant_recaptcha.fieldNameToNestedObject(input.getAttribute('name')));
+				});
+
+				if (hashPWFields.length !== 0) {
+					var hashPWFieldsInput = document.createElement('input');
+					hashPWFieldsInput.type = 'hidden';
+					hashPWFieldsInput.classList.add('hashPWFields');
+					hashPWFieldsInput.name = 'hashPWFields';
+					hashPWFieldsInput.value = btoa(JSON.stringify(hashPWFields));
+					form.prepend(hashPWFieldsInput);
+				}
+			});
+		} catch (harvestErr) {
+			if (typeof console !== 'undefined' && console.warn) {
+				console.warn('gdpr-recaptcha: password-field harvest skipped', harvestErr);
+			}
+		}
+	},
+
+	// One-time start on `load` (until 2026-10: first key/mouse/scroll/click; handbuch/pow.md).
+	addFirstStamp : function(){
 		if( ! gdpr_compliant_recaptcha.stampLoaded){
 			gdpr_compliant_recaptcha.stampLoaded = true;
 			gdpr_compliant_recaptcha.initCaptcha();
-			// Best-effort password-field harvest (marks password fields so their values
-			// are not stored in the inbox). Wrapped in try/catch so a malformed field
-			// name or exotic third-party markup can never throw out of this init and
-			// starve the fetch/XHR interception + renew installed below.
-			try {
-				let forms = document.querySelectorAll('form');
-				forms.forEach(form => {
-					// Skip GET forms — a hidden hashPWFields on one would leak into the
-					// URL just like the token would (see isGetForm()).
-					if (gdpr_compliant_recaptcha.isGetForm(form)) {
-						return;
-					}
-					let passwordInputs = form.querySelectorAll("input[type='password']");
-					let hashPWFields = [];
-					passwordInputs.forEach(input => {
-						hashPWFields.push(gdpr_compliant_recaptcha.fieldNameToNestedObject(input.getAttribute('name')));
-					});
-
-					if (hashPWFields.length !== 0) {
-						let hashPWFieldsInput = document.createElement('input');
-						hashPWFieldsInput.type = 'hidden';
-						hashPWFieldsInput.classList.add('hashPWFields');
-						hashPWFieldsInput.name = 'hashPWFields';
-						hashPWFieldsInput.value = btoa(JSON.stringify(hashPWFields));
-						form.prepend(hashPWFieldsInput);
-					}
-				});
-			} catch (harvestErr) {
-				if (typeof console !== 'undefined' && console.warn) {
-					console.warn('gdpr-recaptcha: password-field harvest skipped', harvestErr);
-				}
-			}
+			gdpr_compliant_recaptcha.harvestPasswordFields(document);
 
 			// Re-capture the CURRENT fetch/XHR right before wrapping them, instead of
-			// relying on the load-time snapshot taken at the top of this file. A third-
-			// party script may have installed its OWN fetch/XHR wrapper between page load
-			// and this first user interaction; wrapping the current functions keeps that
-			// wrapper in the delegation chain rather than stomping it. (window.fetch is
-			// only replaced below, so at this point it is never our own wrapper yet — the
-			// guard is belt-and-suspenders.)
+			// relying on the snapshot taken when this file was parsed in <head>. A third-
+			// party script may have installed its OWN fetch/XHR wrapper between then and
+			// `load`; wrapping the current functions keeps that wrapper in the delegation
+			// chain rather than stomping it. (window.fetch is only replaced below, so at
+			// this point it is never our own wrapper yet — the guard is belt-and-suspenders.)
 			if (typeof window !== 'undefined' && typeof window.fetch === 'function' && window.fetch !== gdpr_compliant_recaptcha.handleFetchResponse) {
 				gdpr_compliant_recaptcha.originalFetch = window.fetch;
 			}
@@ -879,17 +901,19 @@ var gdpr_compliant_recaptcha = {
 						if (!isPluginCall) {
 							gdpr_compliant_recaptcha.scheduleRenew();
 						}
-						// Check for an error response
-						if (self.status >= 200 && self.status < 300) {
-							var responseData = self.responseType === 'json' ? self.response : self.responseText;
-							if(gdpr_compliant_recaptcha.isValidJson(responseData)){
-								// Parse the response JSON
-								responseData = JSON.parse(responseData);
-							}
-							// Check if the gdpr_error_message parameter is present
-							if (!responseData.success && responseData.data && responseData.data.gdpr_error_message) {
-								// Show an error message
-								gdpr_compliant_recaptcha.displayErrorMessage(responseData.data.gdpr_error_message);
+						// Read on every status: the block answer is HTTP 422 (Block_Response).
+						var responseData;
+						try {
+							responseData = self.responseType === 'json' ? self.response : self.responseText;
+						} catch (e) {
+							responseData = null;
+						}
+						var message = gdpr_compliant_recaptcha.blockMessageOf(responseData);
+						if (message) {
+							gdpr_compliant_recaptcha.displayErrorMessage(message);
+							// Only a 200 block is swallowed; a 422 is handed on, so a
+							// client on onreadystatechange takes its own error path.
+							if (self.status >= 200 && self.status < 300) {
 								gdpr_compliant_recaptcha.abortController.abort();
 								return null;
 							}
@@ -929,6 +953,7 @@ var gdpr_compliant_recaptcha = {
 			// per-form pass above (late-rendered builders, modals, ...).
 			document.addEventListener('submit', function (e) {
 				if (e.target && e.target.tagName === 'FORM') {
+					gdpr_compliant_recaptcha.harvestPasswordFields(e.target);
 					gdpr_compliant_recaptcha.updateFormTokenFields(gdpr_compliant_recaptcha_token);
 				}
 			}, true);
@@ -937,13 +962,16 @@ var gdpr_compliant_recaptcha = {
 		}
 	}
 }
+// START on `load`, or at once if it already fired. Cost, accepted: one get_stamp +
+// check_stamp + one stamp row per page view (handbuch/pow.md "Start beim Laden").
 if ( typeof window !== 'undefined' && typeof document !== 'undefined' ) {
-	window.addEventListener( 'load', function gdpr_compliant_recaptcha_load () {
-		document.addEventListener( 'keydown', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-		document.addEventListener( 'mousemove', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-		document.addEventListener( 'scroll', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-		document.addEventListener( 'click', gdpr_compliant_recaptcha.addFirstStamp, { once : true } );
-	} );
+	if ( 'complete' === document.readyState ) {
+		gdpr_compliant_recaptcha.addFirstStamp();
+	} else {
+		window.addEventListener( 'load', function gdpr_compliant_recaptcha_load () {
+			gdpr_compliant_recaptcha.addFirstStamp();
+		}, { once : true } );
+	}
 }
 
 // Expose the pure, DOM-independent helpers for the Node-based regression tests
@@ -960,6 +988,7 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		bodyBrand : gdpr_compliant_recaptcha.bodyBrand,
 		injectTokenIntoBody : gdpr_compliant_recaptcha.injectTokenIntoBody,
 		solveConfirmed : gdpr_compliant_recaptcha.solveConfirmed,
-		shouldRetryUnconfirmed : gdpr_compliant_recaptcha.shouldRetryUnconfirmed
+		shouldRetryUnconfirmed : gdpr_compliant_recaptcha.shouldRetryUnconfirmed,
+		blockMessageOf : gdpr_compliant_recaptcha.blockMessageOf
 	};
 }

@@ -206,7 +206,14 @@ var gdpr_compliant_recaptcha_analysis = {
 	/** Name heuristic for password-carrying fields (fallback when no type info exists). */
 	isPasswordKey : function(key) {
 		const k = String(key).toLowerCase();
-		return k.includes('password') || k.includes('passwort') || /^(pwd|passwd|pass|pass1|pass2|user_pass)$/.test(k);
+		return k.includes('password') || k.includes('passwort') || /^(pwd|passwd|pass|pass1|pass2|user_pass|edd_user_pass|edd_user_pass2|edd_user_pass_confirm|give_user_pass|give_user_pass_confirm|ppmb_user_pass)$/.test(k);
+	},
+	/** Payment-secret field names — twin of Credential_Fields::PAYMENT_NAMES (exact, or the
+	 * tail after a gateway prefix; `-` counts as `_`). */
+	isPaymentKey : function(key) {
+		const k = String(key).toLowerCase().replace(/-/g, '_');
+		return ['card_number', 'cardnumber', 'cc_number', 'card_cvc', 'card_cvv', 'cvc', 'cvv', 'cvv2', 'card_expiry', 'card_exp_month', 'card_exp_year', 'exp_month', 'exp_year', 'iban']
+			.some(name => k === name || (k.length > name.length + 1 && k.endsWith('_' + name)));
 	},
 	/** Remove password field VALUES from a captured submission before it is persisted.
 	 * Security-relevant: analysis entries are stored server-side and readable by every
@@ -255,7 +262,7 @@ var gdpr_compliant_recaptcha_analysis = {
 				return;
 			}
 			Object.keys(obj).forEach(key => {
-				if (gdpr_compliant_recaptcha_analysis.isPasswordKey(key)) {
+				if (gdpr_compliant_recaptcha_analysis.isPasswordKey(key) || gdpr_compliant_recaptcha_analysis.isPaymentKey(key)) {
 					delete obj[key];
 				} else {
 					walk(obj[key]);
@@ -275,5 +282,6 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		extractRestRoute : gdpr_compliant_recaptcha_analysis.extractRestRoute,
 		routeSegmentsMatch : gdpr_compliant_recaptcha_analysis.routeSegmentsMatch,
 		routeCovered : gdpr_compliant_recaptcha_analysis.routeCovered,
+		isPaymentKey : gdpr_compliant_recaptcha_analysis.isPaymentKey,
 	};
 }

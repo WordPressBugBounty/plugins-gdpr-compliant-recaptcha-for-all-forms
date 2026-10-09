@@ -22,7 +22,9 @@ class Settings_Menu {
 	// Begruendung stehen im Kopf jeder Trait-Datei.
 	use Settings_Default_Actions;
 	use Settings_Default_Actions_Wave2;
+	use Settings_Default_Actions_Wave3;
 	use Settings_Default_Patterns;
+	use Settings_Default_Patterns_Wave2;
 	use Settings_Default_Routes;
 	use Settings_Options;
 	use Settings_Options_Storage;

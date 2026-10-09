@@ -215,20 +215,11 @@ trait Stamp_Triage {
 			$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_EXPLICIT_ACTION ), -1, PREG_SPLIT_NO_EMPTY );
 			if ( count( $lines ) > 0 ) {
 				foreach ( $lines as $line ) {
-					// Reading 3. Everything about a rule line — is it one, does it arm,
-					// does it match — is Action_Rules' job; nothing is decoded or
-					// compared here, deliberately, so no second semantics can grow next
-					// to Pattern_Matcher (same construction and same reason as
+					// Every reading of a line — rule line, action value, top-level field
+					// name — is Action_Rules' job; nothing is decoded or compared here, so
+					// no second semantics can grow next to Pattern_Matcher (same reason as
 					// check_existing_patterns() above delegating to line_matches()).
-					if ( Action_Rules::is_rule_line( $line ) ) {
-						if ( Action_Rules::line_matches( $line, $this->whole_request_data ) ) {
-							return true;
-						}
-						continue;
-					}
-					if ( trim( $line ) === $action //explicitly listed ajax-action
-						|| isset( $this->whole_request_data [ trim( $line ) ] ) //explicitly listed post-attribute: the LINE, never $action
-					) {
+					if ( Action_Rules::list_line_matches( $line, $action, $this->whole_request_data ) ) {
 						return true;
 					}
 				}
@@ -395,10 +386,11 @@ trait Stamp_Triage {
 					}
 					// $this->route_found: computed earlier in the constructor, before
 					// save_for_analysis() — see there.
-					//WooCommerce
+					// WooCommerce: only the classic checkout is hard-wired (risk class,
+					// PLAN-RISIKOKLASSE.md). The cart-update term (`update_cart` + `cart` +
+					// `woocommerce-cart-nonce`) that stood next to it is gone with the cart
+					// seeds: the cart is not checked at all (handbuch/seeds.md).
 					if ( (
-							isset( $this->request_data['update_cart'] ) && isset( $this->request_data['cart'] ) && isset( $this->request_data['woocommerce-cart-nonce'] )
-						) || (
 							isset( $this->whole_request_data ['wc-ajax'] ) && 'checkout' === $this->whole_request_data ['wc-ajax']
 						)
 						|| $pattern_found

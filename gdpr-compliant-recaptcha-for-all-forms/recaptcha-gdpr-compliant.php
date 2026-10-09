@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 6.1.0
+	 * Version: 6.2.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '6.1.0';
+	const VERSION = '6.2.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -100,6 +100,7 @@ class RCM_Main {
 		// Not stored: its constructor registers the admin hooks, which keep the instance
 		// alive for the request (matches WordPress's usual add_action( [$this, …] ) idiom).
 		new Scope_Sync();
+		add_action( 'admin_notices', array( Risk_Enforcement::class, 'render_migration_notice' ) );
 		// Same idiom: the one-off notice telling an upgraded installation that gibberish
 		// detection is now selection-based and therefore off until fields are picked.
 		( new Gibberish_Notice() )->run();
@@ -518,6 +519,7 @@ class RCM_Main {
 				// so short-circuit the migration instead of letting it walk (and query)
 				// an empty table on the next loads.
 				Credential_Cleanup::mark_done_fresh_install();
+				Risk_Enforcement::mark_migrated_fresh_install(); // Nothing to preserve.
 			}
 
 			update_option( Option::POW_VERSION, $this->version );
@@ -544,6 +546,11 @@ class RCM_Main {
 		// therefore needs no version bump to reach existing installs.
 		Credential_Cleanup::maybe_run();
 
+		// One-off repair of rule textareas an older version stored HTML-encoded
+		// (`=&gt;`, `&amp;`). Outside the gate for the same reasons as the migration
+		// below, and BEFORE it, because that migration reads one of these options.
+		Text_Option_Value::maybe_repair();
+
 		// DELIBERATELY OUTSIDE the version gate too, and for the same reason plus one
 		// more: this migration has to reach installations whose gate has ALREADY
 		// fired (they would otherwise keep their blocklist mixed into the pattern
@@ -551,6 +558,11 @@ class RCM_Main {
 		// container at all, because its stored version is already current. Guarded by
 		// its own done flag, so a completed migration costs one cached get_option().
 		Blocked_Values_Migration::maybe_run();
+		// Same placement, same reason: the WooCommerce cart lines earlier versions seeded
+		// leave the scope once (Scope_Sync never removes a default by itself).
+		Cart_Seed_Removal::maybe_run();
+		// Same placement, same reason; also must run before admin_init (Scope_Sync).
+		Risk_Enforcement::maybe_migrate();
 	}
 
 	/** Deactivation of the plugin */

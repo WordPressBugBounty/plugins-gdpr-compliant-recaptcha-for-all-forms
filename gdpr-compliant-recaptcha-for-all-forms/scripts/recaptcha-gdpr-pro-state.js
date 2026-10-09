@@ -82,8 +82,15 @@
 	 * @param {string} text Normalized message.
 	 * @return {boolean} True when a request should be made at all.
 	 */
-	function shouldSend( text ) {
-		return typeof text === 'string' && '' !== text;
+	function shouldSend( result ) {
+		if ( ! result || 'object' !== typeof result ) {
+			return false;
+		}
+
+		// EIN GRUND ALLEIN GENUEGT. Vorher hing alles am Freitext, und wer nichts tippte,
+		// schickte nichts — genau die Faelle, die als „eee" ankamen oder gar nicht. Ein
+		// angeklickter Grund ist eine verwertbare Antwort, auch ohne einen Satz dazu.
+		return '' !== ( result.text || '' ) || '' !== ( result.reason || '' );
 	}
 
 	/**
@@ -97,9 +104,22 @@
 	 * @param {Object} config Localized `gdprDeactivate` data.
 	 * @return {Object} Flat map of field name to value.
 	 */
-	function payloadFields( text, config ) {
+	function payloadFields( result, config ) {
 		var settings = config || {};
-		var fields = { grp_reason_long: text };
+		var answer = result && 'object' === typeof result ? result : { text: '' };
+		var fields = { grp_reason_long: answer.text || '' };
+
+		if ( answer.reason ) {
+			fields.reason = answer.reason;
+		}
+
+		// NUR MIT HAKEN, und der Text ist derselbe, den der Absender im Dialog aufklappen
+		// konnte — er kommt aus `config.diagnostics` und wird hier nicht neu gebaut. Es
+		// gibt keine zweite Quelle, aus der Angezeigtes und Gesendetes auseinanderlaufen
+		// koennten.
+		if ( answer.diagnostics && settings.diagnostics ) {
+			fields.diagnostics = settings.diagnostics;
+		}
 
 		// Only sent from this version on. An entry without them is from the installed
 		// base and cannot be attributed to a plugin — known, and preferable to
@@ -146,7 +166,7 @@
 	 * @param {Object} config Localized `gdprDeactivate` data.
 	 * @return {void}
 	 */
-	function send( text, config ) {
+	function send( result, config ) {
 		var settings = config || {};
 
 		if ( ! settings.endpoint || typeof window.fetch !== 'function' || typeof window.FormData !== 'function' ) {
@@ -154,7 +174,7 @@
 		}
 
 		try {
-			var fields = payloadFields( text, settings );
+			var fields = payloadFields( result, settings );
 			var body = new window.FormData();
 
 			Object.keys( fields ).forEach( function ( name ) {
@@ -206,6 +226,83 @@
 		textarea.rows = 5;
 		textarea.maxLength = toLimit( config.maxChars );
 
+		// --- Gruende zum Anklicken, vor dem Freitext ---------------------------------
+		// Die Reihenfolge ist Absicht: erst klicken, dann tippen. Wer nur klickt, hat
+		// trotzdem geantwortet.
+		var reasonBox = document.createElement( 'fieldset' );
+		reasonBox.className = 'gdpr-deactivate-reasons';
+
+		var reasonLegend = document.createElement( 'legend' );
+		reasonLegend.textContent = config.reasonLabel || '';
+		reasonBox.appendChild( reasonLegend );
+
+		var support = document.createElement( 'p' );
+		support.className = 'gdpr-deactivate-support';
+		support.hidden = true;
+		support.textContent = config.supportHint || '';
+		if ( config.supportUrl ) {
+			support.appendChild( document.createTextNode( ' ' ) );
+			var supportLink = document.createElement( 'a' );
+			supportLink.href = config.supportUrl;
+			supportLink.target = '_blank';
+			supportLink.rel = 'noopener noreferrer';
+			supportLink.textContent = config.supportLabel || config.supportUrl;
+			support.appendChild( supportLink );
+		}
+
+		var chosen = '';
+		var supportFor = config.supportFor || [];
+		( config.reasons || [] ).forEach( function ( reason, index ) {
+			var row = document.createElement( 'label' );
+			row.className = 'gdpr-deactivate-reason';
+
+			var input = document.createElement( 'input' );
+			input.type = 'radio';
+			input.name = 'gdpr_deactivate_reason';
+			input.value = reason.value;
+			input.id = 'gdpr-deactivate-reason-' + index;
+
+			input.addEventListener( 'change', function () {
+				chosen = input.checked ? input.value : '';
+				// Der Hinweis erscheint nur bei den Gruenden, die sich beheben lassen —
+				// bei „ich habe ein anderes Plugin gefunden" waere er aufdringlich und
+				// bei „nur voruebergehend" sinnlos.
+				support.hidden = -1 === supportFor.indexOf( chosen );
+			} );
+
+			row.appendChild( input );
+			row.appendChild( document.createTextNode( ' ' + ( reason.label || reason.value ) ) );
+			reasonBox.appendChild( row );
+		} );
+
+		// --- Technischer Abzug, nur mit Haken ----------------------------------------
+		var diagWrap = document.createElement( 'div' );
+		diagWrap.className = 'gdpr-deactivate-diagnostics';
+		var diagCheck = document.createElement( 'input' );
+
+		if ( config.diagnostics ) {
+			var diagLabel = document.createElement( 'label' );
+			diagCheck.type = 'checkbox';
+			diagCheck.id = 'gdpr-deactivate-diagnostics';
+			diagLabel.appendChild( diagCheck );
+			diagLabel.appendChild( document.createTextNode( ' ' + ( config.diagnosticsLabel || '' ) ) );
+
+			// WOERTLICH, NICHT BESCHRIEBEN: `config.diagnostics` ist derselbe String, den
+			// payloadFields() auf die Leitung gibt. Aufklappbar statt ausgeklappt, damit
+			// der Dialog nicht erschlaegt — aber ohne Klick auf „senden" dazwischen.
+			var details = document.createElement( 'details' );
+			var summary = document.createElement( 'summary' );
+			summary.textContent = config.diagnosticsShow || '';
+			var pre = document.createElement( 'pre' );
+			pre.className = 'gdpr-deactivate-diagnostics-text';
+			pre.textContent = config.diagnostics;
+			details.appendChild( summary );
+			details.appendChild( pre );
+
+			diagWrap.appendChild( diagLabel );
+			diagWrap.appendChild( details );
+		}
+
 		var notice = document.createElement( 'p' );
 		notice.className = 'gdpr-deactivate-notice';
 		notice.textContent = config.notice || '';
@@ -239,10 +336,16 @@
 		cancelButton.textContent = config.cancel || '';
 
 		sendButton.addEventListener( 'click', function () {
-			onClose( normalizeText( textarea.value, config.maxChars ) );
+			onClose( {
+				text: normalizeText( textarea.value, config.maxChars ),
+				reason: chosen,
+				diagnostics: !! diagCheck.checked
+			} );
 		} );
 		skipButton.addEventListener( 'click', function () {
-			onClose( '' );
+			// „Ohne Senden deaktivieren" heisst ohne alles — auch ohne den angeklickten
+			// Grund und ohne den Abzug, selbst wenn der Haken gesetzt war.
+			onClose( { text: '', reason: '', diagnostics: false } );
 		} );
 		cancelButton.addEventListener( 'click', function () {
 			onClose( null );
@@ -254,8 +357,11 @@
 
 		box.appendChild( heading );
 		box.appendChild( intro );
+		box.appendChild( reasonBox );
+		box.appendChild( support );
 		box.appendChild( label );
 		box.appendChild( textarea );
+		box.appendChild( diagWrap );
 		box.appendChild( notice );
 		box.appendChild( actions );
 		overlay.appendChild( box );
@@ -291,18 +397,18 @@
 			event.preventDefault();
 
 			var target = link.getAttribute( 'href' );
-			var overlay = buildDialog( config, function ( text ) {
+			var overlay = buildDialog( config, function ( result ) {
 				if ( overlay.parentNode ) {
 					overlay.parentNode.removeChild( overlay );
 				}
 
 				// null means "cancel" — stay on the page, deactivate nothing.
-				if ( null === text ) {
+				if ( null === result ) {
 					return;
 				}
 
-				if ( shouldSend( text ) ) {
-					send( text, config );
+				if ( shouldSend( result ) ) {
+					send( result, config );
 				}
 
 				window.location.href = target;

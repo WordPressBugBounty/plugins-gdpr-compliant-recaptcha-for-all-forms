@@ -360,13 +360,37 @@ class Message_Page {
 			}
 		}
 
+		// A spam verdict on an unarmed risk request (technical row `_gdpr_not_enforced`,
+		// Stamp_Risk): it was recorded, NOT blocked — the reason line must not say
+		// "Blocked", or the operator reads a refused order that actually went through.
+		$not_enforced = null;
+		foreach ( $details as $detail ) {
+			if ( '_gdpr_not_enforced' === $detail->rgd_attribute ) {
+				$not_enforced = (string) $detail->rgd_value;
+				break;
+			}
+		}
+
 		$html_details = '';
 		if ( null !== $reason_value ) {
 			$html_details .= '<p class="gdpr-reason-line">'
-				. esc_html__( 'Blocked because:', 'gdpr-compliant-recaptcha-for-all-forms' )
+				. ( null === $not_enforced
+					? esc_html__( 'Blocked because:', 'gdpr-compliant-recaptcha-for-all-forms' )
+					: esc_html__( 'Classified as spam because:', 'gdpr-compliant-recaptcha-for-all-forms' ) )
 				. ' <span class="gdpr-reason-badge">'
 				. esc_html( Classification_Reason::label( $reason_value ) )
 				. '</span></p>';
+			if ( null !== $not_enforced ) {
+				$html_details .= '<p class="gdpr-reason-detail"><span class="gdpr-reason-badge">'
+					. esc_html__( 'Not blocked', 'gdpr-compliant-recaptcha-for-all-forms' )
+					. '</span> '
+					. esc_html(
+						Risk_Signatures::REGISTRATION === $not_enforced
+							? __( 'This registration went through: blocking on registration forms is off (Settings, Spam Processing).', 'gdpr-compliant-recaptcha-for-all-forms' )
+							: __( 'This checkout went through: blocking on checkout and donation forms is off (Settings, Spam Processing).', 'gdpr-compliant-recaptcha-for-all-forms' )
+					)
+					. '</p>';
+			}
 
 			// THE CAUSE, not just the kind. Four different failures share the label
 			// "No proof of work", and the badge alone cannot tell a blocked bot from a
@@ -476,7 +500,8 @@ class Message_Page {
 		foreach ( $details as $detail ) {
 			// Already shown as the badge/route/scoring line above — do not repeat as a raw row.
 			if ( '_gdpr_reason' === $detail->rgd_attribute || '_gdpr_route' === $detail->rgd_attribute
-				|| '_gdpr_scoring' === $detail->rgd_attribute || '_gdpr_pow_probe' === $detail->rgd_attribute ) {
+				|| '_gdpr_scoring' === $detail->rgd_attribute || '_gdpr_pow_probe' === $detail->rgd_attribute
+				|| '_gdpr_not_enforced' === $detail->rgd_attribute ) {
 				continue;
 			}
 			$html_details .= '<tr class="table-body">';

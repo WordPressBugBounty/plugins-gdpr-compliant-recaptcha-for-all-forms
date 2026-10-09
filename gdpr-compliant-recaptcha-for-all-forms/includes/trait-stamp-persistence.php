@@ -17,8 +17,9 @@
  *                                     handbuch/detection.md. save_for_analysis(),
  *                                     save_message() with its field-tree flattening
  *                                     (generate_paths(), check_skipped_fields(),
- *                                     access_object_or_array()), the analysis-verdict
- *                                     upserts and log_fail2ban_event().
+ *                                     access_object_or_array()) and the analysis-verdict
+ *                                     upserts. log_fail2ban_event() moved on to
+ *                                     trait-stamp-fail2ban.php (2026-09-25).
  *
  * WHY check_submit() STAYS BEHIND, together with the gate and the PoW verification.
  * Those three read and write the SAME instance state, and that state is the semantics:
@@ -57,6 +58,8 @@ defined( 'ABSPATH' ) || die( 'Are you ok?' );
  * Saving a submission and everything that writes to disk. Composed into Stamp.
  */
 trait Stamp_Persistence {
+	// The fail2ban writer, moved out on 2026-09-25 (trait-stamp-fail2ban.php).
+	use Stamp_Fail2ban;
 
 	private function save_for_analysis() {
 		$ajax      = defined( 'DOING_AJAX' ) && DOING_AJAX;
@@ -128,69 +131,6 @@ trait Stamp_Persistence {
 		}
 		// Modify the value by adding the prefix
 		return $current_object;
-	}
-
-	/** Transforms an array into a string-representation */
-
-	private function log_fail2ban_event( $message, $is_login_attempt = false ) {
-		// Get the configured log directory path
-		$log_path = get_option( Option::POW_FAIL_2_BAN_PATH );
-
-		// If no path is provided, simply do nothing (no error logging)
-		if ( empty( $log_path ) ) {
-			return;
-		}
-
-		// Check if the directory exists; if not, attempt to create it
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- fail2ban log dir on an admin-configured path; direct mkdir is intended, WP_Filesystem adds nothing here.
-		if ( ! is_dir( $log_path ) && ! mkdir( $log_path, 0755, true ) ) {
-			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional operator-facing diagnostic when the fail2ban path is misconfigured.
-			error_log( 'Fail2Ban Log Path does not exist and could not be created: ' . $log_path );
-			return;
-		}
-
-		// Ensure the directory is writable before proceeding
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable -- writability probe on the admin-configured fail2ban log path; direct check is intended.
-		if ( ! is_writable( $log_path ) ) {
-			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional operator-facing diagnostic when the fail2ban path is misconfigured.
-			error_log( 'Fail2Ban Log Path is not writable: ' . $log_path );
-			return;
-		}
-
-		// Define log file paths
-		$log_files = array(
-			'spam' => $log_path . '/spam.log',
-			'auth' => $log_path . '/auth.log',
-		);
-
-		// Generate timestamp in ISO 8601 format (UTC)
-		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date -- fail2ban log timestamp; behaviour deliberately preserved (existing logs/filters parse this exact server-local format), so no gmdate() switch.
-		$timestamp     = date( 'Y-m-d\TH:i:s\Z' );
-		$hostname      = isset( $_SERVER['SERVER_NAME'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_NAME'] ) ) : 'unknown_host'; // Get the server hostname
-		$priority_spam = '<42>'; // Priority for spam logs
-		$priority_auth = '<34>'; // Priority for authentication logs
-
-		// Defence in depth: fail2ban parses one event per line, so nothing interpolated
-		// into a line may carry CR/LF or other control characters (log-injection → forged
-		// ban lines). Callers already sanitise the username, but normalise here as well,
-		// and restrict the hostname (Host header on a misconfigured vhost) to safe chars.
-		$message  = preg_replace( '/[\x00-\x1F\x7F]+/', ' ', (string) $message );
-		$hostname = preg_replace( '/[^A-Za-z0-9.\-:_]/', '', $hostname );
-		if ( '' === (string) $hostname ) {
-			$hostname = 'unknown_host';
-		}
-
-		// Create the spam log entry (always logged)
-		$spam_log_entry = sprintf( "%s%s %s spam: %s\n", $priority_spam, $timestamp, $hostname, $message );
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- fail2ban needs an atomic append (FILE_APPEND | LOCK_EX) to a plain log file; WP_Filesystem has no append+lock equivalent.
-		file_put_contents( $log_files['spam'], $spam_log_entry, FILE_APPEND | LOCK_EX );
-
-		// If the request is a WordPress login attempt, also write to the authentication log
-		if ( $is_login_attempt ) {
-			$auth_log_entry = sprintf( "%s%s %s auth: %s\n", $priority_auth, $timestamp, $hostname, $message );
-			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- fail2ban needs an atomic append (FILE_APPEND | LOCK_EX) to a plain log file; WP_Filesystem has no append+lock equivalent.
-			file_put_contents( $log_files['auth'], $auth_log_entry, FILE_APPEND | LOCK_EX );
-		}
 	}
 
 	/** Transforms an array into a string-representation
@@ -362,9 +302,11 @@ trait Stamp_Persistence {
 	 * THE SIDE EFFECT, named rather than hidden: with the option OFF, a spam POST that
 	 * carries `add-to-cart` only in its query string is no longer stored either. The
 	 * VERDICT does not change — save_message() governs persistence, never block/no-block.
-	 * THE THIRD SHAPE, `wc-ajax=add_to_cart`, is the default ajax button, seeded since
-	 * 2026-08-28 (seeds.md); its body carries neither other key. Value-pinned like the
-	 * seed: `wc-ajax=checkout` is deliberately not cart noise, the read-only ones are not.
+	 * THE THIRD SHAPE, `wc-ajax=add_to_cart`, is the default ajax button; its body carries
+	 * neither other key. Value-pinned: `wc-ajax=checkout` is deliberately not cart noise,
+	 * the read-only ones are not. Since 2026-10 no cart shape is seeded or hard-wired any
+	 * more (seeds.md) — this only answers for a cart line an operator added himself, and
+	 * also keeps such a request out of the repeat-sender lock (check_submit()).
 	 *
 	 * @return bool True if this request is WooCommerce cart activity.
 	 */
@@ -373,6 +315,26 @@ trait Stamp_Persistence {
 		return isset( $request['add-to-cart'] )
 			|| ( isset( $request['wc-ajax'] ) && 'add_to_cart' === $request['wc-ajax'] )
 			|| ( isset( $request['update_cart'] ) && isset( $request['woocommerce-cart-nonce'] ) );
+	}
+
+	/**
+	 * Whether the repeat-sender lock (Echo_Store) may look at this request at all — the
+	 * ONE gate for both directions: check_submit() neither RECORDS a cart request's
+	 * values nor MATCHES a cart request against the store.
+	 *
+	 * Defence in depth (2026-10). No cart line is seeded any more (handbuch/seeds.md), but
+	 * an operator may add one by hand, and then this was measured: a blocked tokenless
+	 * add-to-cart (no_pow:no_token, which seeds) put the product's `product_sku` into the
+	 * store whenever it had seven digits or more — the phone extractor read it as a phone
+	 * number, and `product_sku` is no technical key. The next shopper of that product was
+	 * blocked as echo_lock for 36 hours, on any form. A cart request carries no content
+	 * that says anything about a sender, so it neither teaches nor triggers the lock; the
+	 * verdict itself (no_pow etc.) is untouched.
+	 *
+	 * @return bool False for WooCommerce cart activity (is_shopping_cart_request()).
+	 */
+	private function echo_lock_applies() {
+		return ! $this->is_shopping_cart_request();
 	}
 
 	public function save_message( $fields, $action, $ajax, $message_type, $ip, $origin = '' ) {
@@ -415,7 +377,7 @@ trait Stamp_Persistence {
 			// The name heuristic inside redact() is the primary line and covers
 			// submissions the plugin's JS never touched (no-JS logins, hand-built
 			// bodies); the marker is an additional signal on top.
-			$fields = Credential_Fields::redact( $fields, $marker_paths, $learned_names );
+			$fields = Credential_Fields::redact( $fields, $marker_paths, $learned_names, null !== $this->request_risk_class );
 
 			// Only AFTER hashPWFields has been consumed for the credential paths
 			// above: drop the plugin's own injected fields so they never become
@@ -535,6 +497,8 @@ trait Stamp_Persistence {
 			if ( null !== $this->get_rest_route() ) {
 				$technical_fields['_gdpr_route'] = $this->get_rest_route();
 			}
+			// A spam verdict on an unarmed risk request: recorded, not enforced (Stamp_Risk).
+			$technical_fields = $this->with_risk_detail( $technical_fields );
 
 			foreach ( $fields as $key => $value ) {
 				if ( is_array( $value ) || is_object( $value ) ) {
