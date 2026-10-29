@@ -64,11 +64,19 @@ trait Settings_Default_Routes {
 	 * "Drei Defekte…"):
 	 * - WS Form 1.12.0: namespace `ws-form/v1` (ws-form.php:71,
 	 *   `WS_FORM_RESTFUL_NAMESPACE`), anonymous POST submit endpoint `/submit/`
-	 *   (api/class-ws-form-api.php:332, `permission_callback => true`) — matched via
-	 *   the namespace-suffix wildcard, not the exact endpoint, so future WS Form REST
-	 *   endpoints stay covered too. Main plugin file is `ws-form/ws-form.php` (the
-	 *   previous ajax-action entry used the wrong slug `ws-forms/ws-forms.php` and
-	 *   never fired).
+	 *   (api/class-ws-form-api.php:332, `permission_callback => true`); the frontend
+	 *   builds exactly that path (includes/class-ws-form-common.php:1017-1030
+	 *   get_api_path( 'submit' ), public/class-ws-form-public.php:1574). Seeded as the
+	 *   EXACT endpoint since 2026-10-09. Until then this was the namespace wildcard
+	 *   `ws-form/v1/*` ("so future endpoints stay covered") — measured that day: the
+	 *   namespace has 59 POST paths, 58 of them admin-only (form/field/group save,
+	 *   publish, settings), and an administrator saving a form in the WS Form editor got
+	 *   HTTP 422 `no_pow:no_token` unless his address had a fresh PoW row from a frontend
+	 *   visit. `ws-form/v1/submit` matches exactly one of the 59 in both URL shapes;
+	 *   `ws-form/v1/submit/*` would match eleven, admin routes included — never that.
+	 *   Existing installations are moved by Ws_Form_Route_Narrowing. Main plugin file is
+	 *   `ws-form/ws-form.php` (the previous ajax-action entry used the wrong slug
+	 *   `ws-forms/ws-forms.php` and never fired).
 	 * - Otter Blocks 3.2.1: namespace built from `$namespace . $version` = `otter/v1`
 	 *   (inc/server/class-form-server.php:49,57), route `/form/frontend`
 	 *   (class-form-server.php:174-177, `WP_REST_Server::CREATABLE`). The previous
@@ -95,9 +103,11 @@ trait Settings_Default_Routes {
 		}
 
 		// *** WS Form (submits over its own REST namespace, no admin-ajax path) ***
+		// The EXACT submit endpoint, never the namespace — see the docblock above: the
+		// wildcard put WS Form's own editor saves behind the spam gate.
 		if ( array_key_exists( 'ws-form/ws-form.php', $installed_plugins ) ) {
-			$routes[] = 'ws-form/v1/*';
-			self::display_admin_notice( __( 'WS Form detected – added REST route: ws-form/v1/*', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+			$routes[] = 'ws-form/v1/submit';
+			self::display_admin_notice( __( 'WS Form detected – added REST route: ws-form/v1/submit', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** Otter Blocks (Gutenberg form block submits over REST, no admin-ajax path) ***
@@ -129,6 +139,8 @@ trait Settings_Default_Routes {
 		// itself (the class of self-lockout `RestRoute::reject_self_lockout_lines()`
 		// guards against for WordPress' OWN core namespaces, but that guard does not
 		// and cannot know about a third-party plugin's admin routes).
+		// The route is registered EDITABLE (inc/form-submit.php:71-79), so the line is in
+		// RestRoute::UPDATE_METHOD_LINES: a PUT/PATCH to it is judged like the POST.
 		if ( array_key_exists( 'sureforms/sureforms.php', $installed_plugins ) ) {
 			$routes[] = 'sureforms/v1/submit-form';
 			self::display_admin_notice( __( 'SureForms detected – added REST route: sureforms/v1/submit-form', 'gdpr-compliant-recaptcha-for-all-forms' ) );
@@ -158,8 +170,9 @@ trait Settings_Default_Routes {
 		// `current_user_can( 'manage_options' )` and reachable from MetForm's own admin
 		// screens — a wildcard would put those admin-only endpoints behind this plugin's
 		// spam gate too. Fixing the action segment to the literal `insert` keeps the seed
-		// off all of them, and `Stamp::check_rest_routes()` filters to `REQUEST_METHOD ===
-		// 'POST'` before any route comparison runs at all (class-stamp.php), so even a
+		// off all of them, and `Stamp::check_rest_routes()` filters to the dispatched POST
+		// (and PUT/PATCH only for RestRoute::UPDATE_METHOD_LINES, which this line is not)
+		// before any route comparison runs at all (trait-stamp-triage.php), so even a
 		// same-path GET/DELETE admin call — none exists here, checked — could never reach
 		// this gate regardless. MetForm\Core\Forms\Api (core/forms/api.php) is a wholly
 		// separate `metform/v1/forms/*` namespace (admin form settings/builder, all
@@ -209,8 +222,9 @@ trait Settings_Default_Routes {
 		// includes/admin/class-userfeedback-results.php:61-67) and DELETE (delete
 		// responses, class-userfeedback-results.php:127-146), both `permission_callback =>
 		// view_results_permission_check`. Neither collides in practice: `check_rest_routes()`
-		// (class-stamp.php:502) returns `false` outright unless `$_SERVER['REQUEST_METHOD']
-		// === 'POST'`, before the route is even extracted, so the admin's GET/DELETE calls
+		// (trait-stamp-triage.php) returns `false` outright unless the dispatched method is
+		// POST (or PUT/PATCH, only for RestRoute::UPDATE_METHOD_LINES, which this line is
+		// not), before the route is even extracted, so the admin's GET/DELETE calls
 		// to this identical path never reach the route comparison at all — checked
 		// explicitly rather than assumed, this is exactly the class of near-miss
 		// (Formidable's `frm_action`, MailPoet's whole API) CLAUDE.md requires checking
@@ -245,7 +259,8 @@ trait Settings_Default_Routes {
 		//
 		// CHECKED AGAINST THE PRODUCT'S OWN BACKEND: `editor.js` ruft nur
 		// `crowdsignal-forms/v1/polls/` und `…/account/info` — nie die `/response`-Pfade.
-		// Unter diesen Pfaden ist ausschliesslich EDITABLE registriert, kein GET.
+		// Unter diesen Pfaden ist ausschliesslich EDITABLE registriert, kein GET — deshalb
+		// stehen beide Zeilen in RestRoute::UPDATE_METHOD_LINES (PUT/PATCH bewertet wie POST).
 		if ( array_key_exists( 'crowdsignal-forms/crowdsignal-forms.php', $installed_plugins ) ) {
 			$routes[] = 'crowdsignal-forms/v1/nps/*/response';
 			$routes[] = 'crowdsignal-forms/v1/feedback/*/response';
@@ -306,6 +321,21 @@ trait Settings_Default_Routes {
 		if ( array_key_exists( 'site-reviews/site-reviews.php', $installed_plugins ) ) {
 			$routes[] = 'site-reviews/v1/submissions';
 			self::display_admin_notice( __( 'Site Reviews detected – added REST route: site-reviews/v1/submissions', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// *** Welle 7 (2026-10-09), ERHEBUNG-BUILDER-2.md ***
+		// BACK IN STOCK NOTIFIER 7.4.5: POST back-in-stock/v1/subscriber/create
+		// (includes/class-ajax.php:341-349); die permission_callback verlangt nur, DASS ein
+		// X-WP-Nonce-Kopf da ist (:353-357). Der Client nimmt diese Route, wenn der Schalter
+		// `ajax_submission_via` auf REST steht (cwginstocknotifier.php:272, 289) — sonst die
+		// Action `cwginstock_product_subscribe` (wave_7_ajax_actions()). Registriert ist die
+		// Route IMMER: ohne diese Zeile laeuft ein Bot auf jeder Installation am Ajax-Seed
+		// vorbei. Kein Admin-Bundle ruft sie. Die zweite REST-Familie des Produkts
+		// (`wc-instocknotifier/v3/*`, includes/class-rest-api.php:167-172) verlangt
+		// WooCommerce-REST-Rechte und bleibt aussen vor.
+		if ( array_key_exists( 'back-in-stock-notifier-for-woocommerce/cwginstocknotifier.php', $installed_plugins ) ) {
+			$routes[] = 'back-in-stock/v1/subscriber/create';
+			self::display_admin_notice( __( 'Back In Stock Notifier detected – added REST route: back-in-stock/v1/subscriber/create', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
 		// *** WooCommerce — the Store API cart: DELIBERATELY NOT SEEDED (measured) ***

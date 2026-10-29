@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.1
-Stable tag: 6.2.0
+Stable tag: 6.3.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -78,13 +78,15 @@ And they all share one structural limit: they protect the forms they ship an int
 
 **WooCommerce:** Checkout, Login, Password Reset, Product Reviews (the shopping cart is deliberately not checked)
 
-**Form and page builders:** Contact Form 7, WPForms, Elementor Pro Forms, Ninja Forms, Fluent Forms, Forminator, Gravity Forms, Formidable Forms, Everest Forms, WS Form, SureForms, MetForm, JetFormBuilder, Otter Blocks, Spectra, Kadence Blocks, Essential Blocks, Divi Forms, MW WP Form, Jetpack Forms, Mailchimp for WordPress, MailPoet, WP User Frontend, wpDiscuz, bbPress (topics & replies), Thrive Architect, Thrive Leads, Thrive Apprentice, Thrive Quiz Builder, Thrive Comments, UserFeedback, Popup Maker (subscription form), YITH WooCommerce Wishlist, Newsletter (subscription forms), CoBlocks, Popup Builder, Hustle, MailerLite, Email Subscribers, Quiz and Survey Master, WP-Polls, Form Maker, Gutena Forms, Happyforms, Brevo, Mailchimp List Subscribe, Calculated Fields Form, Crowdsignal Forms (NPS & feedback), Pirate Forms, Hostinger Reach, FormLayer, My Sticky Elements, Cool FormKit, Visual Form Builder, Royal Elementor Addons (forms), Happy Addons (Mailchimp form), Chaty (contact form), Jeg Kit (Mailchimp form), Element Pack Lite (contact form), Depicter (lead forms), Hello Plus (forms), PopupKit (subscription form)
+**Form and page builders:** Contact Form 7, WPForms, Elementor Pro Forms, Ninja Forms, Fluent Forms, Forminator, Gravity Forms, Formidable Forms, Everest Forms, WS Form, SureForms, MetForm, JetFormBuilder, Otter Blocks, Spectra, Kadence Blocks, Essential Blocks, Divi Forms, MW WP Form, Jetpack Forms, Mailchimp for WordPress, MailPoet, WP User Frontend, wpDiscuz, bbPress (topics & replies), Thrive Architect, Thrive Leads, Thrive Apprentice, Thrive Quiz Builder, Thrive Comments, UserFeedback, Popup Maker (subscription form), YITH WooCommerce Wishlist, Newsletter (subscription forms), CoBlocks, Popup Builder, Hustle, MailerLite, Email Subscribers, Quiz and Survey Master, WP-Polls, Form Maker, Gutena Forms, Happyforms, Brevo, Mailchimp List Subscribe, Calculated Fields Form, Crowdsignal Forms (NPS & feedback), Pirate Forms, Hostinger Reach, FormLayer, My Sticky Elements, Cool FormKit, Visual Form Builder, Royal Elementor Addons (forms), Happy Addons (Mailchimp form), Chaty (contact form), Jeg Kit (Mailchimp form), Element Pack Lite (contact form), Depicter (lead forms), Hello Plus (forms), PopupKit (subscription form), Brave Popup Builder (forms), Jetpack CRM (lead forms), Back In Stock Notifier (waitlist form)
 
-**Reviews and testimonials:** Customer Reviews for WooCommerce, Strong Testimonials, Site Reviews, WP Ultimate Review
+**Reviews, testimonials and guestbooks:** Customer Reviews for WooCommerce, Strong Testimonials, Site Reviews, WP Ultimate Review, WP Customer Reviews, Gwolle Guestbook
+
+**Forums, directories and jobs:** wpForo (topics & replies), WP Job Openings / HireZoot (applications), Directorist (contact & report forms)
 
 **Checkout and registration forms (recognised and recorded; blocking them is a separate switch, off by default):** BuddyPress (registration), WP-Members (registration), ProfilePress (registration & checkout), Easy Digital Downloads (checkout), CartFlows (checkout login), Amelia (booking), Bookly (booking)
 
-**Added in under a minute, without code** — switch on direct analysis mode, submit the form once, click save: registration forms (WordPress and WooCommerce), Ultimate Member, BuddyForms, MemberPress, Paid Memberships Pro, CheckoutWC & Flux Checkout, Quform, NEX-Forms, Bit Form, Form Maker, Funnelforms, Mailjet, SiteOrigin Page Builder, Calculated Fields Form, weForms, Responsive Contact Form Builder, Smart Forms, Kali Forms, Happyforms, ApplyOnline, FormCraft, CRM Perks Forms, Tripetto, Easy Form Builder, SimpleForm — and any hand-coded or custom form.
+**Added in under a minute, without code** — switch on direct analysis mode, submit the form once, click save: registration forms (WordPress and WooCommerce), Ultimate Member, BuddyForms, MemberPress, Paid Memberships Pro, CheckoutWC & Flux Checkout, Quform, NEX-Forms, Bit Form, Funnelforms, Mailjet, SiteOrigin Page Builder, weForms, Responsive Contact Form Builder, Smart Forms, Kali Forms, ApplyOnline, FormCraft, CRM Perks Forms, Tripetto, Easy Form Builder, SimpleForm — and any hand-coded or custom form.
 
 One honest limit: a form that is hosted elsewhere and only embedded on your page (Typeform, Jotform, Zoho Forms, HubSpot, OptinMonster and the like) sends its data straight to that service. The submission never reaches WordPress, so no WordPress plugin — this one included — can check it.
 
@@ -167,6 +169,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.3.0 =
+Flagged spam carries its prefix in the e-mail your form sends again (lost since 4.1). REST requests from logged-in users who can edit posts skip the check when they carry a valid REST nonce; SureForms and Crowdsignal submissions sent as PUT or PATCH are now checked. More form plugins detected.
 = 6.2.0 =
 Shoppers are no longer blocked: the WooCommerce cart is not checked any more, the invisible check starts when the page loads, and the server waits up to 5 seconds for slow devices. Also fixes a fatal error on uninstall and settings lines with => or &. Many more form plugins detected.
 = 6.1.0 =
@@ -204,6 +208,19 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.3.0 =
+* Fixed: The flag prefix now also reaches the e-mail for fields sent as JSON (e.g. Ninja Forms, REST requests).
+* Fixed: A "Fieldname:prefix" line whose prefix contains a colon is no longer ignored.
+* Fixed: The "Fieldname:prefix to flag spam" prefix now shows up in the e-mail the form sends again (lost in 4.1).
+* Fixed: SureForms and Crowdsignal Forms submissions sent as PUT or PATCH are now checked like POST.
+* Changed: REST requests from logged-in users who can edit posts skip the spam check (valid REST nonce needed).
+* Fixed: The body of a PUT or PATCH request is now read, so the blocklist sees it too.
+* Fixed: Saving a form in the WS Form editor could be rejected as spam; only visitor submissions are checked now.
+* Added: Out-of-the-box detection for Directorist contact/report forms; registration and listings are recorded.
+* Added: Out-of-the-box detection for Brave Popup Builder, Jetpack CRM lead forms and WP Job Openings (HireZoot).
+* Added: Out-of-the-box detection for the Back In Stock Notifier waitlist form.
+* Added: Out-of-the-box detection for Gwolle Guestbook, WP Customer Reviews and wpForo (new topics and replies).
+* Fixed: Deleting the plugin on a multisite network now removes its data from every site, not just the main one.
 = 6.2.0 =
 * Fixed: The repeat-sender lock no longer remembers numbers, so order, product, event or phone numbers lock out no one.
 * Changed: The server now waits up to 5 seconds for a slow device to finish its check before rejecting a submission.

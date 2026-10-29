@@ -23,6 +23,7 @@ class Settings_Menu {
 	use Settings_Default_Actions;
 	use Settings_Default_Actions_Wave2;
 	use Settings_Default_Actions_Wave3;
+	use Settings_Default_Actions_Wave4;
 	use Settings_Default_Patterns;
 	use Settings_Default_Patterns_Wave2;
 	use Settings_Default_Routes;

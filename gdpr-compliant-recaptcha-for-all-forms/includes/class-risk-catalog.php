@@ -39,6 +39,11 @@ final class Risk_Catalog {
 			// Override: PUT (checkout/thunks.ts:173-177) and is not judged since
 			// RestRoute::effective_method() — without that this line would spend token
 			// uses every 1.5 s. The operator's backend sends no POST to wc/store/v1/*.
+			// Since 2026-10-09 the override-PUT draft save carries this class too (it is
+			// still not judged: PUT on this line is not in RestRoute::UPDATE_METHOD_LINES).
+			// Only a blocklist hit inside a draft body reaches the verdict; it follows the
+			// arming switch instead of blocking outright, and its analysis row gets card
+			// redaction.
 			// NAMED GAP: the batch route accepts checkout as a sub-request server-side
 			// (StoreApi/Routes/V1/Checkout.php:144) — see handbuch/detection.md.
 			// The classic checkout (`wc-ajax=checkout`) is NOT here: it blocks since long
@@ -236,6 +241,33 @@ final class Risk_Catalog {
 				'class'   => Risk_Signatures::CHECKOUT,
 				'kind'    => Risk_Signatures::KIND_ACTION,
 				'line'    => 'wcf_woocommerce_login',
+			),
+
+			// *** Directorist 8.10.3 — registration and listing submission (Welle 7) ***
+			// Registration: wp_ajax_nopriv_directorist_register_form (class-user.php:60-61);
+			// FormData of the signup <form> plus action (assets/build/js/public/account.js).
+			// Auto-login is wp_set_auth_cookie (:303-304) — no second wp_authenticate_user.
+			// Listing submission: wp_ajax_nopriv_add_listing_action (class-add-listing.php:
+			// 54-55), FormData + serializeArray of #directorist-add-listing-form
+			// (assets/build/js/global/add-listing.js), a frontend-only form id
+			// (templates/listing-form/add-listing.php:20). For a guest it CREATES AN ACCOUNT
+			// (atbdp_guest_submission(), helper-functions.php:2390, cookie :2402-2403) —
+			// hence the risk class, not the ordinary seed. The login (`ajaxlogin`,
+			// `directorist_ajax_quick_login`, class-ajax-handler.php:58, 108) matches neither
+			// line; neither name occurs in an admin bundle or as a field name.
+			array(
+				'gate'    => 'directorist/directorist-base.php',
+				'product' => 'Directorist (registration & listing submission)',
+				'class'   => Risk_Signatures::REGISTRATION,
+				'kind'    => Risk_Signatures::KIND_ACTION,
+				'line'    => 'directorist_register_form',
+			),
+			array(
+				'gate'    => 'directorist/directorist-base.php',
+				'product' => 'Directorist (registration & listing submission)',
+				'class'   => Risk_Signatures::REGISTRATION,
+				'kind'    => Risk_Signatures::KIND_ACTION,
+				'line'    => 'add_listing_action',
 			),
 		);
 	}

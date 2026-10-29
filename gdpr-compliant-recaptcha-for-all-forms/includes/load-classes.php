@@ -68,6 +68,8 @@ require_once __DIR__ . '/class-blocked-values-migration.php';
 require_once __DIR__ . '/class-text-option-value.php';
 // Einmaliges Entfernen der frueher geseedeten WooCommerce-Warenkorbzeilen (RCM_Main::activate()).
 require_once __DIR__ . '/class-cart-seed-removal.php';
+// Einmaliges Verengen der frueher geseedeten WS-Form-Namensraum-Zeile (RCM_Main::activate()).
+require_once __DIR__ . '/class-ws-form-route-narrowing.php';
 require_once __DIR__ . '/class-pattern-matcher.php';
 // Die JSON-Regelzeilen der Action-Liste (2026-08-28). Delegiert jeden Feldvergleich an
 // Pattern_Matcher, steht deshalb dahinter.
@@ -87,6 +89,8 @@ require_once __DIR__ . '/trait-stamp-fail2ban.php';
 require_once __DIR__ . '/trait-stamp-persistence.php';
 require_once __DIR__ . '/trait-stamp-triage.php';
 require_once __DIR__ . '/trait-stamp-risk.php';
+require_once __DIR__ . '/class-flag-prefix.php';
+require_once __DIR__ . '/trait-stamp-flagging.php';
 require_once __DIR__ . '/class-stamp.php';
 // Support-Report (Diagnostics-Reiter): liest Option/ProofOfWork/Stamp/Echo_Store,
 // muss also nach allen vieren stehen.
@@ -102,6 +106,8 @@ require_once __DIR__ . '/trait-settings-default-actions-wave2.php';
 // Welle 4 (2026-09-24) traegt eine dritte Action- und eine zweite Musterdatei — beide
 // abgespalten, weil ihre Vorgaenger am 600-Zeilen-Deckel standen.
 require_once __DIR__ . '/trait-settings-default-actions-wave3.php';
+// Welle 7 (2026-10-09): eigene Datei, damit wave3 die naechste Welle nicht am Deckel traegt.
+require_once __DIR__ . '/trait-settings-default-actions-wave4.php';
 require_once __DIR__ . '/trait-settings-default-patterns.php';
 require_once __DIR__ . '/trait-settings-default-patterns-wave2.php';
 require_once __DIR__ . '/trait-settings-default-routes.php';

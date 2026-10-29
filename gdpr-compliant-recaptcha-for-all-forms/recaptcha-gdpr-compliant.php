@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 6.2.0
+	 * Version: 6.3.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '6.2.0';
+	const VERSION = '6.3.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -561,6 +561,8 @@ class RCM_Main {
 		// Same placement, same reason: the WooCommerce cart lines earlier versions seeded
 		// leave the scope once (Scope_Sync never removes a default by itself).
 		Cart_Seed_Removal::maybe_run();
+		// Same placement: the WS Form namespace wildcard becomes its submit endpoint once.
+		Ws_Form_Route_Narrowing::maybe_run();
 		// Same placement, same reason; also must run before admin_init (Scope_Sync).
 		Risk_Enforcement::maybe_migrate();
 	}

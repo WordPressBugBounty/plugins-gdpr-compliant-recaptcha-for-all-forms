@@ -15,18 +15,19 @@
  * itself with its ajax branch, the login exclusion, the Wordfence exclusion, the three
  * run() registrations and the two check_submit() calls. The constructor keeps what has
  * to happen for EVERY request regardless of the verdict — capture_request_data(),
- * register_token_endpoints(), Echo_Store::register_cache_hooks(), check_rest_routes()
- * and save_for_analysis().
+ * register_token_endpoints(), Echo_Store::register_cache_hooks(), the call to
+ * check_rest_routes() (defined here since 2026-10-09) and save_for_analysis().
  *
- * TWO ENTRY POINTS INTO THE TRIAGE, and only one of them is the normal one. For every
- * request that is not a wp-admin SCREEN POST — all frontend traffic, ajax, REST,
- * wp-login.php — the constructor calls triage_request() itself, synchronously, at the
- * point where the block always sat. For a screen POST it instead defers to
- * evaluate_admin_screen_post() on `init` priority 0, which asks the one question that
- * cannot be asked at include time (current_user_can(), pluggable.php is not loaded yet)
- * and then either skips the evaluation entirely or runs the very same triage_request().
- * There is exactly one triage body; the screen branch changes WHEN it runs and WHETHER
- * it runs, never WHAT it does.
+ * THREE ENTRY POINTS INTO THE TRIAGE, and only one of them is the normal one. For every
+ * request that is neither a wp-admin SCREEN POST nor a REST request carrying a logged_in
+ * cookie — all anonymous traffic, frontend, ajax, REST, wp-login.php — the constructor
+ * calls triage_request() itself, synchronously, at the point where the block always
+ * sat. For a screen POST it instead defers to evaluate_admin_screen_post() on `init`
+ * priority 0, for such a REST request to evaluate_rest_request() on `init` 0; both ask
+ * the one question that cannot be asked at include time (current_user_can(),
+ * pluggable.php is not loaded yet) and then either skip the evaluation entirely or run
+ * the very same triage_request(). There is exactly one triage body; the two branches
+ * change WHEN it runs and WHETHER it runs, never WHAT it does.
  *
  * is_special_case_request() DELIBERATELY STAYED in class-stamp.php. It is the span end
  * marker of tests/unit/StampGateTest.php and tests/unit/StampRouteOrderingTest.php,
@@ -116,11 +117,119 @@ trait Stamp_Triage {
 	 * @return void
 	 */
 	public function evaluate_admin_screen_post() {
-		if ( current_user_can( 'edit_posts' ) ) {
+		if ( $this->sender_is_operator() ) {
 			return;
 		}
 
 		$this->triage_request();
+	}
+
+	/**
+	 * THE one capability question of the spam path — two exemptions, one helper. The
+	 * screen exemption above and the REST exemption below both ask exactly this, and
+	 * nothing else in Stamp asks for a capability at all
+	 * (tests/unit/StampScreenExemptionTest.php counts it). Every reason for `edit_posts`
+	 * and against a filter is in evaluate_admin_screen_post()'s docblock; they hold for
+	 * both callers unchanged.
+	 *
+	 * @return bool
+	 */
+	private function sender_is_operator(): bool {
+		return current_user_can( 'edit_posts' );
+	}
+
+	/**
+	 * The deferred half of the REST exemption: a REST submission from the site's operator
+	 * — capability AND a REST nonce — is not evaluated; everyone else gets the very same
+	 * triage_request(), only on `init` 0 instead of at include time.
+	 *
+	 * Registered by the constructor as `add_action( 'init', …, 0 )` when, and only when,
+	 * rest_exemption_may_apply() said yes. Public because a hook callback has to be.
+	 *
+	 * WHY `init` 0, AND WHY THE NONCE IS OUR QUESTION. Measured in the container
+	 * (WP 7.1, probe-results of the 2026-10-09 plan): with the logged_in cookie alone, the
+	 * current user at `init` 0 IS the administrator — core demotes him to user 0 only
+	 * later, inside WP_REST_Server::serve_request() (rest_cookie_check_errors(), on
+	 * `rest_authentication_errors`), when no nonce came along. Asking current_user_can()
+	 * at `init` 0 without the nonce would therefore exempt on the cookie alone — i.e. on
+	 * anything a CSRF-led browser carries. Later hooks are no alternative: they fire only
+	 * when WordPress really dispatches the REST server, and a request that merely LOOKS
+	 * like REST to RestRoute::extract() (`/wp-json/x` on a plain-permalink site is an
+	 * ordinary page request) would then never be evaluated at all.
+	 *
+	 * WHY CAPABILITY AND NONCE, AND NEITHER ALONE. The capability says who the session
+	 * is; the nonce says the request was made by a page this session loaded. A valid
+	 * `wp_rest` nonce is derived from the session token parsed out of the logged_in
+	 * cookie (wp_verify_nonce() → wp_get_session_token()), so it proves the very session
+	 * it was minted for — a header the sender writes, but not one the sender can forge.
+	 * Nonce without capability: every subscriber's page carries one. Capability without
+	 * nonce: the cookie alone, see above. Fail-closed on every doubt — no nonce, bad
+	 * nonce, an array, no capability, an expired session, a client authenticated without
+	 * a cookie session (application passwords, JWT plugins): evaluated, exactly as before.
+	 *
+	 * EXEMPT MEANS NOT EVALUATED, same as on screens: no run(), no check_submit(), no spam
+	 * row, no wave/health counters, no fail2ban line, no Echo_Store::record(), no risk
+	 * observation. The analysis row is still written — in the constructor, before this.
+	 *
+	 * @return void
+	 */
+	public function evaluate_rest_request() {
+		if ( $this->sender_is_operator() && $this->rest_nonce_is_valid() ) {
+			return;
+		}
+
+		$this->triage_request();
+	}
+
+	/**
+	 * Does this request carry a `wp_rest` nonce that verifies for the current session?
+	 *
+	 * Candidate in core's own order (RestRoute::nonce_candidate()), read from RAW
+	 * $_REQUEST — the source core reads, not $whole_request_data, which also carries the
+	 * merged keys of a JSON body that core never looks at for this.
+	 *
+	 * @return bool
+	 */
+	private function rest_nonce_is_valid(): bool {
+		$nonce = RestRoute::nonce_candidate( $_REQUEST, $_SERVER ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- this IS the nonce verification; the candidate only feeds wp_verify_nonce() below.
+		return null !== $nonce && false !== wp_verify_nonce( wp_unslash( $nonce ), 'wp_rest' );
+	}
+
+	/**
+	 * Is this a REST request whose evaluation must wait for `init` 0, because its sender
+	 * MIGHT be the operator? Pure — every input is handed in (same shape and reason as
+	 * signature_matching_applies() below), unit-tested in StampScreenExemptionTest.
+	 *
+	 * All four, server truth plus one harmless cookie read:
+	 *   - a REST route was extracted — i.e. a dispatched POST/PUT/PATCH (check_rest_routes()
+	 *     filters the method before extraction);
+	 *   - NOT DOING_AJAX — the ajax branch stays untouched, so `admin-ajax.php?rest_route=`
+	 *     can never become a side door;
+	 *   - the executed script is the front controller `index.php`. Every REST request
+	 *     WordPress serves runs through it; wp-login.php, wp-admin/*, admin-post.php,
+	 *     wp-comments-post.php and xmlrpc.php are excluded by construction — there is no
+	 *     login leg, as there is none on screens (wp-login.php defines no WP_ADMIN). An
+	 *     empty name answers false: today's include-time verdict.
+	 *   - a logged_in cookie is PRESENT. This decides only WHEN (include time or `init` 0),
+	 *     never WHETHER: a bot adding a fake cookie buys nothing but the deferral window
+	 *     handbuch/gate.md (c) already measures for screens, and anonymous REST traffic
+	 *     keeps its include-time verdict byte for byte.
+	 *
+	 * @param string|null $rest_route             $this->rest_route after check_rest_routes().
+	 * @param bool        $doing_ajax             The DOING_AJAX constant.
+	 * @param string      $script_filename        $_SERVER['SCRIPT_FILENAME'], raw.
+	 * @param bool        $session_cookie_present isset( $_COOKIE[ LOGGED_IN_COOKIE ] ).
+	 * @return bool
+	 */
+	public static function rest_exemption_may_apply( ?string $rest_route, bool $doing_ajax, string $script_filename, bool $session_cookie_present ): bool {
+		if ( null === $rest_route || $doing_ajax || ! $session_cookie_present ) {
+			return false;
+		}
+		$last = '';
+		foreach ( explode( '/', strtolower( trim( str_replace( '\\', '/', $script_filename ) ) ) ) as $segment ) {
+			$last = '' === $segment ? $last : $segment;
+		}
+		return 'index.php' === $last;
 	}
 
 	/**
@@ -229,14 +338,89 @@ trait Stamp_Triage {
 	}
 
 	/**
+	 * Third signature class alongside patterns/actions (REST_ROUTES_PLAN.md AP3):
+	 * is this request targeting an admin-configured REST route? Evaluates what WordPress
+	 * DISPATCHES as POST — and as PUT/PATCH for the lines in RestRoute::UPDATE_METHOD_LINES
+	 * only (route_is_monitored()); DELETE and GET never. Only collects the
+	 * WordPress-specific inputs (REQUEST_URI, the `rest_route` request var — $_POST
+	 * before $_GET, see below —, the home path, and the REST prefix
+	 * `rest_get_url_prefix()`, changeable via the `rest_url_prefix` filter); the actual
+	 * extraction and wildcard matching is pure and lives in RestRoute
+	 * (class-rest-route.php), unit-tested there in isolation — including the three places
+	 * where WordPress' own routing is case-INsensitive and this class has to follow it.
+	 *
+	 * MOVED HERE FROM class-stamp.php (2026-10-09), body unchanged apart from the method
+	 * line: the constructor needed lines for the REST deferral, and class-stamp.php sat at
+	 * its file-size cap. It is gate code and handbuch/gate.md describes it here anyway.
+	 * Still called exactly once, from the constructor, before save_for_analysis()
+	 * (StampRouteOrderingTest pins the call site, not this definition).
+	 *
+	 * THE METHOD IS FILTERED BEFORE EXTRACTION, so $this->rest_route stays null for a
+	 * GET/DELETE exactly as before — and is set for a POST/PUT/PATCH whether or not the
+	 * route ends up monitored. The constructor's REST deferral keys on that.
+	 *
+	 * SAME GATE AS EVERY OTHER SIGNATURE CLASS (handbuch/gate.md): once a route is
+	 * configured, a POST to it is evaluated whether it came from a visitor or a logged-in
+	 * admin — unless the admin's request proves itself with a REST nonce
+	 * (evaluate_rest_request()). Never seed a bare core namespace like `wp/v2` into
+	 * POW_REST_ROUTES (see Settings_Menu::get_default_rest_routes() and its doc-comment) —
+	 * that would block post saves of every author without a nonce. Regression net:
+	 * tests/integration/cases/backend-posts.mjs.
+	 *
+	 * @return bool
+	 */
+	private function check_rest_routes() {
+		$method = RestRoute::effective_method( $_SERVER, $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the dispatched method, read like WP_REST_Server does; nothing stored.
+		if ( ! in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
+			return false;
+		}
+		if ( ! isset( $_SERVER['REQUEST_URI'] ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
+			return false;
+		}
+		$request_uri = wp_unslash( $_SERVER['REQUEST_URI'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared/extracted, never output or stored.
+
+		// $_POST BEFORE $_GET — WordPress' own precedence, not a preference. `rest_route`
+		// is a PUBLIC query var (`$wp->add_query_var( 'rest_route' )` in
+		// rest_api_register_rewrites(), wp-includes/rest-api.php), and WP::parse_request()
+		// resolves every public query var in this order (wp-includes/class-wp.php, the
+		// `foreach ( $this->public_query_vars as $wpvar )` loop): extra_query_vars, then
+		// wp_die() if $_GET and $_POST BOTH hold it and DIFFER, then $_POST, then $_GET.
+		// So a plain `POST /` whose BODY carries `rest_route=/…` is dispatched to the REST
+		// server exactly like `GET|POST /?rest_route=/…`. Reading only $_GET here left that
+		// spelling as a complete bypass — the request reached the endpoint, we saw no route.
+		// Regression net: the post-body sub-case in tests/integration/cases/rest-routes.mjs.
+		$rest_route_param = '';
+		// phpcs:disable WordPress.Security.NonceVerification -- read-only inspection of which route is being targeted, not a state change.
+		if ( isset( $_POST['rest_route'] ) && is_string( $_POST['rest_route'] ) ) {
+			$rest_route_param = wp_unslash( $_POST['rest_route'] );
+		} elseif ( isset( $_GET['rest_route'] ) && is_string( $_GET['rest_route'] ) ) {
+			$rest_route_param = wp_unslash( $_GET['rest_route'] );
+		}
+		// phpcs:enable WordPress.Security.NonceVerification
+
+		$home_path = untrailingslashit( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_PATH ) );
+
+		$route = RestRoute::extract( $request_uri, $rest_route_param, $home_path, rest_get_url_prefix() );
+		// Feeds the `_gdpr_route` detail row — see $rest_route's doc-comment.
+		// Recorded on every REST request, matched or not.
+		$this->rest_route = $route;
+		if ( null === $route ) {
+			return false;
+		}
+		return RestRoute::route_is_monitored( $route, (string) get_option( Option::POW_REST_ROUTES ), $method );
+	}
+
+	/**
 	 * The request triage: whitelists, special cases and the gate `if` that decides
 	 * whether this request is evaluated.
 	 *
-	 * Reached on exactly two paths, both of which end here unchanged: directly from the
-	 * constructor, synchronously, as the last thing it does — that is every request that
-	 * is not a wp-admin screen POST; or from evaluate_admin_screen_post() on `init` 0,
-	 * for a screen POST whose sender turned out NOT to hold `edit_posts`. Same body,
-	 * same verdict; only the moment differs.
+	 * Reached on exactly three paths, all of which end here unchanged: directly from the
+	 * constructor, synchronously, as the last thing it does — every request that is
+	 * neither a wp-admin screen POST nor a REST request with a logged_in cookie; from
+	 * evaluate_admin_screen_post() on `init` 0, for a screen POST whose sender turned out
+	 * NOT to hold `edit_posts`; or from evaluate_rest_request() on `init` 0, for a REST
+	 * request whose sender is not the operator with a valid REST nonce. Same body, same
+	 * verdict; only the moment differs.
 	 *
 	 * @return void
 	 */

@@ -16,10 +16,11 @@
  *   - trait-stamp-persistence.php   — THIS file: the persistence half of
  *                                     handbuch/detection.md. save_for_analysis(),
  *                                     save_message() with its field-tree flattening
- *                                     (generate_paths(), check_skipped_fields(),
- *                                     access_object_or_array()) and the analysis-verdict
- *                                     upserts. log_fail2ban_event() moved on to
- *                                     trait-stamp-fail2ban.php (2026-09-25).
+ *                                     (generate_paths(), check_skipped_fields()) and
+ *                                     the analysis-verdict upserts. log_fail2ban_event()
+ *                                     moved on to trait-stamp-fail2ban.php (2026-09-25),
+ *                                     access_object_or_array() with the field flagging
+ *                                     to trait-stamp-flagging.php (2026-10-29).
  *
  * WHY check_submit() STAYS BEHIND, together with the gate and the PoW verification.
  * Those three read and write the SAME instance state, and that state is the semantics:
@@ -107,30 +108,6 @@ trait Stamp_Persistence {
 		) {
 			$this->analysis_row_id = $this->save_message( $this->whole_request_data, $action, $ajax, 4, $this->hash_values( $client_ip ) );
 		}
-	}
-
-	/** Resolves a '->'-separated path into a nested array/object and returns a reference to the target value
-	 *
-	 */
-	private function &access_object_or_array( &$obj, $path ) {
-		$path_segments  = explode( '->', $path );
-		$current_object = &$obj;
-		foreach ( $path_segments as $segment ) {
-			// If the segment is a numeric key, convert it to an integer
-			$segment = is_numeric( $segment ) ? (int) $segment : $segment;
-
-			if ( is_array( $current_object ) && array_key_exists( $segment, $current_object ) ) {
-				// If the segment is a valid key in the array, move to the next level
-				$current_object = &$current_object[ $segment ];
-			} elseif ( is_object( $current_object ) && property_exists( $current_object, $segment ) ) {
-				// If the segment is a valid property in the object, move to the next level
-				$current_object = &$current_object->$segment;
-			} else {
-				return null;
-			}
-		}
-		// Modify the value by adding the prefix
-		return $current_object;
 	}
 
 	/** Transforms an array into a string-representation

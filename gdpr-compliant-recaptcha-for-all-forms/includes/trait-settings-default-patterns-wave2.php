@@ -165,6 +165,38 @@ trait Settings_Default_Patterns_Wave2 {
 			self::display_admin_notice( __( 'WP Ultimate Review detected – added recognition pattern: {"xs_review_form_public_data":null}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
 		}
 
+		// *** Welle 7 (2026-10-09), ERHEBUNG-BUILDER-2.md ***
+		// GWOLLE GUESTBOOK 5.1.1 — DER Besucherweg: POST auf die eigene Seite, gelesen am
+		// `wp`-Hook, nur ausserhalb von wp-admin (frontend/gb-form-posthandling.php:12-20).
+		// Gemessen im echten Browser: auch mit eingeschaltetem Ajax (Werkseinstellung) geht
+		// die Einsendung hier entlang, weil der Ajax-Selektor des Clients in 5.1.1 nichts
+		// trifft (s. die Action `gwolle_gb_form_ajax` in
+		// trait-settings-default-actions-wave4.php, die den Handler deckt). Das versteckte
+		// Feld rendert jedes Formular (frontend/gb-form.php:179). WERTGEBUNDEN; das Feld
+		// kommt unter admin/ nicht vor.
+		if ( array_key_exists( 'gwolle-gb/gwolle-gb.php', $installed_plugins ) ) {
+			$patterns[] = '{"gwolle_gb_function":"add_entry"}';
+			self::display_admin_notice( __( 'Gwolle Guestbook detected – added recognition pattern: {"gwolle_gb_function":"add_entry"}', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
+		// WPFORO 3.2.2 (wpforo, 20.000) — neues Thema und neue Antwort, klassischer
+		// multipart-POST auf die Forenseite (das JS prueft nur Laenge und Doppelklick,
+		// assets/js/frontend.js:670). Verteilt ueber `wpfaction` in Actions::do_actions()
+		// (classes/Actions.php:190-199) an topic_add() :761 / post_add() :791; die
+		// Formulare rendern den Wert fest (classes/Template.php:944, 1041, 1094, 1154).
+		// WERTGEBUNDEN, nie `{"wpfaction":null}`: dasselbe Feld traegt jeden Admin-Save des
+		// Produkts (admin/settings/*.php: `email_settings_save`, `forum_add` …), den Login
+		// (`login`) und die Registrierung (`registration`). Weder `topic_add` noch `post_add`
+		// kommt unter admin/ vor. Bearbeiten (`topic_edit`/`post_edit`) bleibt aussen vor.
+		// NICHT IN DER RISIKOKLASSE: die Registrierung meldet nach dem Anlegen per
+		// wp_signon() an (classes/Members.php:565) — der Login wuerde doppelt bewertet
+		// (PLAN-RISIKOKLASSE.md, Doppelbewertungs-Regel).
+		if ( array_key_exists( 'wpforo/wpforo.php', $installed_plugins ) ) {
+			$patterns[] = '{"wpfaction":"topic_add"}';
+			$patterns[] = '{"wpfaction":"post_add"}';
+			self::display_admin_notice( __( 'wpForo detected – added recognition patterns: wpfaction topic_add, post_add', 'gdpr-compliant-recaptcha-for-all-forms' ) );
+		}
+
 		return $patterns;
 	}
 }

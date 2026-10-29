@@ -228,7 +228,7 @@ trait Settings_Options {
                     <br><strong>How it works:</strong> Add one REST route per line. A leading slash is optional. Two wildcard forms are supported:
                     <br><ul>
                         <li><code>*</code> as one segment matches exactly that segment, e.g. a form ID: <code>contact-form-7/v1/contact-forms/*/feedback</code></li>
-                        <li><code>*</code> as the LAST segment matches the whole namespace below it, e.g. <code>ws-form/v1/*</code></li>
+                        <li><code>*</code> as the LAST segment matches the whole namespace below it, e.g. <code>my-form/v1/*</code> — use it with care: a plugin\'s namespace usually also carries its own admin API, and a wildcard puts those saves behind the spam check too</li>
                     </ul>
                     <br><strong>Never add a bare core namespace like <code>wp/v2</code></strong> — that would also match the block editor\'s own save requests and block your own post saves.',
 					'gdpr-compliant-recaptcha-for-all-forms'

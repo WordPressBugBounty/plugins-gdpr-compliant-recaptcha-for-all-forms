@@ -83,6 +83,47 @@ final class RestRoute {
 	);
 
 	/**
+	 * The configured lines whose submission handler WordPress also dispatches as PUT or
+	 * PATCH — and the ONLY lines for which a dispatched PUT/PATCH is evaluated at all
+	 * (route_is_monitored()). Everything else stays "evaluated as POST, never as
+	 * PUT/PATCH", DELETE is never evaluated.
+	 *
+	 * WHY AN ALLOWLIST AND NOT "EVERY PUT". A handler registered with
+	 * `WP_REST_Server::EDITABLE` (POST, PUT, PATCH) answers a wire PUT exactly like the
+	 * POST it was written for, so judging only POST left those submissions open to anyone
+	 * who changes one word in the request line (measured 2026-10-09 on SureForms: wire PUT
+	 * and POST + `?_method=PUT` reached the handler, no row). But PUT is also the method of
+	 * legitimate updates — the WooCommerce Checkout block's automatic draft save is a PUT
+	 * on `wc/store/v1/checkout`, every 1.5 s. Judging that would spend the visitor's token
+	 * uses before "Place order". So a line is in here only with zip evidence:
+	 *
+	 *   - `sureforms/v1/submit-form`: SureForms 2.12.3 inc/form-submit.php:71-79,
+	 *     `WP_REST_Server::EDITABLE`, one handler (handle_form_submission) for all three.
+	 *   - `crowdsignal-forms/v1/nps/{id}/response`, `…/feedback/{id}/response`: Crowdsignal
+	 *     Forms 1.8.3 includes/rest-api/controllers/class-nps-controller.php:62-69 and
+	 *     class-feedback-controller.php:62-69, EDITABLE, permission constant true, handlers
+	 *     read get_json_params().
+	 *
+	 * EXPLICIT NON-MEMBERS, so nobody adds them "for completeness":
+	 *   - `wc/store/v1/checkout`: its PUT is the visitor's own draft save (see above).
+	 *     Pinned absent in RestRouteTest, together with every risk-class route line.
+	 *   - `ws-form/v1/submit`, `back-in-stock/v1/subscriber/create`: registered for POST
+	 *     only (measured 2026-10-09) — a PUT there reaches nothing.
+	 *
+	 * Rule for a new entry (also in handbuch/matchers.md, "Regel für einen neuen Eintrag"): the submission handler
+	 * is EDITABLE/ALLMETHODS by the zip, and its PUT is not a visitor updating their own
+	 * object. Exact lines only — no trailing-`*` namespace form, which would reach the
+	 * product's admin API.
+	 *
+	 * @var string[]
+	 */
+	const UPDATE_METHOD_LINES = array(
+		'sureforms/v1/submit-form',
+		'crowdsignal-forms/v1/nps/*/response',
+		'crowdsignal-forms/v1/feedback/*/response',
+	);
+
+	/**
 	 * Extract and normalize the REST route a request targets, or null if this is
 	 * not (recognizably) a REST request at all.
 	 *
@@ -245,6 +286,95 @@ final class RestRoute {
 	}
 
 	/**
+	 * Is $route, dispatched as $method, a monitored submission?
+	 *
+	 *   POST        → matches() against the configured lines, unchanged semantics.
+	 *   PUT, PATCH  → only through UPDATE_METHOD_LINES: some CONFIGURED line must be one
+	 *                 of those entries (segment-equal) AND match the route. Keyed on the
+	 *                 configured line, so removing the line switches PUT off with it, and
+	 *                 a broader operator line (`sureforms/v1/*`) does NOT bring PUT
+	 *                 coverage — conservative on purpose: a namespace line also covers
+	 *                 the product's admin routes, whose PUTs are the operator's saves.
+	 *   anything else, DELETE and '' included → false.
+	 *
+	 * No new matching semantics: the route comparison is segments_match(), as in matches().
+	 *
+	 * @param string $route    Canonical or raw route.
+	 * @param string $patterns Newline-separated configured lines (POW_REST_ROUTES).
+	 * @param string $method   The dispatched method, effective_method().
+	 * @return bool
+	 */
+	public static function route_is_monitored( $route, $patterns, string $method ): bool {
+		if ( 'POST' === $method ) {
+			return self::matches( $route, $patterns );
+		}
+		if ( 'PUT' !== $method && 'PATCH' !== $method ) {
+			return false;
+		}
+		$route_segments = self::segments( (string) $route );
+		$lines          = preg_split( '/\r\n|\n|\r/', (string) $patterns, -1, PREG_SPLIT_NO_EMPTY );
+		if ( empty( $route_segments ) || false === $lines ) {
+			return false;
+		}
+		foreach ( $lines as $line ) {
+			$pattern_segments = self::segments( trim( $line ) );
+			if ( ! empty( $pattern_segments ) && self::is_update_line( $pattern_segments )
+				&& self::segments_match( $route_segments, $pattern_segments ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Is this configured line one of UPDATE_METHOD_LINES? Same segment count, every
+	 * segment equal case-insensitively; a `*` is compared as the literal character, so
+	 * only the entry's own wildcard position counts — `sureforms/v1/*` is not
+	 * `sureforms/v1/submit-form`.
+	 *
+	 * @param string[] $pattern_segments Non-empty.
+	 * @return bool
+	 */
+	private static function is_update_line( array $pattern_segments ) {
+		foreach ( self::UPDATE_METHOD_LINES as $entry ) {
+			$entry_segments = self::segments( $entry );
+			if ( count( $entry_segments ) !== count( $pattern_segments ) ) {
+				continue;
+			}
+			$equal = true;
+			foreach ( $entry_segments as $i => $segment ) {
+				if ( 0 !== strcasecmp( $segment, $pattern_segments[ $i ] ) ) {
+					$equal = false;
+					break;
+				}
+			}
+			if ( $equal ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * The REST nonce candidate WordPress itself would verify — chosen in core's order:
+	 * the `_wpnonce` request var first, else the `X-WP-Nonce` header
+	 * (rest_cookie_check_errors(), wp-includes/rest-api.php, measured on 7.1).
+	 *
+	 * Null unless the chosen value is a non-empty string. Core would cast an array to
+	 * "Array" and fail the check; we simply do not exempt. Only ever a candidate — whether
+	 * it verifies is wp_verify_nonce()'s answer, asked by the caller on `init` 0.
+	 *
+	 * @param array<string, mixed> $request $_REQUEST (raw: the source core reads, not a
+	 *                                      merged JSON body).
+	 * @param array<string, mixed> $server  $_SERVER.
+	 * @return string|null
+	 */
+	public static function nonce_candidate( array $request, array $server ): ?string {
+		$nonce = isset( $request['_wpnonce'] ) ? $request['_wpnonce'] : ( $server['HTTP_X_WP_NONCE'] ?? null );
+		return is_string( $nonce ) && '' !== $nonce ? $nonce : null;
+	}
+
+	/**
 	 * SAVE-TIME GUARD against the administrator locking themselves out of their own
 	 * wp-admin (REST_ROUTES_PLAN.md AP6 failure mode, made unreachable here rather
 	 * than only warned about in the option's help text).
@@ -261,7 +391,7 @@ final class RestRoute {
 	 * wildcard followed by `v2/posts` all go; a bare `*` goes
 	 * because it covers literally every route (checked separately below, so the
 	 * intent is explicit and not a side effect of the namespace list). Builder lines
-	 * (`ws-form/v1/*`, `otter/v1/form/frontend`, `contact-form-7/v1/…`) are
+	 * (`ws-form/v1/submit`, `otter/v1/form/frontend`, `contact-form-7/v1/…`) are
 	 * unaffected — they share no leading segment with any core namespace.
 	 *
 	 * Pure: no options, no notices, no WordPress. Settings_Menu::update_settings()

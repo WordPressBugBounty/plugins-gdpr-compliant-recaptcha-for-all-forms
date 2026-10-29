@@ -25,6 +25,34 @@ class Uninstall {
 		require_once __DIR__ . '/includes/trait-option-counters.php';
 		require_once __DIR__ . '/includes/class-option.php';
 
+		// On multisite WordPress runs this file ONCE, in the main site's context — not
+		// once per site. Every site that ever ran the plugin has its own options and its
+		// own three tables (prefix wp_<id>_), so each one is cleaned in turn; a site that
+		// never ran it simply has nothing to find. switch_to_blog() moves $wpdb->prefix and
+		// $wpdb->options along, which is all clean_site() reads.
+		if ( function_exists( 'is_multisite' ) && is_multisite() ) {
+			foreach ( get_sites(
+				array(
+					'fields' => 'ids',
+					'number' => 0,
+				)
+			) as $site_id ) {
+				switch_to_blog( (int) $site_id );
+				self::clean_site();
+				restore_current_blog();
+			}
+			return;
+		}
+
+		self::clean_site();
+	}
+
+	/**
+	 * Removes the options and tables of the CURRENT site.
+	 *
+	 * @return void
+	 */
+	private static function clean_site() {
 		global $wpdb;
 
 		// Delete every option whose NAME carries our prefix, instead of reflecting over
@@ -44,9 +72,8 @@ class Uninstall {
 		//
 		// Nothing here is ever stored as a network option, only as a per-site option
 		// (confirmed by grep across plugin/includes/ — no add_site_option()/
-		// update_site_option() call exists). On multisite WordPress runs this file ONCE,
-		// in the context of the main site, so only the main site's wp_options rows and
-		// tables are removed; other sites keep theirs (ISSUES.md, "Multisite-Uninstall").
+		// update_site_option() call exists), so the per-site loop in run() reaches all
+		// of it.
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name from $wpdb->options, not user input; the LIKE value itself IS passed through prepare().

@@ -199,7 +199,7 @@ class Gibberish_Signature {
 		// ROUTES ALSO MATCH BY WILDCARD. Since signature_for() stores the SCOPE line, a
 		// button-written rule normally matches the exact-line loop above; a concrete
 		// route reaches this branch only from the no-scope fallback or from a hand-typed
-		// line (`ws-form/v1/submit/42` against the shipped `ws-form/v1/*`). Comparing
+		// line (`ws-form/v1/submit/42` against a wildcard line like `ws-form/v1/*`). Comparing
 		// lines alone would report those as "not monitored" although they are fully
 		// covered. Same matcher as the live gate, for the same reason as everywhere else.
 		if ( 'route' === $rule['kind'] ) {

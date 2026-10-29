@@ -17,7 +17,9 @@
  *   2. A JSON REQUEST BODY (Content-Type: application/json), merged on top. This has
  *      been here since 4.x and covers builders that post the whole submission as a JSON
  *      document, with the client twins in scripts/recaptcha-gdpr-pow.js
- *      (injectTokenIntoBody) and recaptcha-gdpr-analysis-model.js (formToJSON).
+ *      (injectTokenIntoBody) and recaptcha-gdpr-analysis-model.js (formToJSON). Since
+ *      2026-10-09 also for a wire PUT/PATCH, plus their form-urlencoded body, which PHP
+ *      never puts into $_POST but WordPress hands to the handler.
  *   3. A JSON ENVELOPE INSIDE A FIELD VALUE — layer 2 one level deeper, and until 5.5.0
  *      the one shape nothing here handled. Ninja Forms posts form-urlencoded with a
  *      single `formData` field carrying the whole form as JSON, so it fell between
@@ -129,12 +131,21 @@ trait Stamp_Capture {
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- see note above: read-only capture of the full request for inspection, not a state-changing action.
 		$this->whole_request_data = $_REQUEST; // Standard REQUEST data
 
+		// The WIRE method: PHP fills $_POST for a POST only, but WordPress parses the body of
+		// a PUT/PATCH for every handler (WP_REST_Request::parse_body_params(): JSON via
+		// is_json_content_type(), and `application/x-www-form-urlencoded` OR no
+		// Content-Type at all via parse_str(), for ANY method). Since PUT/PATCH reach the
+		// gate on RestRoute::UPDATE_METHOD_LINES, judging them with an empty body would let
+		// one solved PoW carry up to POW_MAX_USES bodies past the content checks.
+		// Multipart on PUT is read by nobody, WordPress included — deliberately not here.
+		$method       = isset( $_SERVER['REQUEST_METHOD'] ) && is_string( $_SERVER['REQUEST_METHOD'] ) ? strtoupper( $_SERVER['REQUEST_METHOD'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- compared against fixed strings only.
+		$content_type = isset( $_SERVER['CONTENT_TYPE'] ) && is_string( $_SERVER['CONTENT_TYPE'] ) ? $_SERVER['CONTENT_TYPE'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput -- searched for two fixed media types only.
+
 		// If the request is JSON, read data from php://input. Decoded through
 		// Field_Envelopes::decode_body() rather than json_decode() directly, so this path
 		// carries the SAME caps as layer 3 — without that, the entry budget below would be
 		// one Content-Type header away from being pointless (see that method's docblock).
-		if ( isset( $_SERVER['REQUEST_METHOD'] ) && 'POST' === $_SERVER['REQUEST_METHOD']
-			&& isset( $_SERVER['CONTENT_TYPE'] ) && strpos( $_SERVER['CONTENT_TYPE'], 'application/json' ) !== false ) {
+		if ( in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) && strpos( $content_type, 'application/json' ) !== false ) {
 			$body       = file_get_contents( 'php://input' );
 			$incomplete = false;
 			$json_data  = Field_Envelopes::decode_body( $body, $incomplete );
@@ -146,6 +157,23 @@ trait Stamp_Capture {
 				// What did not make it in is invisible to the content checks. Keep the bytes
 				// for the blocklist — see $body_raw for the regression that closes.
 				$this->body_raw = substr( (string) $body, 0, Field_Envelopes::MAX_BYTES );
+			}
+		} elseif ( in_array( $method, array( 'PUT', 'PATCH' ), true )
+			&& ( '' === $content_type || false !== strpos( $content_type, 'application/x-www-form-urlencoded' ) ) ) {
+			// The form-urlencoded twin of the JSON path, for the methods PHP leaves $_POST
+			// empty on. Same byte cap, same raw side channel: over the cap nothing is
+			// merged, and the blocklist still sees the first MAX_BYTES — DECODED, unlike the
+			// JSON bytes: an address arrives as `bot%40domain`, and the blocklist would not
+			// recognise it in that spelling (measured, rest-method-override.mjs arm F2).
+			// Raw like $_POST here (include time, before wp_magic_quotes()); parse_str() is
+			// bounded by max_input_vars exactly as PHP's own $_POST parsing is.
+			$body = (string) file_get_contents( 'php://input' );
+			if ( strlen( $body ) > Field_Envelopes::MAX_BYTES ) {
+				$this->body_raw = urldecode( substr( $body, 0, Field_Envelopes::MAX_BYTES ) );
+			} elseif ( '' !== $body ) {
+				parse_str( $body, $form );
+				$this->request_data       = array_merge( $this->request_data, $form );
+				$this->whole_request_data = array_merge( $this->whole_request_data, $form );
 			}
 		}
 

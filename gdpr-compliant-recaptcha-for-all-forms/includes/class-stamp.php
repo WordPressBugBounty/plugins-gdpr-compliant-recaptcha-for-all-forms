@@ -44,6 +44,7 @@ class Stamp {
 	// Auspacken hinterlaesst — steht in trait-stamp-capture.php.
 	use Stamp_Capture;
 	use Stamp_Risk; // Die RISIKOKLASSE: "aufzeichnen, nicht durchsetzen" — trait-stamp-risk.php.
+	use Stamp_Flagging; // Feld-Markierung (POW_FLAG_SUFFIXES/POW_FLAG_TAGS) — trait-stamp-flagging.php.
 
 	/**
 	 * Maximum submissions a single solved PoW token may pay for (AP3 submission-
@@ -225,7 +226,7 @@ class Stamp {
 		// in triage_request(), where it used to live. save_for_analysis() persists a
 		// type-4 row from THIS call, and REST_ROUTES_PLAN.md AP5 needs $this->rest_route
 		// (read via get_rest_route() in save_message()) already set for that row.
-		// check_rest_routes() is pure request inspection (only $_SERVER/$_GET/$_POST +
+		// check_rest_routes() (trait-stamp-triage.php) is pure request inspection (only $_SERVER/$_GET/$_POST +
 		// the option, see its docblock) — computing it here changes no other behavior,
 		// and the boolean is reused in triage_request() instead of calling the method a
 		// second time.
@@ -298,16 +299,33 @@ class Stamp {
 			return;
 		}
 
+		// A REST request whose sender MIGHT be the operator: same deferral, same belt, same
+		// load-bearing `return`. Why the four inputs and why `init` 0 (capability + REST
+		// nonce): rest_exemption_may_apply() / evaluate_rest_request() in the triage trait.
+		if ( self::rest_exemption_may_apply(
+			$this->rest_route,
+			defined( 'DOING_AJAX' ) && DOING_AJAX,
+			$screen_script,
+			defined( 'LOGGED_IN_COOKIE' ) && isset( $_COOKIE[ LOGGED_IN_COOKIE ] )
+		) ) {
+			if ( did_action( 'init' ) ) {
+				$this->evaluate_rest_request();
+				return;
+			}
+			add_action( 'init', array( $this, 'evaluate_rest_request' ), 0 );
+			return;
+		}
+
 		// …and only now the question this plugin exists for: is this request evaluated
 		// at all? The whole block — whitelists, special cases, the gate `if` with its
 		// ajax branch, the login and Wordfence exclusions, the run() registrations and
 		// the check_submit() calls — lives in trait-stamp-triage.php since the file-size
-		// cut (PLAN-DATEIGROESSE.md). SYNCHRONOUS: for every request that is not an
-		// admin-screen POST — which is all normal traffic, frontend, ajax, REST and
-		// wp-login.php alike — the call sits here, at the end of the constructor,
-		// exactly where the block itself used to sit. Anything that would defer or skip
-		// it BEYOND the screen branch above is a change to the security boundary, not a
-		// refactoring.
+		// cut (PLAN-DATEIGROESSE.md). SYNCHRONOUS: for every request that is neither an
+		// admin-screen POST nor a REST request carrying a logged_in cookie — all anonymous
+		// traffic, frontend, ajax, REST and wp-login.php alike — the call sits here, at
+		// the end of the constructor, exactly where the block itself used to sit. Anything
+		// that would defer or skip it BEYOND the two branches above is a change to the
+		// security boundary, not a refactoring.
 		$this->triage_request();
 	}
 
@@ -459,68 +477,6 @@ class Stamp {
 			$pattern_found = true;
 		}
 		return $pattern_found;
-	}
-
-	/**
-	 * Third signature class alongside patterns/actions (REST_ROUTES_PLAN.md AP3):
-	 * is this POST targeting an admin-configured REST route? Only collects the
-	 * WordPress-specific inputs (REQUEST_URI, the `rest_route` request var — $_POST
-	 * before $_GET, see below —, the home path, and the REST prefix
-	 * `rest_get_url_prefix()`, changeable via the `rest_url_prefix` filter) and gates
-	 * on POST; the actual extraction and wildcard matching is pure and lives in
-	 * RestRoute (class-rest-route.php), unit-tested there in isolation — including
-	 * the three places where WordPress' own routing is case-INsensitive and this
-	 * class has to follow it.
-	 *
-	 * SAME GATE AS EVERY OTHER SIGNATURE CLASS (handbuch/gate.md): this runs behind
-	 * the constructor's whitelist gate, which does not distinguish frontend from
-	 * admin traffic — so once a route is configured, a POST to it is evaluated
-	 * whether it came from a visitor or a logged-in admin (e.g. the block editor's
-	 * own save request, `/wp/v2/posts/<id>`). Never seed a bare core namespace
-	 * like `wp/v2` into POW_REST_ROUTES (see Settings_Menu::get_default_rest_routes()
-	 * and its doc-comment) — that would make the plugin block post saves in
-	 * wp-admin. Regression net: tests/integration/cases/backend-posts.mjs.
-	 *
-	 * @return bool
-	 */
-	private function check_rest_routes() {
-		if ( 'POST' !== RestRoute::effective_method( $_SERVER, $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- the dispatched method, read like WP_REST_Server does; nothing stored.
-			return false;
-		}
-		if ( ! isset( $_SERVER['REQUEST_URI'] ) || ! is_string( $_SERVER['REQUEST_URI'] ) ) {
-			return false;
-		}
-		$request_uri = wp_unslash( $_SERVER['REQUEST_URI'] ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared/extracted, never output or stored.
-
-		// $_POST BEFORE $_GET — WordPress' own precedence, not a preference. `rest_route`
-		// is a PUBLIC query var (`$wp->add_query_var( 'rest_route' )` in
-		// rest_api_register_rewrites(), wp-includes/rest-api.php), and WP::parse_request()
-		// resolves every public query var in this order (wp-includes/class-wp.php, the
-		// `foreach ( $this->public_query_vars as $wpvar )` loop): extra_query_vars, then
-		// wp_die() if $_GET and $_POST BOTH hold it and DIFFER, then $_POST, then $_GET.
-		// So a plain `POST /` whose BODY carries `rest_route=/…` is dispatched to the REST
-		// server exactly like `GET|POST /?rest_route=/…`. Reading only $_GET here left that
-		// spelling as a complete bypass — the request reached the endpoint, we saw no route.
-		// Regression net: the post-body sub-case in tests/integration/cases/rest-routes.mjs.
-		$rest_route_param = '';
-		// phpcs:disable WordPress.Security.NonceVerification -- read-only inspection of which route is being targeted, not a state change.
-		if ( isset( $_POST['rest_route'] ) && is_string( $_POST['rest_route'] ) ) {
-			$rest_route_param = wp_unslash( $_POST['rest_route'] );
-		} elseif ( isset( $_GET['rest_route'] ) && is_string( $_GET['rest_route'] ) ) {
-			$rest_route_param = wp_unslash( $_GET['rest_route'] );
-		}
-		// phpcs:enable WordPress.Security.NonceVerification
-
-		$home_path = untrailingslashit( (string) wp_parse_url( (string) get_option( 'home' ), PHP_URL_PATH ) );
-
-		$route = RestRoute::extract( $request_uri, $rest_route_param, $home_path, rest_get_url_prefix() );
-		// Feeds the `_gdpr_route` detail row — see $rest_route's doc-comment.
-		// Recorded on every REST request, matched or not.
-		$this->rest_route = $route;
-		if ( null === $route ) {
-			return false;
-		}
-		return RestRoute::matches( $route, (string) get_option( Option::POW_REST_ROUTES ) );
 	}
 
 	/**
@@ -980,43 +936,7 @@ class Stamp {
 		if ( $gdpr_fields ) {
 			// If message shall be flagged and message is spam
 			if ( get_option( Option::POW_FLAG_SPAM ) && $this->plugin_spam && $this->enforcement_allowed() ) {
-				// Line by line for prefixes
-				$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_FLAG_SUFFIXES ), -1, PREG_SPLIT_NO_EMPTY );
-				if ( count( $lines ) > 0 ) {
-					foreach ( $lines as $line ) {
-						// Add the prefix to the respective posted technical field in order to flag this message as spam
-						$args = explode( ':', $line );
-						if ( 2 === count( $args ) ) {
-							$field_link = &$this->access_object_or_array( $gdpr_fields, $args[0] );
-							$post_link  = &$this->access_object_or_array( $this->request_data, $args[0] );
-							// is_scalar, nicht nur isset: seit Field_Envelopes kann ein Feldname
-							// auf eine Struktur zeigen — Prefix davor waere eine Warnung.
-							if ( isset( $field_link ) && is_scalar( $field_link ) ) {
-								$prefix     = htmlspecialchars( $args[1], ENT_QUOTES, 'UTF-8' );
-								$post_link  = is_scalar( $post_link ) ? $prefix . $post_link : $post_link;
-								$field_link = $prefix . $field_link;
-							}
-						}
-					}
-					$this->print_debug_information( 'Fields flagged' );
-				}
-				// Line by line for new fields
-				$lines = preg_split( '/\r\n|\n|\r/', get_option( Option::POW_FLAG_TAGS ), -1, PREG_SPLIT_NO_EMPTY );
-				if ( count( $lines ) > 0 ) {
-					foreach ( $lines as $line ) {
-						// Add the new field to the _POST array in order to flag this message as spam
-						$args = explode( ':', $line );
-						if ( 2 === count( $args ) ) {
-
-							$field                        = htmlspecialchars( $args[0], ENT_QUOTES, 'UTF-8' );
-							$value                        = htmlspecialchars( $args[1], ENT_QUOTES, 'UTF-8' );
-							$_POST[ $field ]              = $value;
-							$this->request_data[ $field ] = $value;
-							$gdpr_fields[ $field ]        = $value;
-						}
-					}
-					$this->print_debug_information( 'New flag fields added' );
-				}
+				$this->flag_spam_fields( $gdpr_fields ); // trait-stamp-flagging.php
 			}
 		}
 
