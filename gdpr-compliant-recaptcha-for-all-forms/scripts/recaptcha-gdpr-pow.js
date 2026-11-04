@@ -37,6 +37,8 @@ var gdpr_compliant_recaptcha_difficulty = gdprPow.difficulty;
 var gdpr_compliant_recaptcha_token = null;
 var gdpr_compliant_recaptcha = {
 	stampLoaded : false,
+	// Set by the first form interaction, never reset; see solveMayPause().
+	solveUrgent : false,
 	renewDebounceTimer : null,
 	// Consecutive solves the server did not confirm with {accepted:true} (see
 	// handleUnconfirmedSolve()). Reset to 0 by every confirmed solve; bounds the retry
@@ -519,61 +521,10 @@ var gdpr_compliant_recaptcha = {
 		return this.hashFunc( str );
 	},
 
-	// Convert hex char to binary string.
+	// One hex char to its 4 bits; anything else (only ever a charAt() result) gives '0000'.
 	hexInBin : function( x ) {
-		var ret = '';
-		switch( x.toUpperCase() ) {
-			case '0':
-			return '0000';
-			break;
-			case '1':
-			return '0001';
-			break;
-			case '2':
-			return '0010';
-			break;
-			case '3':
-			return '0011';
-			break;
-			case '4':
-			return '0100';
-			break;
-			case '5':
-			return '0101';
-			break;
-			case '6':
-			return '0110';
-			break;
-			case '7':
-			return '0111';
-			break;
-			case '8':
-			return '1000';
-			break;
-			case '9':
-			return '1001';
-			break;
-			case 'A':
-			return '1010';
-			break;
-			case 'B':
-			return '1011';
-			break;
-			case 'C':
-			return '1100';
-			break;
-			case 'D':
-			return '1101';
-			break;
-			case 'E':
-			return '1110';
-			break;
-			case 'F':
-			return '1111';
-			break;
-			default :
-			return '0000';
-		}
+		var n = ( 1 === x.length ) ? parseInt( x, 16 ) : NaN;
+		return isNaN( n ) ? '0000' : ( '000' + n.toString( 2 ) ).slice( -4 );
 	},
 
 	// Gets the leading number of bits from the string.
@@ -597,11 +548,35 @@ var gdpr_compliant_recaptcha = {
 		return ( checkBits == 0 );
 	},
 
-	sleep : function( ms ) {
-		return new Promise( resolve => setTimeout( resolve, ms ) );
+	// One new task, so taps, scrolling and painting run between two slices of the search.
+	// MessageChannel, not setTimeout(0): no 4 ms clamp and no background-tab timer throttle.
+	yieldToPage : function () {
+		return new Promise( function ( resolve ) {
+			if ( typeof MessageChannel === 'undefined' ) {
+				return setTimeout( resolve, 0 );
+			}
+			var channel = new MessageChannel();
+			channel.port1.onmessage = function () { channel.port1.close(); resolve(); };
+			channel.port2.postMessage( 0 );
+		} );
+	},
+
+	// Whether a pointer/key/focus/submit event concerns a form (or a lone form control).
+	isFormInteraction : function ( target ) {
+		return !! ( target && target.closest && ( target.closest( 'form' ) || /^(BUTTON|INPUT|SELECT|TEXTAREA)$/.test( target.tagName ) ) );
+	},
+
+	// Once a visitor touches a form while no token is out yet, the rest is solved in one
+	// task again, so the submit queues behind check_stamp as before (handbuch/pow.md "In Scheiben").
+	solveMayPause : function ( urgent, token ) {
+		return ! ( urgent && ! token );
 	},
 
 	// Iterate through as many nonces as it takes to find one that gives us a solution hash at the target difficulty.
+	// Awaiting crypto.subtle.digest() never yields to the event loop (its promise settles in
+	// microtasks), so without the slices below the whole search was ONE main-thread task:
+	// 72 ms to 1.06 s at 4x CPU throttling, measured 2026-11 (handbuch/pow.md "In Scheiben").
+	// Same nonces in the same order, same result — only when the page gets a turn changes.
 	findHash : async function() {
 		var hashStamp = gdpr_compliant_recaptcha_stamp;
 		// Difficulty travels with the freshly-fetched token (AP4 prep); fall back to
@@ -609,13 +584,13 @@ var gdpr_compliant_recaptcha = {
 		var hashDifficulty = gdpr_compliant_recaptcha_difficulty || gdprPow.difficulty;
 
 		var nonce = 1;
+		var sliceStart = Date.now();
 
 		while( ! ( await this.checkNonce( hashDifficulty, hashStamp, nonce ) ) ) {
 			nonce++;
-			if ( nonce % 10000 == 0 ) {
-				let remaining = Math.round( ( Math.pow( 2, hashDifficulty ) - nonce ) / 10000 );
-				// Don't peg the CPU and prevent the browser from rendering these updates
-				//await this.sleep( 100 );
+			if ( Date.now() - sliceStart >= 30 && this.solveMayPause( this.solveUrgent, gdpr_compliant_recaptcha_token ) ) {
+				await this.yieldToPage();
+				sliceStart = Date.now();
 			}
 		}
 		gdpr_compliant_recaptcha_nonce = nonce;
@@ -952,11 +927,20 @@ var gdpr_compliant_recaptcha = {
 			// rendered/added to the DOM after this one-time init already ran its
 			// per-form pass above (late-rendered builders, modals, ...).
 			document.addEventListener('submit', function (e) {
+				gdpr_compliant_recaptcha.solveUrgent = true;
 				if (e.target && e.target.tagName === 'FORM') {
 					gdpr_compliant_recaptcha.harvestPasswordFields(e.target);
 					gdpr_compliant_recaptcha.updateFormTokenFields(gdpr_compliant_recaptcha_token);
 				}
 			}, true);
+			// Urgency only, never a start: the solve already runs since `load`.
+			[ 'pointerdown', 'keydown', 'focusin' ].forEach( function ( type ) {
+				document.addEventListener( type, function ( e ) {
+					if ( gdpr_compliant_recaptcha.isFormInteraction( e.target ) ) {
+						gdpr_compliant_recaptcha.solveUrgent = true;
+					}
+				}, { capture : true, passive : true } );
+			} );
 
 			setInterval( gdpr_compliant_recaptcha.initCaptcha, gdpr_compliant_recaptcha.renewIntervalMs( gdprPow.timeout ) );
 		}
@@ -989,6 +973,8 @@ if ( typeof module !== 'undefined' && module.exports ) {
 		injectTokenIntoBody : gdpr_compliant_recaptcha.injectTokenIntoBody,
 		solveConfirmed : gdpr_compliant_recaptcha.solveConfirmed,
 		shouldRetryUnconfirmed : gdpr_compliant_recaptcha.shouldRetryUnconfirmed,
-		blockMessageOf : gdpr_compliant_recaptcha.blockMessageOf
+		blockMessageOf : gdpr_compliant_recaptcha.blockMessageOf,
+		isFormInteraction : gdpr_compliant_recaptcha.isFormInteraction,
+		solveMayPause : gdpr_compliant_recaptcha.solveMayPause
 	};
 }

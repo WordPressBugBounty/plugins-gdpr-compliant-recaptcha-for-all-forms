@@ -769,8 +769,8 @@ class Stamp {
 	/**
 	 * Enqueue the client-side proof-of-work script in the page <head>.
 	 *
-	 * Loaded in the head (not the footer) so its fetch/XHR interception can wrap
-	 * window.fetch before other page scripts run. Per-request and configuration
+	 * Deferred: nothing in it runs before `load` (fetch/XHR wrapping included, see
+	 * addFirstStamp()); WP < 6.3 reads the array as "in footer" (handbuch/pow.md). Per-request and configuration
 	 * values are handed to the script via wp_localize_script as the global `gdprPow`.
 	 * The script itself lives in scripts/recaptcha-gdpr-pow.js.
 	 *
@@ -787,7 +787,7 @@ class Stamp {
 			plugins_url( '/scripts/recaptcha-gdpr-pow.js', __DIR__ ),
 			array(),
 			RCM_Main::VERSION,
-			false
+			array( 'strategy' => 'defer' )
 		);
 
 		wp_localize_script(

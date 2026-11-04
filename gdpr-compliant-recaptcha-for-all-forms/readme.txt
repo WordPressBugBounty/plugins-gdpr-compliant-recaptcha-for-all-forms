@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.1
-Stable tag: 6.3.0
+Stable tag: 6.3.1
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -169,6 +169,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.3.1 =
+The proof of work now runs in short slices instead of one long task, so the page stays responsive and PageSpeed no longer reports it as blocking time.
 = 6.3.0 =
 Flagged spam carries its prefix in the e-mail your form sends again (lost since 4.1). REST requests from logged-in users who can edit posts skip the check when they carry a valid REST nonce; SureForms and Crowdsignal submissions sent as PUT or PATCH are now checked. More form plugins detected.
 = 6.2.0 =
@@ -208,6 +210,8 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.3.1 =
+* Changed: The proof of work runs in short slices, so the page stays responsive and no longer counts as blocking time.
 = 6.3.0 =
 * Fixed: The flag prefix now also reaches the e-mail for fields sent as JSON (e.g. Ninja Forms, REST requests).
 * Fixed: A "Fieldname:prefix" line whose prefix contains a colon is no longer ignored.
