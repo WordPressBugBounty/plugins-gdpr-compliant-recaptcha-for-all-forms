@@ -56,6 +56,7 @@ require_once __DIR__ . '/class-gibberish-fields.php';
 require_once __DIR__ . '/class-gibberish-signature.php';
 require_once __DIR__ . '/class-gibberish-notice.php';
 require_once __DIR__ . '/class-review-request.php';
+require_once __DIR__ . '/class-translation-request.php';
 require_once __DIR__ . '/class-opcache.php';
 require_once __DIR__ . '/class-classification-reason.php';
 require_once __DIR__ . '/class-credential-fields.php';

@@ -3,7 +3,7 @@ Contributors: MatthiasNordwig
 Tags: anti-spam, spam, captcha, recaptcha, spam-protection
 Requires at least: 4.8
 Tested up to: 7.1
-Stable tag: 6.3.1
+Stable tag: 6.4.0
 Requires PHP: 7.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -156,6 +156,9 @@ To confirm which one it is: open the affected page, press F12 → Console, and l
 = Problems with Borlabs Script Blocker =
 When you use the Borlabs Script Blocker to scan for JavaScript, the scan does not work properly while this plugin is active. Deactivate this plugin for the scan and reactivate it afterwards.
 
+= Is the plugin available in my language? =
+The plugin is translated by volunteers on translate.wordpress.org. As soon as 90% of a language is translated and approved there, WordPress installs the translation on its own. If your language is missing or incomplete, you can help here: https://translate.wordpress.org/projects/wp-plugins/gdpr-compliant-recaptcha-for-all-forms/ — even a handful of strings helps, and every suggestion is checked by a native speaker before it ships.
+
 = Still stuck? =
 1. Check the browser console (F12) on the problematic page for messages
 2. Post in the support forum with as many details as possible — issues are usually fixed quickly
@@ -169,6 +172,8 @@ When you use the Borlabs Script Blocker to scan for JavaScript, the scan does no
 4. Every option explained in place — no documentation hunting
 
 == Upgrade Notice ==
+= 6.4.0 =
+Logins and forms sent before the page finished loading, or left open for a long time, are no longer blocked as spam. The invisible check now starts as soon as the page is built.
 = 6.3.1 =
 The proof of work now runs in short slices instead of one long task, so the page stays responsive and PageSpeed no longer reports it as blocking time.
 = 6.3.0 =
@@ -210,6 +215,14 @@ Recommended for everyone. Stronger spam protection (gibberish detection, repeat-
 Major release: proof-of-work is now bound to single-use signed tokens (much stronger against replay bots), adaptive under-attack difficulty, redesigned settings page, live direct-analysis guide, and several security hardenings. Requires PHP 7.1+.
 
 == Changelog ==
+= 6.4.0 =
+* Changed: The invisible check now starts as soon as the page is built, not after all images have loaded.
+* Fixed: Typing in a form renews an expired token at once, so Enter-to-send after a long pause (JetFormBuilder) works.
+* Fixed: After a blocked attempt (expired or missing token), a retry with a valid token is no longer locked out for 36 h.
+* Fixed: Logins and forms sent before the page had finished loading were blocked as spam.
+* Fixed: Forms left open on mobile (especially Android) longer than the time window are no longer rejected.
+* Added: One-time, dismissible invitation to help translate, shown if your admin language is under 90%.
+* Fixed: Logins via Ultimate Member are checked once instead of twice and no longer use up two of a token's three uses.
 = 6.3.1 =
 * Changed: The proof of work runs in short slices, so the page stays responsive and no longer counts as blocking time.
 = 6.3.0 =

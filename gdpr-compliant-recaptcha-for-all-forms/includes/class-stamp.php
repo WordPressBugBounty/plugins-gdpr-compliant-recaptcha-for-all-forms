@@ -189,6 +189,8 @@ class Stamp {
 	/** JSON that holds the data of the request */
 	private $request_data;
 	private $whole_request_data;
+	/** @var bool Whether pre_process_login() already judged this request (once per request, handbuch/gate.md). */
+	private $login_judged = false;
 
 	/**
 	 * Whether this request targets one of the monitored REST routes, as computed once
@@ -749,30 +751,27 @@ class Stamp {
 	 * instead would be a detection feature of its own (cookie auth, filter ordering)
 	 * with its own risk, not part of this path.
 	 *
-	 * Historical note (2026-07-16): the former pre_process_submission() this delegated
-	 * to carried a non-login leg (analysis capture + pattern matching before
-	 * check_submit) that was dead twice over — unreachable via an always-false
-	 * precedence bug (`! $origin === 'login'`), and functionally superseded by the
-	 * constructor triage, which handles classic POSTs itself. Removed, method folded
-	 * down to its only real job.
+	 * ONCE per request: Ultimate Member applies `authenticate` (whose core handler runs
+	 * wp_authenticate_user) and then wp_authenticate_user again — two judgments, two
+	 * token uses for one login (cases/ultimate-member.mjs).
 	 */
 	public function pre_process_login( $wp = null ) {
 		// Empty request_data: WordPress fires loading-time POSTs (e.g. containing only
 		// the time) that must not be treated as a submission.
-		if ( ! is_admin() && $this->request_data ) {
+		if ( ! is_admin() && $this->request_data && ! $this->login_judged ) {
+			$this->login_judged = true;
 			return $this->check_submit( $wp, $this->request_data, '', null, null, 'login' );
 		}
 		return $wp;
 	}
 
-
 	/**
 	 * Enqueue the client-side proof-of-work script in the page <head>.
 	 *
-	 * Deferred: nothing in it runs before `load` (fetch/XHR wrapping included, see
-	 * addFirstStamp()); WP < 6.3 reads the array as "in footer" (handbuch/pow.md). Per-request and configuration
+	 * Deferred: nothing in it runs before DOMContentLoaded (start there via -renew.js, else at
+	 * `load`; fetch/XHR wrapping included); WP < 6.3 reads the array as "in footer" (handbuch/pow.md). Per-request and configuration
 	 * values are handed to the script via wp_localize_script as the global `gdprPow`.
-	 * The script itself lives in scripts/recaptcha-gdpr-pow.js.
+	 * Scripts: scripts/recaptcha-gdpr-pow.js, after -renew.js (renewal clock; deliberately no dependency).
 	 *
 	 * PRIVACY INVARIANT (pinned by LocalizePrivacyTest): nothing here is derived from
 	 * the visitor's IP — the embedded token is the anonymous one, and no address is
@@ -782,6 +781,7 @@ class Stamp {
 	public function add_script_to_header() {
 		$stamp = $this->get_anonymous_stamp();
 
+		wp_enqueue_script( 'gdpr-recaptcha-pow-renew', plugins_url( '/scripts/recaptcha-gdpr-pow-renew.js', __DIR__ ), array(), RCM_Main::VERSION, array( 'strategy' => 'defer' ) );
 		wp_enqueue_script(
 			'gdpr-recaptcha-pow',
 			plugins_url( '/scripts/recaptcha-gdpr-pow.js', __DIR__ ),
@@ -899,17 +899,14 @@ class Stamp {
 		//  a) The under-attack quarantine ($quarantine_only_spam, exception #2 above):
 		//     grey-zone submissions are presumed innocent and must not seed values that
 		//     would spam-classify legitimate senders after the wave ends.
-		//  b) The three infrastructure-shaped no_pow sub-cases (seeds_echo_values(),
-		//     false for token_no_row / token_ip_changed / the historic chain_no_row): a
-		//     token that VERIFIED was presented and merely its solved-PoW row was missing
-		//     — cache, proxy, storage failure, clock skew (HANDBUCH.md §12 causes 4/7/8).
-		//     Letting those seed turns each mass false alarm into a content blocklist
-		//     outliving its own fix by 36h (measured on 5.3.4, now as "Known spam value").
-		//  c) The LONG-TEXT hash for the WHOLE no_pow family — third argument below,
-		//     Classification_Reason::seeds_long_text(). It is the one echo value a form
-		//     can carry without anyone typing it (a consent label, a dropdown option), so
-		//     one spam hit locked the form for everybody. Price named there: cross-form
-		//     TEXT matching for tokenless spam is gone; address/domain still seed.
+		//  b) The WHOLE no_pow family (seeds_echo_values(), since 2026-11; before, only the
+		//     three sub-cases with a verified token). A failed handshake says nothing about
+		//     the content, and the echo check only ever sees submissions that PAID — so a
+		//     value learned here could only block the real visitor retrying with a fresh
+		//     token (measured: invalid_token, then echo_lock 20 s later). Price named there.
+		//  c) The LONG-TEXT hash for the no_pow family — third argument below,
+		//     Classification_Reason::seeds_long_text(). Since b) a second line only: it
+		//     keeps constant form text out should a no_pow sub-case ever seed again.
 		if (
 			$gdpr_fields
 			&& $this->plugin_spam

@@ -5,7 +5,7 @@
 	 * Plugin Name: Invisible Anti-Spam & CAPTCHA — reCAPTCHA Alternative for All Forms
 	 * Plugin URI: https://programmiere.de/
 	 * Description: Invisible spam protection for every form, login and checkout. No puzzles, no checkboxes, no external services — a CAPTCHA your visitors never see.
-	 * Version: 6.3.1
+	 * Version: 6.4.0
 	 * Requires at least: 4.8
 	 * Requires PHP: 7.1
 	 * Author: Matthias Nordwig
@@ -32,7 +32,7 @@ class RCM_Main {
 	 * style_analysis.css after a release, rendering the redesigned overlay
 	 * unstyled. Keep the plugin header comment above in sync.
 	 */
-	const VERSION = '6.3.1';
+	const VERSION = '6.4.0';
 
 	/** Current version of the plugin */
 	private $version = self::VERSION;
@@ -108,6 +108,10 @@ class RCM_Main {
 		// plugin's own admin screens only, once the installation has stood for a month
 		// and sorted enough spam to have an opinion (handbuch/admin.md).
 		( new Review_Request() )->run();
+		// Same idiom: the one-off call for translators, per language, on this plugin's own
+		// screens when the admin language is below the 90% language-pack line
+		// (handbuch/translations.md).
+		( new Translation_Request() )->run();
 		// Same idiom: the deactivation feedback box on plugins.php — the only place in
 		// this plugin that talks to a server other than the site's own, which is why
 		// the endpoint, the disclosure and every string of it live in one class

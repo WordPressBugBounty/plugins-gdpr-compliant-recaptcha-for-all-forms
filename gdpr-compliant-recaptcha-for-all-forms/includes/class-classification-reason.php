@@ -38,10 +38,9 @@
  * code — a code for cleanliness would be indistinguishable from an unlabelled
  * legacy row in the corpus.
  *
- * The reasons are not all equally load-bearing downstream: three of the no_pow
- * sub-cases must NOT feed the auto-echo lock with the submission's content values,
- * because they describe a failed handshake rather than the content — see
- * NON_SEEDING_REASONS / seeds_echo_values().
+ * The reasons are not all equally load-bearing downstream: no no_pow verdict (since
+ * 2026-11 the whole family) and no echo_lock verdict may feed the auto-echo lock with
+ * the submission's content values — see seeds_echo_values() / NON_SEEDING_REASONS.
  *
  * The one thing that invariant costs is the ability to explain a NON-block, so that
  * lives in a separate datum with its own grammar and its own storage field:
@@ -148,21 +147,18 @@ final class Classification_Reason {
 	const NO_POW_TOKEN_IP_CHANGED = 'no_pow:token_ip_changed';
 
 	/**
-	 * Reasons whose submissions must NOT seed the auto-echo lock with their CONTENT
-	 * values — see seeds_echo_values(), which is the only thing that reads this.
+	 * Reasons OUTSIDE the no_pow family whose submissions must NOT seed the auto-echo lock
+	 * with their CONTENT values — see seeds_echo_values(), which is the only thing that
+	 * reads this. The no_pow family is excluded there by its CODE (since 2026-11), so it
+	 * needs no entry here; until then this list carried its three infrastructure-shaped
+	 * sub-cases (token_no_row, token_ip_changed, the historic chain_no_row) by name.
 	 *
-	 * THE FIRST THREE share one property: a token that VERIFIED was presented, and only
-	 * the solved-PoW row was missing. That is an infrastructure symptom (cache in front
-	 * of `get_stamp`, proxy, a database that cannot store the row, two clocks —
-	 * HANDBUCH.md §12 causes 4/7/8), not a statement about the submitted content.
-	 *
-	 * CODE_ECHO_LOCK is here for a different reason, and it is the general form of the
-	 * same idea: a verdict that the echo lock itself produced must not RE-SEED the very
-	 * values that produced it. Until 5.6.0 it did — an echo hit is a spam verdict like
-	 * any other, so it recorded again and pushed the entry's expiry to now + TTL_SECONDS.
-	 * The 36h therefore ran from the last HIT rather than from the last real spam, and
-	 * every further submission carrying the value renewed it. A lock could not expire
-	 * while it was being tripped.
+	 * CODE_ECHO_LOCK is here because a verdict that the echo lock itself produced must
+	 * not RE-SEED the very values that produced it. Until 5.6.0 it did — an echo hit is a
+	 * spam verdict like any other, so it recorded again and pushed the entry's expiry to
+	 * now + TTL_SECONDS. The 36h therefore ran from the last HIT rather than from the last
+	 * real spam, and every further submission carrying the value renewed it. A lock could
+	 * not expire while it was being tripped.
 	 *
 	 * That is harmless while the locked value really is spam — the sender is blocked
 	 * either way — and unbounded when it is not. One case MEASURED, one that follows
@@ -190,9 +186,6 @@ final class Classification_Reason {
 	 * @var string[]
 	 */
 	const NON_SEEDING_REASONS = array(
-		self::NO_POW_TOKEN_NO_ROW,
-		self::NO_POW_TOKEN_IP_CHANGED,
-		self::NO_POW_CHAIN_NO_ROW,
 		self::CODE_ECHO_LOCK,
 	);
 
@@ -415,40 +408,44 @@ final class Classification_Reason {
 	 * sender email, payload domain, long-text hash (no numbers since 2026-10) — for 36 hours, across
 	 * every form and every address. That is the right response to "this content is spam"
 	 * and the wrong response to "the handshake failed": a `no_pow` verdict says nothing
-	 * whatsoever about what was submitted. The three NON_SEEDING_REASONS presented a
-	 * token that VERIFIED and merely lacked its solved-PoW row, which is the signature of
-	 * a broken infrastructure (cache, proxy, storage failure, clock skew) rather than of
-	 * a bot. Letting those seed turns a mass false alarm into a content blocklist that
-	 * outlives its own fix by up to 36h: the two-clocks bug fixed in 5.3.4 classified
-	 * legitimate submissions as `no_pow:token_no_row` en masse, and after the update the
-	 * very same senders kept being blocked — now as "Known spam value".
+	 * whatsoever about what was submitted.
 	 *
-	 * Same reasoning the under-attack quarantine already carries as its exception #2
-	 * ("grey-zone submissions are presumed innocent and must not seed echo values that
-	 * would spam-classify legitimate senders after the wave ends"), applied to the
-	 * handshake failure.
+	 * THE WHOLE no_pow FAMILY IS OUT (since 2026-11), decided by the CODE, not by a list of
+	 * sub-cases. Until then only the three sub-cases that had presented a VERIFIED token
+	 * were excluded (token_no_row, token_ip_changed, chain_no_row: cache, proxy, storage,
+	 * clock — the 5.3.4 lesson, where the very senders a fix had released kept being
+	 * blocked as "Known spam value"), while `no_token` and `invalid_token` kept seeding as
+	 * the lock's "main food source". Measured 2026-11 (JetFormBuilder, Android, a long
+	 * form): a real visitor's token expired, the first attempt was blocked as
+	 * `no_pow:invalid_token` and seeded the visitor's own address; the retry 20 s later
+	 * carried a fresh, correctly confirmed token and was blocked as `echo_lock` — and so
+	 * would every retry for 36 h, on every form. `no_token` has the same human shape (a form
+	 * sent before `load`, handbuch/pow-renew.md "Absenden vor load").
 	 *
-	 * ERROR DIRECTION IS DELIBERATE: anything not explicitly listed — including an
+	 * WHY NOT "a no_pow-seeded value only blocks submissions without a valid PoW". That
+	 * reads like a middle way and is the same thing: the echo check
+	 * (Stamp::classify_echo_lock()) only ever runs on a submission that PASSED the PoW
+	 * stage — a submission without one is already blocked as no_pow, first cause wins. A
+	 * value learned from a failed handshake can therefore only ever block a PAYING
+	 * submission, and the retrying human is exactly that. There is no signal in the request
+	 * that tells the retrying human from a bot that pays on its second run: not the PoW,
+	 * not the address (mobile networks change it between two attempts), not the timing.
+	 *
+	 * THE PRICE, real and knowingly paid: a sender first seen without a proof of work and
+	 * later arriving WITH one is no longer caught by the echo lock. A bot that never pays
+	 * is untouched — it stays blocked by no_pow on every attempt, the echo lock never
+	 * looked at it. What still seeds is every CONTENT verdict (blocklist, gibberish), which
+	 * is what a content blocklist is for. Rule of the house: a false block of a real
+	 * visitor is the worst error this plugin can make (it outweighs a missed repeat, which
+	 * still has to pay the proof of work and still faces gibberish and blocklist).
+	 *
+	 * ERROR DIRECTION IS DELIBERATE: anything else not explicitly listed — including an
 	 * unknown, empty, null or otherwise malformed value — SEEDS. A reason code added
 	 * later would otherwise silently drop out of the echo lock, and a lock that quietly
 	 * stops learning is far harder to notice than one that learns too much (the latter
-	 * has a reset button, see the Diagnostics tab). Pinned in
+	 * has a reset button, see the Diagnostics tab). A NEW no_pow sub-case does not seed:
+	 * the code decides, so it inherits the family rule. Pinned in
 	 * tests/unit/ClassificationReasonTest.php.
-	 *
-	 * TWO PRICES KNOWINGLY PAID, recorded here so the next session need not rediscover
-	 * them:
-	 *  1. A protocol-aware bot can provoke `no_pow:token_no_row` for free — fetch a token
-	 *     via `get_stamp` (stateless, costs the server nothing), never solve it, post it
-	 *     anyway — and thereby escape the echo lock permanently. Accepted: whoever can do
-	 *     that can also just PAY the proof of work (field data: d=20 in ~2 s), and a
-	 *     paying submission is classified clean and seeds nothing today either. The echo
-	 *     lock was never the barrier against that class; the proof of work is.
-	 *  2. `no_pow:invalid_token` keeps seeding although it, too, has a false-alarm shape
-	 *     (a cache layer in front of `get_stamp` hands out expired tokens to real
-	 *     visitors en masse). The cut is drawn at "a valid token was demonstrably
-	 *     presented", which is the more conservative of the two available lines: it keeps
-	 *     protocol-blind mass spam — the echo lock's main food source — feeding the
-	 *     store.
 	 *
 	 * @param mixed $reason Reason string, or null for a clean submission (any input
 	 *                      accepted defensively — stored values pass through the
@@ -456,7 +453,7 @@ final class Classification_Reason {
 	 * @return bool True when the submission's values may be recorded.
 	 */
 	public static function seeds_echo_values( $reason ) {
-		return ! in_array( $reason, self::NON_SEEDING_REASONS, true );
+		return self::CODE_NO_POW !== self::code( $reason ) && ! in_array( $reason, self::NON_SEEDING_REASONS, true );
 	}
 
 	/**
@@ -481,19 +478,15 @@ final class Classification_Reason {
 	 * form builder (Echo_Values::build_echo_set()), never an ordinary field.
 	 *
 	 * THE CUT: a `no_pow` verdict says the handshake failed and nothing about what was
-	 * submitted — the same reasoning NON_SEEDING_REASONS already applies to its three
-	 * infrastructure-shaped sub-cases, here extended to the one value type that can be
-	 * form furniture rather than content. The deterministic content verdicts (gibberish,
-	 * blocklist) keep seeding long text unchanged: those DID look at the text.
+	 * submitted; this extended that to the one value type that can be form furniture rather
+	 * than content (6.1.0). The deterministic content verdicts (gibberish, blocklist) keep
+	 * seeding long text unchanged: those DID look at the text.
 	 *
-	 * THE PRICE, real and knowingly paid: cross-form text matching for TOKENLESS spam is
-	 * gone. `no_pow:no_token` is the echo lock's main food source (see
-	 * seeds_echo_values()), so the store now learns only address and domain from
-	 * it. What that gave up is the bot that posts the same body text again later WITH a
-	 * valid proof of work — it is no longer caught by its text. Accepted because the
-	 * failure it removes is worse than the catch it loses: a self-inflicted lock takes a
-	 * working form offline for everybody, while the missed repeat still has to pay the
-	 * proof of work and still faces the gibberish and blocklist checks.
+	 * SINCE 2026-11 A SECOND LINE, NOT THE FIRST: seeds_echo_values() keeps the whole no_pow
+	 * family out of the store, so at the call site this predicate is always true today. It
+	 * stays on purpose. seeds_echo_values() errs towards seeding, and should anyone ever let
+	 * a no_pow sub-case seed again (an address or a domain), the constant form text must
+	 * still not be learned from it — the measured self-lock above would come back at once.
 	 *
 	 * Error direction is the same as seeds_echo_values(): anything not recognised as
 	 * `no_pow` seeds. Pinned in tests/unit/ClassificationReasonTest.php.

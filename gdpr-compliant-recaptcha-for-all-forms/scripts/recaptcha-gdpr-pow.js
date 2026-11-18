@@ -35,11 +35,15 @@ var gdpr_compliant_recaptcha_stamp = gdprPow.stamp;
 var gdpr_compliant_recaptcha_nonce = null;
 var gdpr_compliant_recaptcha_difficulty = gdprPow.difficulty;
 var gdpr_compliant_recaptcha_token = null;
+// Date.now() when get_stamp issued the stamp above: the renewal clock's reference (see renewal).
+var gdpr_compliant_recaptcha_stamp_at = Date.now();
 var gdpr_compliant_recaptcha = {
 	stampLoaded : false,
 	// Set by the first form interaction, never reset; see solveMayPause().
 	solveUrgent : false,
 	renewDebounceTimer : null,
+	// The renewal clock (recaptcha-gdpr-pow-renew.js, enqueued before this file). Missing → old setInterval.
+	renewal : ( typeof gdpr_compliant_recaptcha_renew !== 'undefined' ) ? gdpr_compliant_recaptcha_renew : null,
 	// Consecutive solves the server did not confirm with {accepted:true} (see
 	// handleUnconfirmedSolve()). Reset to 0 by every confirmed solve; bounds the retry
 	// so a permanently broken check_stamp cannot become a request storm.
@@ -579,6 +583,7 @@ var gdpr_compliant_recaptcha = {
 	// Same nonces in the same order, same result — only when the page gets a turn changes.
 	findHash : async function() {
 		var hashStamp = gdpr_compliant_recaptcha_stamp;
+		var stampAt = gdpr_compliant_recaptcha_stamp_at;
 		// Difficulty travels with the freshly-fetched token (AP4 prep); fall back to
 		// the page-load value from gdprPow for safety if a response ever omits it.
 		var hashDifficulty = gdpr_compliant_recaptcha_difficulty || gdprPow.difficulty;
@@ -633,6 +638,7 @@ var gdpr_compliant_recaptcha = {
 				gdpr_compliant_recaptcha.unconfirmedSolves = 0;
 				gdpr_compliant_recaptcha_token = hashStamp;
 				gdpr_compliant_recaptcha.updateFormTokenFields(hashStamp);
+				if (gdpr_compliant_recaptcha.renewal) { gdpr_compliant_recaptcha.renewal.published(stampAt); }
 				return;
 			}
 			gdpr_compliant_recaptcha.handleUnconfirmedSolve('check_stamp did not confirm the solved puzzle');
@@ -716,6 +722,8 @@ var gdpr_compliant_recaptcha = {
 
 	initCaptcha : function ( attempt ) {
 		attempt = attempt || 0;
+		var requestedAt = Date.now(); // the token's issued_at lies after this: its age is never underestimated
+		if (gdpr_compliant_recaptcha.renewal) { gdpr_compliant_recaptcha.renewal.solveStarted(requestedAt); }
 		// Cache-busted and no-store: the answer is a SINGLE-USE token, so a cached copy
 		// served to a second visitor makes both share one token — and one token pays for
 		// at most TOKEN_MAX_USES submissions (see cacheBuster()). A cached token still
@@ -740,6 +748,7 @@ var gdpr_compliant_recaptcha = {
 			var data = gdpr_compliant_recaptcha.parseJsonLoose(text);
 			if (data && typeof data.stamp === 'string' && data.stamp) {
 				gdpr_compliant_recaptcha_stamp = data.stamp;
+				gdpr_compliant_recaptcha_stamp_at = requestedAt;
 				gdpr_compliant_recaptcha_difficulty = data.difficulty || gdprPow.difficulty;
 				gdpr_compliant_recaptcha.findHash();
 				return;
@@ -799,7 +808,7 @@ var gdpr_compliant_recaptcha = {
 
 	// Marks the password fields of `root` (one form) or of every POST form in a hidden
 	// `hashPWFields` input, once per form; at start AND on submit, so a form rendered after
-	// `load` is covered too (handbuch/pow.md). Never throws — must not starve the wrappers.
+	// the start is covered too (handbuch/pow.md). Never throws — must not starve the wrappers.
 	harvestPasswordFields : function ( root ) {
 		try {
 			var forms = root && root.tagName === 'FORM' ? [ root ] : document.querySelectorAll('form');
@@ -831,7 +840,7 @@ var gdpr_compliant_recaptcha = {
 		}
 	},
 
-	// One-time start on `load` (until 2026-10: first key/mouse/scroll/click; handbuch/pow.md).
+	// One-time start: DOMContentLoaded via the renew file, else `load` (handbuch/pow-renew.md).
 	addFirstStamp : function(){
 		if( ! gdpr_compliant_recaptcha.stampLoaded){
 			gdpr_compliant_recaptcha.stampLoaded = true;
@@ -840,10 +849,10 @@ var gdpr_compliant_recaptcha = {
 
 			// Re-capture the CURRENT fetch/XHR right before wrapping them, instead of
 			// relying on the snapshot taken when this file was parsed in <head>. A third-
-			// party script may have installed its OWN fetch/XHR wrapper between then and
-			// `load`; wrapping the current functions keeps that wrapper in the delegation
-			// chain rather than stomping it. (window.fetch is only replaced below, so at
-			// this point it is never our own wrapper yet — the guard is belt-and-suspenders.)
+			// party script may have installed its OWN fetch/XHR wrapper since; wrapping the
+			// current functions keeps it in the delegation chain. One that comes after the
+			// start: renewal.rewrapLate() after `load`. (window.fetch is only replaced below,
+			// so it is never our own wrapper yet — the guard is belt-and-suspenders.)
 			if (typeof window !== 'undefined' && typeof window.fetch === 'function' && window.fetch !== gdpr_compliant_recaptcha.handleFetchResponse) {
 				gdpr_compliant_recaptcha.originalFetch = window.fetch;
 			}
@@ -933,7 +942,7 @@ var gdpr_compliant_recaptcha = {
 					gdpr_compliant_recaptcha.updateFormTokenFields(gdpr_compliant_recaptcha_token);
 				}
 			}, true);
-			// Urgency only, never a start: the solve already runs since `load`.
+			// Urgency only, never a start: the solve already runs since the start.
 			[ 'pointerdown', 'keydown', 'focusin' ].forEach( function ( type ) {
 				document.addEventListener( type, function ( e ) {
 					if ( gdpr_compliant_recaptcha.isFormInteraction( e.target ) ) {
@@ -942,11 +951,14 @@ var gdpr_compliant_recaptcha = {
 				}, { capture : true, passive : true } );
 			} );
 
-			setInterval( gdpr_compliant_recaptcha.initCaptcha, gdpr_compliant_recaptcha.renewIntervalMs( gdprPow.timeout ) );
+			// Renewal by token age, visibility, typing and submit (handbuch/pow-renew.md); else the old interval.
+			if ( ! ( gdpr_compliant_recaptcha.renewal && gdpr_compliant_recaptcha.renewal.install( gdpr_compliant_recaptcha, function () { return gdpr_compliant_recaptcha_token; } ) ) ) {
+				setInterval( gdpr_compliant_recaptcha.initCaptcha, gdpr_compliant_recaptcha.renewIntervalMs( gdprPow.timeout ) );
+			}
 		}
 	}
 }
-// START on `load`, or at once if it already fired. Cost, accepted: one get_stamp +
+// START on `load` (DOMContentLoaded: renew file), at once if it fired. Cost: one get_stamp +
 // check_stamp + one stamp row per page view (handbuch/pow.md "Start beim Laden").
 if ( typeof window !== 'undefined' && typeof document !== 'undefined' ) {
 	if ( 'complete' === document.readyState ) {
